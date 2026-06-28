@@ -164,7 +164,8 @@ export default function SwapPage() {
       tokenIn:  TOKENS[tokenIn].address,
       tokenOut: TOKENS[tokenOut].address,
       pool:     selectedPool.address,
-      poolType: 0, // all deployed pools are vAMM AeonPair
+      poolType: 0,
+      feeBps:   Number(feeToBps(selectedPool.fee)),
     }]
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
 
