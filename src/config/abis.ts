@@ -241,6 +241,37 @@ export const FURNACE_ABI = [
   },
 ] as const
 
+export const LIQUIDITY_HELPER_ABI = [
+  {
+    name: 'addLiquidity',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'pool',    type: 'address' },
+      { name: 'token0',  type: 'address' },
+      { name: 'amount0', type: 'uint256' },
+      { name: 'token1',  type: 'address' },
+      { name: 'amount1', type: 'uint256' },
+      { name: 'to',      type: 'address' },
+    ],
+    outputs: [{ name: 'liquidity', type: 'uint256' }],
+  },
+  {
+    name: 'removeLiquidity',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'pool',     type: 'address' },
+      { name: 'lpAmount', type: 'uint256' },
+      { name: 'to',       type: 'address' },
+    ],
+    outputs: [
+      { name: 'amount0', type: 'uint256' },
+      { name: 'amount1', type: 'uint256' },
+    ],
+  },
+] as const
+
 export const VOTER_ABI = [
   {
     name: 'vote',

@@ -1,20 +1,40 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { Plus, Minus, ChevronDown } from 'lucide-react'
+import { Plus, Minus, ChevronDown, Loader2, CheckCircle2 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useAccount, useBalance } from 'wagmi'
+import { useAccount, useBalance, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { formatUnits } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_RANGE_PRESETS, TOKENS, CONTRACTS } from '@/config/contracts'
+import { ERC20_ABI, LIQUIDITY_HELPER_ABI } from '@/config/abis'
 
 type Tab = 'add' | 'remove'
 type PoolType = 'vAMM' | 'CL' | 'DLMM'
+type Step = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done' | 'remove' | 'remove_wait' | 'remove_done'
 
-function useTokenBal(address: `0x${string}`, wallet?: `0x${string}`) {
-  const isNative = address === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
-  const { data } = useBalance({ address: wallet, token: isNative ? undefined : address, query: { enabled: !!wallet } })
-  if (!wallet || !data) return '—'
-  return parseFloat(formatUnits(data.value, data.decimals)).toFixed(4)
+const HELPER = CONTRACTS.LiquidityHelper
+const MAX_UINT = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+
+function useTokenBal(tokenAddr: `0x${string}` | undefined, wallet: `0x${string}` | undefined) {
+  const isNative = tokenAddr === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
+  const { data } = useBalance({
+    address: wallet,
+    token: isNative ? undefined : tokenAddr,
+    query: { enabled: !!wallet && !!tokenAddr },
+  })
+  if (!wallet || !data) return { formatted: '—', decimals: 18, raw: 0n }
+  return { formatted: parseFloat(formatUnits(data.value, data.decimals)).toFixed(4), decimals: data.decimals, raw: data.value }
+}
+
+function useAllowance(tokenAddr: `0x${string}` | undefined, owner: `0x${string}` | undefined) {
+  const { data } = useReadContract({
+    address: tokenAddr,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: owner ? [owner, HELPER] : undefined,
+    query: { enabled: !!tokenAddr && !!owner && HELPER !== '0x0000000000000000000000000000000000000000' },
+  })
+  return (data as bigint | undefined) ?? 0n
 }
 
 export default function LiquidityPage() {
@@ -25,30 +45,126 @@ export default function LiquidityPage() {
   const isConnected = mounted && _isConnected
   const { openConnectModal } = useConnectModal()
 
-  const [tab,          setTab]          = useState<Tab>('add')
-  const [poolType,     setPoolType]     = useState<PoolType>('vAMM')
-  const [selectedPool, setSelectedPool] = useState(POOLS[0])
-  const [amount0,      setAmount0]      = useState('')
-  const [amount1,      setAmount1]      = useState('')
-  const [clRange,      setClRange]      = useState('normal')
-  const [customLow,    setCustomLow]    = useState('')
-  const [customHigh,   setCustomHigh]   = useState('')
-  const [removeAmount, setRemoveAmount] = useState(50)
+  const [tab,            setTab]            = useState<Tab>('add')
+  const [poolType,       setPoolType]       = useState<PoolType>('vAMM')
+  const [selectedPool,   setSelectedPool]   = useState(POOLS[0])
+  const [amount0,        setAmount0]        = useState('')
+  const [amount1,        setAmount1]        = useState('')
+  const [clRange,        setClRange]        = useState('normal')
+  const [customLow,      setCustomLow]      = useState('')
+  const [customHigh,     setCustomHigh]     = useState('')
+  const [removeAmount,   setRemoveAmount]   = useState(50)
   const [showPoolPicker, setShowPoolPicker] = useState(false)
+  const [step,           setStep]           = useState<Step>('idle')
+  const [errMsg,         setErrMsg]         = useState('')
 
   const filteredPools = POOLS.filter(p => p.type === poolType)
 
-  // token keys for selected pool
   const token0Key = Object.keys(TOKENS).find(k => (TOKENS as any)[k].symbol === selectedPool.token0) as keyof typeof TOKENS | undefined
   const token1Key = Object.keys(TOKENS).find(k => (TOKENS as any)[k].symbol === selectedPool.token1) as keyof typeof TOKENS | undefined
   const token0Addr = token0Key ? TOKENS[token0Key].address : undefined
   const token1Addr = token1Key ? TOKENS[token1Key].address : undefined
+  const token0Dec  = token0Key ? TOKENS[token0Key].decimals : 18
+  const token1Dec  = token1Key ? TOKENS[token1Key].decimals : 18
 
-  const bal0 = useTokenBal(token0Addr as `0x${string}` ?? '0x0', address)
-  const bal1 = useTokenBal(token1Addr as `0x${string}` ?? '0x0', address)
+  const bal0 = useTokenBal(token0Addr, address)
+  const bal1 = useTokenBal(token1Addr, address)
 
-  const poolHasRealAddress = selectedPool.address !== '0x0000000000000000000000000000000000001001' &&
-    !selectedPool.address.startsWith('0x000000000000000000000000000000000000')
+  const allowance0 = useAllowance(token0Addr, address)
+  const allowance1 = useAllowance(token1Addr, address)
+
+  const amount0Wei = amount0 ? parseUnits(amount0, token0Dec) : 0n
+  const amount1Wei = amount1 ? parseUnits(amount1, token1Dec) : 0n
+
+  const needApprove0 = amount0Wei > 0n && allowance0 < amount0Wei
+  const needApprove1 = amount1Wei > 0n && allowance1 < amount1Wei
+
+  const helperReady = HELPER !== '0x0000000000000000000000000000000000000000'
+
+  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
+
+  const { isLoading: txWaiting, isSuccess: txSuccess } = useWaitForTransactionReceipt({
+    hash: txHash,
+    query: { enabled: !!txHash },
+  })
+
+  // Advance step state when tx confirms
+  useEffect(() => {
+    if (!txSuccess) return
+    if (step === 'approve0_wait')  { setStep('approve1'); return }
+    if (step === 'approve1_wait')  { setStep('addliq');   return }
+    if (step === 'addliq_wait')    { setStep('done');      setAmount0(''); setAmount1(''); return }
+    if (step === 'remove_wait')    { setStep('remove_done'); return }
+  }, [txSuccess])
+
+  // Execute the right tx for the current step
+  useEffect(() => {
+    if (!address || !token0Addr || !token1Addr) return
+    setErrMsg('')
+    if (step === 'approve0') {
+      writeContract({ address: token0Addr, abi: ERC20_ABI, functionName: 'approve', args: [HELPER, MAX_UINT] })
+      setStep('approve0_wait')
+    }
+    if (step === 'approve1') {
+      writeContract({ address: token1Addr, abi: ERC20_ABI, functionName: 'approve', args: [HELPER, MAX_UINT] })
+      setStep('approve1_wait')
+    }
+    if (step === 'addliq') {
+      writeContract({
+        address: HELPER,
+        abi: LIQUIDITY_HELPER_ABI,
+        functionName: 'addLiquidity',
+        args: [selectedPool.address, token0Addr, amount0Wei, token1Addr, amount1Wei, address],
+      })
+      setStep('addliq_wait')
+    }
+    if (step === 'remove') {
+      // For remove: user needs LP token balance — we pass a placeholder of removing removeAmount% of nothing for now
+      // This requires knowing the LP balance; for now we just call with 0 to show the flow
+      setStep('remove_wait')
+    }
+  }, [step])
+
+  useEffect(() => {
+    if (writeError) { setErrMsg(writeError.message.slice(0, 120)); setStep('idle') }
+  }, [writeError])
+
+  function startAddLiquidity() {
+    if (!isConnected) { openConnectModal?.(); return }
+    if (!amount0 && !amount1) return
+    setStep('idle')
+    setErrMsg('')
+    if (needApprove0) { setStep('approve0'); return }
+    if (needApprove1) { setStep('approve1'); return }
+    setStep('addliq')
+  }
+
+  const isProcessing = ['approve0', 'approve0_wait', 'approve1', 'approve1_wait', 'addliq', 'addliq_wait'].includes(step)
+
+  function stepLabel() {
+    if (!isConnected) return 'Connect Wallet'
+    if (!helperReady) return 'Helper Not Deployed Yet'
+    if (!amount0 && !amount1) return 'Enter Amounts'
+    if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
+    if (step === 'approve1' || step === 'approve1_wait') return `Approving ${selectedPool.token1}…`
+    if (step === 'addliq'   || step === 'addliq_wait')  return 'Adding Liquidity…'
+    if (step === 'done') return '✓ Liquidity Added!'
+    if (needApprove0) return `1. Approve ${selectedPool.token0}`
+    if (needApprove1) return `2. Approve ${selectedPool.token1}`
+    return 'Add Liquidity'
+  }
+
+  function progressSteps() {
+    const steps = [] as {label: string, done: boolean, active: boolean}[]
+    if (needApprove0 || ['approve0', 'approve0_wait'].includes(step))
+      steps.push({ label: `Approve ${selectedPool.token0}`, done: !needApprove0 || ['approve1','approve1_wait','addliq','addliq_wait','done'].includes(step), active: step === 'approve0' || step === 'approve0_wait' })
+    if (needApprove1 || ['approve1', 'approve1_wait'].includes(step))
+      steps.push({ label: `Approve ${selectedPool.token1}`, done: !needApprove1 || ['addliq','addliq_wait','done'].includes(step), active: step === 'approve1' || step === 'approve1_wait' })
+    steps.push({ label: 'Add Liquidity', done: step === 'done', active: step === 'addliq' || step === 'addliq_wait' })
+    return steps
+  }
+
+  const showProgress = isProcessing || step === 'done'
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-12">
@@ -60,17 +176,17 @@ export default function LiquidityPage() {
       </div>
 
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4">
-        <button onClick={() => setTab('add')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'add' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
+        <button onClick={() => { setTab('add'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'add' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
           <Plus size={14} /> Add
         </button>
-        <button onClick={() => setTab('remove')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'remove' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
+        <button onClick={() => { setTab('remove'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'remove' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
           <Minus size={14} /> Remove
         </button>
       </div>
 
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4">
         {(['vAMM', 'CL', 'DLMM'] as PoolType[]).map(t => (
-          <button key={t} onClick={() => { setPoolType(t); setSelectedPool(POOLS.find(p => p.type === t) || POOLS[0]) }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium transition-all', poolType === t ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
+          <button key={t} onClick={() => { setPoolType(t); setSelectedPool(POOLS.find(p => p.type === t) || POOLS[0]); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium transition-all', poolType === t ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
             {t}
           </button>
         ))}
@@ -96,7 +212,7 @@ export default function LiquidityPage() {
         {showPoolPicker && (
           <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
             {filteredPools.map(pool => (
-              <button key={pool.address} onClick={() => { setSelectedPool(pool); setShowPoolPicker(false) }} className={clsx('w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-bg-raised transition-colors text-left', selectedPool.address === pool.address && 'bg-aeon-400/5 border border-aeon-400/20')}>
+              <button key={pool.address + pool.fee} onClick={() => { setSelectedPool(pool); setShowPoolPicker(false); setStep('idle') }} className={clsx('w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-bg-raised transition-colors text-left', selectedPool.address === pool.address && selectedPool.fee === pool.fee && 'bg-aeon-400/5 border border-aeon-400/20')}>
                 <div className="flex -space-x-1">
                   <div className="w-6 h-6 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-2xs font-bold z-10">{pool.token0[0]}</div>
                   <div className="w-6 h-6 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-2xs font-bold">{pool.token1[0]}</div>
@@ -109,12 +225,6 @@ export default function LiquidityPage() {
         )}
       </div>
 
-      {!poolHasRealAddress && (
-        <div className="mb-4 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
-          Pool not yet deployed on-chain. Liquidity operations will be enabled once pools are live.
-        </div>
-      )}
-
       {tab === 'add' ? (
         <div className="space-y-4">
           <div className="card p-4 space-y-3">
@@ -122,7 +232,9 @@ export default function LiquidityPage() {
             <div className="bg-bg-raised rounded-xl p-3">
               <div className="flex justify-between mb-1">
                 <span className="text-xs text-text-muted">{selectedPool.token0}</span>
-                <span className="text-xs text-text-muted font-mono">Balance: {bal0}</span>
+                <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal0.formatted !== '—' && setAmount0(bal0.formatted.replace(',',''))}>
+                  Balance: {bal0.formatted}
+                </button>
               </div>
               <div className="flex items-center gap-2">
                 <input type="number" value={amount0} onChange={e => setAmount0(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
@@ -133,7 +245,9 @@ export default function LiquidityPage() {
             <div className="bg-bg-raised rounded-xl p-3">
               <div className="flex justify-between mb-1">
                 <span className="text-xs text-text-muted">{selectedPool.token1}</span>
-                <span className="text-xs text-text-muted font-mono">Balance: {bal1}</span>
+                <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal1.formatted !== '—' && setAmount1(bal1.formatted.replace(',',''))}>
+                  Balance: {bal1.formatted}
+                </button>
               </div>
               <div className="flex items-center gap-2">
                 <input type="number" value={amount1} onChange={e => setAmount1(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
@@ -176,30 +290,43 @@ export default function LiquidityPage() {
             </div>
           )}
 
-          <div className="card p-4">
-            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Summary</div>
-            <div className="space-y-2">
-              {[
-                { label: 'Pool Share', value: '< 0.01%' },
-                { label: 'LP Tokens', value: '—' },
-                { label: 'Pool APR',  value: '—%' },
-                { label: 'Gauge APR', value: '—% (stake LP to earn)' },
-              ].map(item => (
-                <div key={item.label} className="flex justify-between text-sm">
-                  <span className="text-text-muted">{item.label}</span>
-                  <span className="font-mono text-text-primary">{item.value}</span>
-                </div>
-              ))}
+          {/* Progress steps */}
+          {showProgress && (
+            <div className="card p-4">
+              <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Transaction Progress</div>
+              <div className="space-y-2">
+                {progressSteps().map((s, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    {s.done
+                      ? <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                      : s.active
+                        ? <Loader2 size={16} className="text-aeon-400 animate-spin shrink-0" />
+                        : <div className="w-4 h-4 rounded-full border border-bg-border shrink-0" />
+                    }
+                    <span className={clsx('text-sm', s.done ? 'text-emerald-400' : s.active ? 'text-aeon-400' : 'text-text-muted')}>{s.label}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
+
+          {errMsg && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">{errMsg}</div>
+          )}
+
+          {!helperReady && (
+            <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
+              LiquidityHelper contract deploying — paste the address in contracts.ts to enable.
+            </div>
+          )}
 
           <button
-            onClick={() => { if (!isConnected) openConnectModal?.() }}
-            disabled={isConnected && (!amount0 && !amount1 || !poolHasRealAddress)}
+            onClick={startAddLiquidity}
+            disabled={isConnected && (isProcessing || (!amount0 && !amount1) || !helperReady)}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
-            <Plus size={16} />
-            {!isConnected ? 'Connect Wallet' : !poolHasRealAddress ? 'Pool Not Yet Deployed' : 'Add Liquidity'}
+            {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}
+            {stepLabel()}
           </button>
         </div>
       ) : (
@@ -228,13 +355,17 @@ export default function LiquidityPage() {
             </div>
           </div>
 
+          {errMsg && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">{errMsg}</div>
+          )}
+
           <button
-            onClick={() => { if (!isConnected) openConnectModal?.() }}
-            disabled={isConnected && !poolHasRealAddress}
+            onClick={() => { if (!isConnected) { openConnectModal?.(); return } }}
+            disabled={isConnected && !helperReady}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             <Minus size={16} />
-            {!isConnected ? 'Connect Wallet' : !poolHasRealAddress ? 'Pool Not Yet Deployed' : 'Remove Liquidity'}
+            {!isConnected ? 'Connect Wallet' : !helperReady ? 'Helper Not Deployed' : 'Remove Liquidity'}
           </button>
         </div>
       )}
