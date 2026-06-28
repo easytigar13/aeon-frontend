@@ -90,14 +90,14 @@ export const CL_RANGE_PRESETS = [
 export const EPOCH_CONFIG = {
   epochLength:         604800,   // 7 days in seconds
   bootstrapEpochs:     2,
-  bootstrapAmount:     250n * BigInt(1e18),
+  bootstrapAmount:     '250000000000000000000',
   emissionRatio:       10,
   feeVoterSplit:       95,
   feeBuybackSplit:     5,
   emissionVoterSplit:  95,
   emissionFurnaceSplit:5,
-  minStakeUSD:         5n  * BigInt(1e18),
-  poolCreationFeeUSD:  500n * BigInt(1e18),
+  minStakeUSD:         '5000000000000000000',
+  poolCreationFeeUSD:  '500000000000000000000',
 }
 
 export const CHAIN_ID = 43114 // Avalanche C-Chain
