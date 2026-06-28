@@ -55,17 +55,22 @@ export default function SwapPage() {
   const balanceIn  = useTokenBalance(tokenIn,  address)
   const balanceOut = useTokenBalance(tokenOut, address)
 
-  // AVAX and WAVAX are the same asset in pools (router wraps/unwraps)
+  // AVAX↔WAVAX is a 1:1 wrap/unwrap — no pool needed
+  const isWrapUnwrap = (tokenIn === 'AVAX' && tokenOut === 'WAVAX') || (tokenIn === 'WAVAX' && tokenOut === 'AVAX')
+
+  // For pool lookup, AVAX routes through WAVAX pools
   const poolKey = (k: TokenKey) => k === 'AVAX' ? 'WAVAX' : k
 
-  // Find the best pool for this pair — prefer lowest fee vAMM first
-  const selectedPool = POOLS.find(p =>
-    p.type === 'vAMM' &&
-    ((p.token0 === poolKey(tokenIn)  && p.token1 === poolKey(tokenOut)) ||
-     (p.token0 === poolKey(tokenOut) && p.token1 === poolKey(tokenIn)))
-  ) ?? POOLS.find(p =>
-    (p.token0 === poolKey(tokenIn)  && p.token1 === poolKey(tokenOut)) ||
-    (p.token0 === poolKey(tokenOut) && p.token1 === poolKey(tokenIn))
+  // Find the best pool — skip lookup for wrap/unwrap
+  const selectedPool = isWrapUnwrap ? undefined : (
+    POOLS.find(p =>
+      p.type === 'vAMM' &&
+      ((p.token0 === poolKey(tokenIn)  && p.token1 === poolKey(tokenOut)) ||
+       (p.token0 === poolKey(tokenOut) && p.token1 === poolKey(tokenIn)))
+    ) ?? POOLS.find(p =>
+      (p.token0 === poolKey(tokenIn)  && p.token1 === poolKey(tokenOut)) ||
+      (p.token0 === poolKey(tokenOut) && p.token1 === poolKey(tokenIn))
+    )
   )
 
   // Read reserves from the selected pool
@@ -108,11 +113,17 @@ export default function SwapPage() {
     ? parseUnits(amountIn, TOKENS[tokenIn].decimals)
     : 0n
 
+  // Wrap/unwrap: 1:1 quote
+  const wrapUnwrapAmountOut = isWrapUnwrap ? parsedAmountIn : 0n
+
   let amountOutWei = 0n
   let spotRate = 0
   let priceImpactPct = 0
 
-  if (reserves && poolToken0 && parsedAmountIn > 0n && selectedPool) {
+  if (isWrapUnwrap && parsedAmountIn > 0n) {
+    amountOutWei = parsedAmountIn
+    spotRate = 1
+  } else if (reserves && poolToken0 && parsedAmountIn > 0n && selectedPool) {
     const [r0, r1] = reserves
     // AVAX routes through WAVAX in the pool
     const effectiveTokenIn = tokenIn === 'AVAX' ? 'WAVAX' : tokenIn
@@ -177,6 +188,19 @@ export default function SwapPage() {
     }]
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
 
+    if (isWrapUnwrap) {
+      // AVAX→WAVAX: deposit(), WAVAX→AVAX: withdraw()
+      const WAVAX_ABI = [
+        { name: 'deposit',  type: 'function', stateMutability: 'payable',    inputs: [],                                     outputs: [] },
+        { name: 'withdraw', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'wad', type: 'uint256' }],    outputs: [] },
+      ] as const
+      if (tokenIn === 'AVAX') {
+        writeSwap({ address: TOKENS['WAVAX'].address, abi: WAVAX_ABI, functionName: 'deposit', args: [], value: parsedAmountIn })
+      } else {
+        writeSwap({ address: TOKENS['WAVAX'].address, abi: WAVAX_ABI, functionName: 'withdraw', args: [parsedAmountIn] })
+      }
+      return
+    }
     if (tokenIn === 'AVAX') {
       writeSwap({ address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactAVAXForTokens', args: [route, amountOutMin, address, deadline], value: parsedAmountIn })
     } else if (tokenOut === 'AVAX') {
@@ -189,7 +213,7 @@ export default function SwapPage() {
   const isBusy = isApproving || isApproveConfirming || isSwapping || isSwapConfirming
   const errMsg = approveError?.message.slice(0, 150) ?? swapError?.message.slice(0, 150) ?? ''
 
-  const noPool    = hasAmount && !selectedPool
+  const noPool    = hasAmount && !selectedPool && !isWrapUnwrap
   const overBal   = hasAmount && balanceIn.raw > 0n && parsedAmountIn > balanceIn.raw
   const noLiquidity = hasAmount && selectedPool && (!reserves || (reserves[0] === 0n && reserves[1] === 0n))
 
@@ -203,10 +227,11 @@ export default function SwapPage() {
     if (isSwapping  || isSwapConfirming)   return 'Swapping…'
     if (swapSuccess) return '✓ Swap complete!'
     if (needsApproval) return `Approve ${TOKENS[tokenIn].symbol}`
+    if (isWrapUnwrap) return tokenIn === 'AVAX' ? 'Wrap AVAX → WAVAX' : 'Unwrap WAVAX → AVAX'
     return `Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
   }
 
-  const disabled = isConnected && (!hasAmount || overBal || noPool || !!noLiquidity || isBusy)
+  const disabled = isConnected && (!hasAmount || overBal || noPool || !!noLiquidity || isBusy || (isWrapUnwrap && !!needsApproval && isNativeIn))
 
   return (
     <div className="max-w-lg mx-auto px-4 py-12">
@@ -292,6 +317,22 @@ export default function SwapPage() {
             {selectedPool && <span className="text-2xs font-mono text-blue-400">{selectedPool.type} · {selectedPool.fee}</span>}
           </div>
         </div>
+
+        {/* Wrap/unwrap info */}
+        {isWrapUnwrap && hasAmount && (
+          <div className="mt-3 mx-1 p-3 bg-bg-base rounded-xl space-y-1.5">
+            {[
+              { label: 'Rate',   value: '1 : 1 (no price impact)' },
+              { label: 'Action', value: tokenIn === 'AVAX' ? 'Wrap AVAX → WAVAX' : 'Unwrap WAVAX → AVAX' },
+              { label: 'Fee',    value: 'None' },
+            ].map(item => (
+              <div key={item.label} className="flex items-center justify-between">
+                <span className="text-xs text-text-muted">{item.label}</span>
+                <span className="text-xs font-mono text-text-secondary">{item.value}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Quote info */}
         {hasAmount && selectedPool && amountOutWei > 0n && (
