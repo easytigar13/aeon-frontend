@@ -13,7 +13,7 @@ export const CONTRACTS = {
   AeonFactory:      '0x3ECf287990A2365d48C6681620393aC1cdF3D268' as `0x${string}`,
   AeonOracle:       '0x0b18B0f483f1caAaBB7505bCD8D1C3C43197Add9' as `0x${string}`,
   AeonGaugeFactory:    '0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6' as `0x${string}`,
-  LiquidityHelper:     '0x0000000000000000000000000000000000000000' as `0x${string}`,
+  LiquidityHelper:     '0xFe307aA9b7514949Ee1a0F8a64E951d9277B62CA' as `0x${string}`,
 } as const
 
 export const TOKENS = {
