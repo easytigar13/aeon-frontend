@@ -33,13 +33,20 @@ export default function DashboardPage() {
   const { data: veTokenCount }  = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId' })
   const { data: totalVotes }    = useReadContract({ address: CONTRACTS.AeonVoter,        abi: VOTER_ABI,          functionName: 'totalWeight' })
 
-  const EPOCH_LENGTH = 7 * 24 * 60 * 60 * 1000
-  const now        = Date.now()
-  const epochNum   = Math.floor(now / EPOCH_LENGTH)
-  const epochStart = epochNum * EPOCH_LENGTH
-  const remaining  = epochStart + EPOCH_LENGTH - now
-  const days       = Math.floor(remaining / (24 * 60 * 60 * 1000))
-  const hours      = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+  // Epoch = weeks since Unix epoch (matches contract: timestamp / WEEK * WEEK)
+  const WEEK_MS       = 7 * 24 * 60 * 60 * 1000
+  const WEEK_S        = 7 * 24 * 60 * 60
+  const now           = Date.now()
+  const epochStartMs  = Math.floor(now / WEEK_MS) * WEEK_MS
+  const epochEndMs    = epochStartMs + WEEK_MS
+  const remaining     = epochEndMs - now
+  const days          = Math.floor(remaining / (24 * 60 * 60 * 1000))
+  const hours         = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+  const fmtDate       = (ms: number) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  const epochLabel    = `${fmtDate(epochStartMs)} – ${fmtDate(epochEndMs)}`
+  // Protocol epoch number: weeks since deployment (~Jun 27 2026)
+  const GENESIS_S     = 1751000000 // approx Jun 27 2026 unix timestamp
+  const protocolEpoch = Math.floor((now / 1000 - GENESIS_S) / WEEK_S) + 1
 
   const burnedPct = aeonSupply && totalBurned && aeonSupply > 0n
     ? ((Number(totalBurned) / Number(aeonSupply)) * 100).toFixed(2)
@@ -109,12 +116,12 @@ export default function DashboardPage() {
           </div>
           <div className="space-y-3">
             {[
-              { label: 'Current Epoch',      value: `#${epochNum}` },
+              { label: 'Current Epoch',      value: `#${protocolEpoch} (${epochLabel})` },
               { label: 'Epoch Ends',         value: `${days}d ${hours}h remaining` },
               { label: 'Total Votes',        value: totalVotes !== undefined ? `${fmt18(totalVotes)} veAEON` : '—' },
               { label: 'Fees This Epoch',    value: '$—' },
               { label: 'Projected Emissions',value: '— AEON' },
-              { label: 'Bootstrap Status',   value: epochNum <= 2 ? `Bootstrap Epoch ${epochNum}/2` : 'Fee-anchored (10:1)', highlight: true },
+              { label: 'Emissions Status',   value: 'Awaiting first vote + distribute()', highlight: true },
             ].map(item => (
               <div key={item.label} className="flex justify-between items-center">
                 <span className="text-sm text-text-muted">{item.label}</span>
