@@ -16,6 +16,7 @@ export const CONTRACTS = {
 
 export const TOKENS = {
   AEON:  { address: '0x0000000000000000000000000000000000000001' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
+  AVAX:  { address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `0x${string}`, symbol: 'AVAX',  decimals: 18, name: 'Avalanche (Native)' },
   WAVAX: { address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7' as `0x${string}`, symbol: 'WAVAX',  decimals: 18, name: 'Wrapped AVAX' },
   USDC:  { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6' as `0x${string}`, symbol: 'USDC',   decimals: 6,  name: 'USD Coin' },
   WUSDT: { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7' as `0x${string}`, symbol: 'WUSDT',  decimals: 6,  name: 'Tether USD' },
@@ -54,6 +55,7 @@ export const POOLS = [
   { name: 'ARENA/USDC', token0: 'ARENA',token1: 'USDC',  type: 'CL',   fee: '0.3%',  address: '0x0000000000000000000000000000000000002018' as `0x${string}` },
   { name: 'COQ/USDC',   token0: 'COQ',  token1: 'USDC',  type: 'CL',   fee: '0.3%',  address: '0x0000000000000000000000000000000000002019' as `0x${string}` },
   { name: 'USDC/WUSDT', token0: 'USDC', token1: 'WUSDT', type: 'CL',   fee: '0.01%', address: '0x0000000000000000000000000000000000002020' as `0x${string}` },
+  { name: 'AVAX/WAVAX', token0: 'AVAX', token1: 'WAVAX', type: 'CL',   fee: '0.05%', address: '0x0000000000000000000000000000000000002021' as `0x${string}` },
   // DLMM
   { name: 'AEON/WAVAX', token0: 'AEON', token1: 'WAVAX', type: 'DLMM', fee: '1%',    binStep: 100, address: '0x0000000000000000000000000000000000003001' as `0x${string}` },
   { name: 'AEON/USDC',  token0: 'AEON', token1: 'USDC',  type: 'DLMM', fee: '1%',    binStep: 100, address: '0x0000000000000000000000000000000000003002' as `0x${string}` },
@@ -78,6 +80,7 @@ export const POOLS = [
   { name: 'WBTCB/WBTCE',token0: 'WBTCB',token1: 'WBTCE', type: 'DLMM', fee: '0.05%', binStep: 5,   address: '0x0000000000000000000000000000000000003021' as `0x${string}` },
   { name: 'SPX/USDC',   token0: 'SPX',  token1: 'USDC',  type: 'DLMM', fee: '0.3%',  binStep: 100, address: '0x0000000000000000000000000000000000003022' as `0x${string}` },
   { name: 'SPX/WAVAX',  token0: 'SPX',  token1: 'WAVAX', type: 'DLMM', fee: '0.3%',  binStep: 100, address: '0x0000000000000000000000000000000000003023' as `0x${string}` },
+  { name: 'AVAX/WAVAX', token0: 'AVAX', token1: 'WAVAX', type: 'DLMM', fee: '0.05%', binStep: 1,   address: '0x0000000000000000000000000000000000003024' as `0x${string}` },
 ]
 
 export const CL_RANGE_PRESETS = [
@@ -88,7 +91,7 @@ export const CL_RANGE_PRESETS = [
 ]
 
 export const EPOCH_CONFIG = {
-  epochLength:         604800,   // 7 days in seconds
+  epochLength:         604800,
   bootstrapEpochs:     2,
   bootstrapAmount:     '250000000000000000000',
   emissionRatio:       10,
@@ -100,4 +103,4 @@ export const EPOCH_CONFIG = {
   poolCreationFeeUSD:  '500000000000000000000',
 }
 
-export const CHAIN_ID = 43114 // Avalanche C-Chain
+export const CHAIN_ID = 43114
