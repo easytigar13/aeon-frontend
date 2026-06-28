@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { Coins, ChevronDown, ChevronUp, Loader2, Wallet } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CONTRACTS } from '@/config/contracts'
@@ -279,6 +279,70 @@ function PoolRow({ pool, wallet }: { pool: typeof UNIQUE_POOLS[number]; wallet?:
   )
 }
 
+function useEarnStats(wallet?: `0x${string}`) {
+  // Batch read LP balances (unstaked) from all pool contracts
+  const { data: lpBalances } = useReadContracts({
+    contracts: UNIQUE_POOLS.map(p => ({
+      address: p.address as `0x${string}`,
+      abi: ERC20_ABI,
+      functionName: 'balanceOf' as const,
+      args: [wallet!] as [`0x${string}`],
+    })),
+    query: { enabled: !!wallet, refetchInterval: 30000 },
+  })
+
+  // Batch read gauge addresses
+  const { data: gaugeAddrs } = useReadContracts({
+    contracts: UNIQUE_POOLS.map(p => ({
+      address: CONTRACTS.AeonGaugeFactory as `0x${string}`,
+      abi: GAUGE_FACTORY_ABI,
+      functionName: 'gaugeForPool' as const,
+      args: [p.address as `0x${string}`],
+    })),
+    query: { refetchInterval: 60000 },
+  })
+
+  const validGauges = (gaugeAddrs ?? [])
+    .map(r => r.status === 'success' ? r.result as `0x${string}` : null)
+    .filter((g): g is `0x${string}` => !!g && g !== '0x0000000000000000000000000000000000000000')
+
+  // Batch read staked balances
+  const { data: stakedBalances } = useReadContracts({
+    contracts: validGauges.map(g => ({
+      address: g,
+      abi: GAUGE_ABI,
+      functionName: 'balanceOf' as const,
+      args: [wallet!] as [`0x${string}`],
+    })),
+    query: { enabled: !!wallet && validGauges.length > 0, refetchInterval: 30000 },
+  })
+
+  // Batch read earned emissions
+  const { data: earnedAmounts } = useReadContracts({
+    contracts: validGauges.map(g => ({
+      address: g,
+      abi: GAUGE_ABI,
+      functionName: 'earned' as const,
+      args: [wallet!] as [`0x${string}`],
+    })),
+    query: { enabled: !!wallet && validGauges.length > 0, refetchInterval: 15000 },
+  })
+
+  const totalStaked = (stakedBalances ?? []).reduce((sum, r) =>
+    sum + (r.status === 'success' ? r.result as bigint : 0n), 0n)
+
+  const totalLPUnstaked = (lpBalances ?? []).reduce((sum, r) =>
+    sum + (r.status === 'success' ? r.result as bigint : 0n), 0n)
+
+  const totalEarned = (earnedAmounts ?? []).reduce((sum, r) =>
+    sum + (r.status === 'success' ? r.result as bigint : 0n), 0n)
+
+  const fmtLP = (wei: bigint) => wei > 0n ? parseFloat(formatUnits(wei, 18)).toFixed(4) : '0'
+  const fmtAEON = (wei: bigint) => wei > 0n ? parseFloat(formatUnits(wei, 18)).toFixed(4) : '0'
+
+  return { totalStaked, totalLPUnstaked, totalEarned, fmtLP, fmtAEON }
+}
+
 export default function EarnPage() {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
@@ -289,6 +353,12 @@ export default function EarnPage() {
 
   const [filterTab, setFilterTab] = useState<'all' | 'my'>('all')
 
+  const stats = useEarnStats(isConnected ? address : undefined)
+
+  const stakedDisplay  = isConnected ? `${stats.fmtLP(stats.totalStaked)} LP` : '—'
+  const lpDisplay      = isConnected ? `${stats.fmtLP(stats.totalLPUnstaked)} LP` : '—'
+  const earnedDisplay  = isConnected ? `${stats.fmtAEON(stats.totalEarned)} AEON` : '—'
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-12">
       <div className="mb-8">
@@ -298,10 +368,10 @@ export default function EarnPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {[
-          { label: 'My Staked LP',     value: '$—',     sub: 'across all gauges' },
-          { label: 'Claimable Fees',   value: '— AEON', sub: 'from voted pools' },
-          { label: 'Claimable Emiss.', value: '— AEON', sub: 'from staked LP' },
-          { label: 'My Avg APR',       value: '—%',     sub: 'weighted average' },
+          { label: 'My Staked LP',     value: stakedDisplay,  sub: 'across all gauges' },
+          { label: 'Unstaked LP',      value: lpDisplay,      sub: 'not yet earning' },
+          { label: 'Claimable Emiss.', value: earnedDisplay,  sub: 'from staked LP' },
+          { label: 'Claimable Fees',   value: '— AEON',       sub: 'from voted pools' },
         ].map(s => (
           <div key={s.label} className="card p-4">
             <div className="stat-label mb-1">{s.label}</div>
