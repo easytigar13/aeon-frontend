@@ -6,7 +6,7 @@ import { useAccount, useBalance, useReadContract, useWriteContract, useWaitForTr
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_RANGE_PRESETS, TOKENS, CONTRACTS } from '@/config/contracts'
-import { ERC20_ABI, LIQUIDITY_HELPER_ABI } from '@/config/abis'
+import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI } from '@/config/abis'
 
 type Tab = 'add' | 'remove'
 type PoolType = 'vAMM' | 'CL' | 'DLMM'
@@ -72,6 +72,57 @@ export default function LiquidityPage() {
 
   const allowance0 = useAllowance(token0Addr, address)
   const allowance1 = useAllowance(token1Addr, address)
+
+  // Read pool reserves for ratio calculation
+  const { data: reserves } = useReadContract({
+    address: selectedPool.type === 'vAMM' ? selectedPool.address : undefined,
+    abi: PAIR_ABI,
+    functionName: 'getReserves',
+    query: { enabled: selectedPool.type === 'vAMM', refetchInterval: 15000 },
+  })
+  const { data: poolToken0Addr } = useReadContract({
+    address: selectedPool.type === 'vAMM' ? selectedPool.address : undefined,
+    abi: PAIR_ABI,
+    functionName: 'token0',
+    query: { enabled: selectedPool.type === 'vAMM' },
+  })
+
+  // Determine which reserve maps to token0/token1 in our display order
+  const isToken0First = !poolToken0Addr || !token0Addr ||
+    poolToken0Addr.toLowerCase() === token0Addr.toLowerCase()
+  const reserve0 = reserves ? (isToken0First ? reserves[0] : reserves[1]) : 0n
+  const reserve1 = reserves ? (isToken0First ? reserves[1] : reserves[0]) : 0n
+  const hasLiquidity = reserve0 > 0n && reserve1 > 0n
+
+  // Auto-calculate paired amount from reserves ratio
+  function calcPaired(inputWei: bigint, rIn: bigint, rOut: bigint, decOut: number): string {
+    if (!hasLiquidity || rIn === 0n) return ''
+    const out = inputWei * rOut / rIn
+    const str = formatUnits(out, decOut)
+    // trim trailing zeros but keep up to 6 decimals
+    return parseFloat(parseFloat(str).toFixed(6)).toString()
+  }
+
+  function handleAmount0Change(val: string) {
+    setAmount0(val)
+    if (!val || !hasLiquidity) { return }
+    try {
+      const wei = parseUnits(val, token0Dec)
+      setAmount1(calcPaired(wei, reserve0, reserve1, token1Dec))
+    } catch {}
+  }
+
+  function handleAmount1Change(val: string) {
+    setAmount1(val)
+    if (!val || !hasLiquidity) { return }
+    try {
+      const wei = parseUnits(val, token1Dec)
+      setAmount0(calcPaired(wei, reserve1, reserve0, token0Dec))
+    } catch {}
+  }
+
+  // Reset amounts when pool changes
+  useEffect(() => { setAmount0(''); setAmount1('') }, [selectedPool.address])
 
   const amount0Wei = amount0 ? parseUnits(amount0, token0Dec) : 0n
   const amount1Wei = amount1 ? parseUnits(amount1, token1Dec) : 0n
@@ -234,12 +285,12 @@ export default function LiquidityPage() {
             <div className="bg-bg-raised rounded-xl p-3">
               <div className="flex justify-between mb-1">
                 <span className="text-xs text-text-muted">{selectedPool.token0}</span>
-                <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal0.formatted !== '—' && setAmount0(bal0.formatted.replace(',',''))}>
+                <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal0.formatted !== '—' && handleAmount0Change(bal0.formatted.replace(',',''))}>
                   Balance: {bal0.formatted}
                 </button>
               </div>
               <div className="flex items-center gap-2">
-                <input type="number" value={amount0} onChange={e => setAmount0(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
+                <input type="number" value={amount0} onChange={e => handleAmount0Change(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
                 <span className="text-sm font-bold text-text-secondary">{selectedPool.token0}</span>
               </div>
             </div>
@@ -247,12 +298,12 @@ export default function LiquidityPage() {
             <div className="bg-bg-raised rounded-xl p-3">
               <div className="flex justify-between mb-1">
                 <span className="text-xs text-text-muted">{selectedPool.token1}</span>
-                <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal1.formatted !== '—' && setAmount1(bal1.formatted.replace(',',''))}>
+                <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal1.formatted !== '—' && handleAmount1Change(bal1.formatted.replace(',',''))}>
                   Balance: {bal1.formatted}
                 </button>
               </div>
               <div className="flex items-center gap-2">
-                <input type="number" value={amount1} onChange={e => setAmount1(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
+                <input type="number" value={amount1} onChange={e => handleAmount1Change(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
                 <span className="text-sm font-bold text-text-secondary">{selectedPool.token1}</span>
               </div>
             </div>
