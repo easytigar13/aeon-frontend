@@ -8,8 +8,8 @@ import { formatUnits, parseUnits } from 'viem'
 import { POOLS } from '@/config/contracts'
 import { ERC20_ABI } from '@/config/abis'
 
-// Deduplicate pools by address — CL/DLMM rows share addresses with vAMM pools
-const UNIQUE_POOLS = Array.from(new Map(POOLS.map(p => [p.address, p])).values())
+// Deduplicate by address, keeping the FIRST occurrence (vAMM comes before CL/DLMM)
+const UNIQUE_POOLS = POOLS.filter((p, _, arr) => arr.findIndex(x => x.address === p.address) === arr.indexOf(p))
 
 function useLPBalance(poolAddress: `0x${string}`, wallet?: `0x${string}`) {
   const { data } = useReadContract({
@@ -21,7 +21,7 @@ function useLPBalance(poolAddress: `0x${string}`, wallet?: `0x${string}`) {
   })
   if (!wallet || data === undefined) return { formatted: '—', raw: 0n }
   return {
-    formatted: parseFloat(formatUnits(data as bigint, 18)).toFixed(8),
+    formatted: formatUnits(data as bigint, 18).replace(/\.?0+$/, ''),
     raw: data as bigint,
   }
 }
@@ -41,7 +41,7 @@ function PoolRow({ pool, wallet }: { pool: typeof UNIQUE_POOLS[number]; wallet?:
   const canStake = parsedStake > 0n && lpBal.raw >= parsedStake
 
   function handleMaxStake() {
-    if (lpBal.raw > 0n) setStakeAmt(formatUnits(lpBal.raw, 18))
+    if (lpBal.raw > 0n) setStakeAmt(formatUnits(lpBal.raw, 18).replace(/\.?0+$/, ''))
   }
 
   return (
