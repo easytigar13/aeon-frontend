@@ -75,16 +75,15 @@ export default function LiquidityPage() {
 
   // Read pool reserves for ratio calculation
   const { data: reserves } = useReadContract({
-    address: selectedPool.type === 'vAMM' ? selectedPool.address : undefined,
+    address: selectedPool.address,
     abi: PAIR_ABI,
     functionName: 'getReserves',
-    query: { enabled: selectedPool.type === 'vAMM', refetchInterval: 15000 },
+    query: { refetchInterval: 15000 },
   })
   const { data: poolToken0Addr } = useReadContract({
-    address: selectedPool.type === 'vAMM' ? selectedPool.address : undefined,
+    address: selectedPool.address,
     abi: PAIR_ABI,
     functionName: 'token0',
-    query: { enabled: selectedPool.type === 'vAMM' },
   })
 
   // Determine which reserve maps to token0/token1 in our display order
@@ -183,7 +182,6 @@ export default function LiquidityPage() {
   function startAddLiquidity() {
     if (!isConnected) { openConnectModal?.(); return }
     if (!amount0 || !amount1) return  // BOTH amounts required
-    if (selectedPool.type !== 'vAMM') return  // CL/DLMM need different logic
     setStep('idle')
     setErrMsg('')
     if (needApprove0) { setStep('approve0'); return }
@@ -196,7 +194,6 @@ export default function LiquidityPage() {
   function stepLabel() {
     if (!isConnected) return 'Connect Wallet'
     if (!helperReady) return 'Helper Not Deployed Yet'
-    if (selectedPool.type !== 'vAMM') return 'CL/DLMM liquidity coming soon'
     if (!amount0 || !amount1) return 'Enter both amounts'
     if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
     if (step === 'approve1' || step === 'approve1_wait') return `Approving ${selectedPool.token1}…`
@@ -241,7 +238,6 @@ export default function LiquidityPage() {
         {(['vAMM', 'CL', 'DLMM'] as PoolType[]).map(t => (
           <button key={t} onClick={() => { setPoolType(t); setSelectedPool(POOLS.find(p => p.type === t) || POOLS[0]); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium transition-all relative', poolType === t ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
             {t}
-            {t !== 'vAMM' && <span className="ml-1 text-2xs text-yellow-500 font-mono">soon</span>}
           </button>
         ))}
       </div>
