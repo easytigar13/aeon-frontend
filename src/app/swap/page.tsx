@@ -1,15 +1,42 @@
 'use client'
-import { useState, useCallback } from 'react'
-import { ArrowUpDown, Settings, ChevronDown, Info } from 'lucide-react'
+import { useState, useCallback, useEffect } from 'react'
+import { ArrowUpDown, Settings, ChevronDown } from 'lucide-react'
 import { clsx } from 'clsx'
-import { TOKENS, POOLS, CL_RANGE_PRESETS } from '@/config/contracts'
+import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
+import { useConnectModal } from '@rainbow-me/rainbowkit'
+import { formatUnits, parseUnits, maxUint256 } from 'viem'
+import { TOKENS, POOLS, CL_RANGE_PRESETS, CONTRACTS } from '@/config/contracts'
+import { AEON_ROUTER_ABI, ERC20_ABI } from '@/config/abis'
 
 type TokenKey = keyof typeof TOKENS
 type PoolType = 'vAMM' | 'CL' | 'DLMM'
 
 const TOKEN_LIST = Object.entries(TOKENS).map(([key, val]) => ({ key: key as TokenKey, ...val }))
 
+function useTokenBalance(tokenKey: TokenKey, address?: `0x${string}`) {
+  const token = TOKENS[tokenKey]
+  const isNative = token.address === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
+  const { data } = useBalance({
+    address,
+    token: isNative ? undefined : token.address,
+    query: { enabled: !!address },
+  })
+  if (!address || !data) return { formatted: '—', raw: 0n }
+  return {
+    formatted: parseFloat(formatUnits(data.value, data.decimals)).toFixed(4),
+    raw: data.value,
+    decimals: data.decimals,
+  }
+}
+
 export default function SwapPage() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  const { address, isConnected: _isConnected } = useAccount()
+  const isConnected = mounted && _isConnected
+  const { openConnectModal } = useConnectModal()
+
   const [tokenIn,   setTokenIn]   = useState<TokenKey>('WAVAX')
   const [tokenOut,  setTokenOut]  = useState<TokenKey>('AEON')
   const [amountIn,  setAmountIn]  = useState('')
@@ -21,6 +48,24 @@ export default function SwapPage() {
   const [showTokenOutModal, setShowTokenOutModal] = useState(false)
   const [customRangeLow,  setCustomRangeLow]  = useState('')
   const [customRangeHigh, setCustomRangeHigh] = useState('')
+
+  const balanceIn  = useTokenBalance(tokenIn,  address)
+  const balanceOut = useTokenBalance(tokenOut, address)
+
+  // Allowance check — skip for native AVAX
+  const isNativeIn = TOKENS[tokenIn].address === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
+  const { data: allowance } = useReadContract({
+    address: isNativeIn ? undefined : TOKENS[tokenIn].address,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: address ? [address, CONTRACTS.AeonRouter] : undefined,
+    query: { enabled: !!address && !isNativeIn },
+  })
+
+  const { writeContract, data: approveTxHash, isPending: isApproving } = useWriteContract()
+  const { writeContract: writeSwap, data: swapTxHash, isPending: isSwapping } = useWriteContract()
+  const { isLoading: isApproveConfirming } = useWaitForTransactionReceipt({ hash: approveTxHash })
+  const { isLoading: isSwapConfirming }    = useWaitForTransactionReceipt({ hash: swapTxHash })
 
   const flip = useCallback(() => {
     setTokenIn(tokenOut)
@@ -35,6 +80,99 @@ export default function SwapPage() {
   )
 
   const amountOut = amountIn ? (parseFloat(amountIn) * 0.998).toFixed(6) : ''
+
+  function setPercent(pct: number) {
+    if (!isConnected || balanceIn.raw === 0n || !('decimals' in balanceIn)) return
+    const portion = (balanceIn.raw * BigInt(pct)) / 100n
+    setAmountIn(parseFloat(formatUnits(portion, balanceIn.decimals as number)).toFixed(6))
+  }
+
+  const hasAmount = !!amountIn && parseFloat(amountIn) > 0
+
+  const parsedAmountIn = hasAmount
+    ? parseUnits(amountIn, TOKENS[tokenIn].decimals)
+    : 0n
+
+  const needsApproval = !isNativeIn && hasAmount && allowance !== undefined && allowance < parsedAmountIn
+
+  const poolTypeIndex = poolType === 'vAMM' ? 0 : poolType === 'CL' ? 1 : 2
+
+  function handleSwapClick() {
+    if (!isConnected) { openConnectModal?.(); return }
+    if (!hasAmount || !selectedPool || !address) return
+
+    if (needsApproval) {
+      writeContract({
+        address: TOKENS[tokenIn].address,
+        abi: ERC20_ABI,
+        functionName: 'approve',
+        args: [CONTRACTS.AeonRouter, maxUint256],
+      })
+      return
+    }
+
+    const route = [{
+      tokenIn:  TOKENS[tokenIn].address,
+      tokenOut: TOKENS[tokenOut].address,
+      pool:     selectedPool.address,
+      poolType: poolTypeIndex,
+    }]
+
+    const slippagePct  = parseFloat(slippage) / 100
+    const amountOutMin = parseUnits(
+      ((parseFloat(amountOut) || 0) * (1 - slippagePct)).toFixed(TOKENS[tokenOut].decimals),
+      TOKENS[tokenOut].decimals
+    )
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200) // 20 min
+
+    const isAvaxIn  = tokenIn  === 'AVAX'
+    const isAvaxOut = tokenOut === 'AVAX'
+
+    if (isAvaxIn) {
+      writeSwap({
+        address: CONTRACTS.AeonRouter,
+        abi: AEON_ROUTER_ABI,
+        functionName: 'swapExactAVAXForTokens',
+        args: [route, amountOutMin, address, deadline],
+        value: parsedAmountIn,
+      })
+    } else if (isAvaxOut) {
+      writeSwap({
+        address: CONTRACTS.AeonRouter,
+        abi: AEON_ROUTER_ABI,
+        functionName: 'swapExactTokensForAVAX',
+        args: [route, parsedAmountIn, amountOutMin, address, deadline],
+      })
+    } else {
+      writeSwap({
+        address: CONTRACTS.AeonRouter,
+        abi: AEON_ROUTER_ABI,
+        functionName: 'swapExactTokensForTokens',
+        args: [route, parsedAmountIn, amountOutMin, address, deadline],
+      })
+    }
+  }
+
+  const isBusy = isApproving || isApproveConfirming || isSwapping || isSwapConfirming
+
+  function swapButtonLabel() {
+    if (!isConnected) return 'Connect Wallet to Swap'
+    if (!hasAmount) return 'Enter amount'
+    if (balanceIn.formatted !== '—' && parseFloat(amountIn) > parseFloat(balanceIn.formatted)) return 'Insufficient balance'
+    if (isApproving || isApproveConfirming) return 'Approving...'
+    if (isSwapping  || isSwapConfirming)   return 'Swapping...'
+    if (needsApproval) return `Approve ${TOKENS[tokenIn].symbol}`
+    return `Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
+  }
+
+  function swapButtonDisabled() {
+    if (!isConnected) return false
+    if (!hasAmount) return true
+    if (balanceIn.formatted !== '—' && parseFloat(amountIn) > parseFloat(balanceIn.formatted)) return true
+    if (isBusy) return true
+    if (!selectedPool) return true
+    return false
+  }
 
   return (
     <div className="max-w-lg mx-auto px-4 py-12">
@@ -114,7 +252,9 @@ export default function SwapPage() {
         <div className="bg-bg-raised rounded-xl p-4 mb-1">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-text-muted">You pay</span>
-            <span className="text-xs text-text-muted font-mono">Balance: —</span>
+            <span className="text-xs text-text-muted font-mono">
+              Balance: {balanceIn.formatted}
+            </span>
           </div>
           <div className="flex items-center gap-3">
             <input
@@ -138,11 +278,17 @@ export default function SwapPage() {
           <div className="flex items-center justify-between mt-2">
             <span className="text-xs text-text-muted font-mono">≈ $—</span>
             <div className="flex gap-1">
-              {['25%', '50%', 'MAX'].map(p => (
-                <button key={p} className="text-2xs text-text-muted hover:text-aeon-400
-                                          px-1.5 py-0.5 rounded border border-bg-border
-                                          hover:border-aeon-400/30 transition-all font-mono">
-                  {p}
+              {([['25', 25], ['50', 50], ['MAX', 100]] as [string, number][]).map(([label, pct]) => (
+                <button
+                  key={label}
+                  onClick={() => setPercent(pct)}
+                  disabled={!isConnected}
+                  className="text-2xs text-text-muted hover:text-aeon-400
+                             px-1.5 py-0.5 rounded border border-bg-border
+                             hover:border-aeon-400/30 transition-all font-mono
+                             disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {label === '25' ? '25%' : label === '50' ? '50%' : 'MAX'}
                 </button>
               ))}
             </div>
@@ -165,7 +311,9 @@ export default function SwapPage() {
         <div className="bg-bg-raised rounded-xl p-4 mt-1">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs text-text-muted">You receive</span>
-            <span className="text-xs text-text-muted font-mono">Balance: —</span>
+            <span className="text-xs text-text-muted font-mono">
+              Balance: {balanceOut.formatted}
+            </span>
           </div>
           <div className="flex items-center gap-3">
             <div className="flex-1 text-2xl font-mono text-text-primary">
@@ -204,7 +352,7 @@ export default function SwapPage() {
               {CL_RANGE_PRESETS.map(preset => (
                 <button
                   key={preset.key}
-                  onClick={() => { setClRange(preset.key); setCustomRangeLow(''); setCustomRangeHigh(''); }}
+                  onClick={() => { setClRange(preset.key); setCustomRangeLow(''); setCustomRangeHigh('') }}
                   className={clsx(
                     'py-1.5 rounded-lg text-xs font-medium transition-all text-center',
                     clRange === preset.key
@@ -223,7 +371,7 @@ export default function SwapPage() {
                 <input
                   type="number"
                   value={customRangeLow}
-                  onChange={e => { setCustomRangeLow(e.target.value); setClRange('custom'); }}
+                  onChange={e => { setCustomRangeLow(e.target.value); setClRange('custom') }}
                   placeholder="0.0"
                   className="input-base w-full text-sm py-1.5"
                 />
@@ -233,7 +381,7 @@ export default function SwapPage() {
                 <input
                   type="number"
                   value={customRangeHigh}
-                  onChange={e => { setCustomRangeHigh(e.target.value); setClRange('custom'); }}
+                  onChange={e => { setCustomRangeHigh(e.target.value); setClRange('custom') }}
                   placeholder="∞"
                   className="input-base w-full text-sm py-1.5"
                 />
@@ -243,7 +391,7 @@ export default function SwapPage() {
         )}
 
         {/* Route info */}
-        {amountIn && parseFloat(amountIn) > 0 && (
+        {hasAmount && (
           <div className="mt-3 p-3 bg-bg-base rounded-xl space-y-1.5">
             {[
               { label: 'Rate',         value: `1 ${TOKENS[tokenIn].symbol} = — ${TOKENS[tokenOut].symbol}` },
@@ -263,10 +411,11 @@ export default function SwapPage() {
         {/* Swap button */}
         <div className="p-2 mt-1">
           <button
-            disabled={!amountIn || parseFloat(amountIn) <= 0}
+            onClick={handleSwapClick}
+            disabled={swapButtonDisabled()}
             className="btn-primary w-full text-base py-4"
           >
-            {!amountIn || parseFloat(amountIn) <= 0 ? 'Enter amount' : 'Connect Wallet to Swap'}
+            {swapButtonLabel()}
           </button>
         </div>
       </div>
@@ -282,6 +431,7 @@ export default function SwapPage() {
           }}
           onClose={() => { setShowTokenInModal(false); setShowTokenOutModal(false) }}
           exclude={showTokenInModal ? tokenOut : tokenIn}
+          walletAddress={address}
         />
       )}
     </div>
@@ -290,32 +440,36 @@ export default function SwapPage() {
 
 function TokenIcon({ symbol }: { symbol: string }) {
   const colors: Record<string, string> = {
-    AEON: 'bg-aeon-400/20 text-aeon-400',
-    WAVAX: 'bg-red-500/20 text-red-400',
-    USDC: 'bg-blue-500/20 text-blue-400',
-    WUSDT: 'bg-green-500/20 text-green-400',
-    'WBTC.e': 'bg-orange-500/20 text-orange-400',
-    'WBTC.b': 'bg-orange-500/20 text-orange-400',
-    'WETH.e': 'bg-indigo-500/20 text-indigo-400',
-    SPX: 'bg-purple-500/20 text-purple-400',
-    GUNZ: 'bg-cyan-500/20 text-cyan-400',
-    ARENA: 'bg-pink-500/20 text-pink-400',
-    COQ: 'bg-yellow-500/20 text-yellow-400',
+    AEON:    'bg-aeon-400/20 text-aeon-400',
+    AVAX:    'bg-red-500/20 text-red-400',
+    WAVAX:   'bg-red-500/20 text-red-400',
+    USDC:    'bg-blue-500/20 text-blue-400',
+    WUSDT:   'bg-green-500/20 text-green-400',
+    'WBTC.e':'bg-orange-500/20 text-orange-400',
+    'WBTC.b':'bg-orange-500/20 text-orange-400',
+    'WETH.e':'bg-indigo-500/20 text-indigo-400',
+    SPX:     'bg-purple-500/20 text-purple-400',
+    GUNZ:    'bg-cyan-500/20 text-cyan-400',
+    ARENA:   'bg-pink-500/20 text-pink-400',
+    COQ:     'bg-yellow-500/20 text-yellow-400',
   }
   return (
-    <div className={clsx('w-6 h-6 rounded-full flex items-center justify-center text-2xs font-bold font-mono shrink-0',
-      colors[symbol] || 'bg-bg-raised text-text-muted')}>
+    <div className={clsx(
+      'w-6 h-6 rounded-full flex items-center justify-center text-2xs font-bold font-mono shrink-0',
+      colors[symbol] || 'bg-bg-raised text-text-muted'
+    )}>
       {symbol[0]}
     </div>
   )
 }
 
 function TokenSelectModal({
-  onSelect, onClose, exclude,
+  onSelect, onClose, exclude, walletAddress,
 }: {
   onSelect: (key: TokenKey) => void
   onClose: () => void
   exclude: TokenKey
+  walletAddress?: `0x${string}`
 }) {
   const [search, setSearch] = useState('')
   const filtered = TOKEN_LIST.filter(t =>
@@ -325,8 +479,10 @@ function TokenSelectModal({
   )
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-bg-base/80 backdrop-blur-sm"
-         onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-bg-base/80 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div className="card w-full max-w-sm p-4 animate-slide-up" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h3 className="font-display font-semibold">Select Token</h3>
@@ -342,22 +498,39 @@ function TokenSelectModal({
         />
         <div className="space-y-1 max-h-72 overflow-y-auto">
           {filtered.map(token => (
-            <button
+            <TokenRow
               key={token.key}
-              onClick={() => onSelect(token.key)}
-              className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-bg-raised
-                         transition-colors text-left"
-            >
-              <TokenIcon symbol={token.symbol} />
-              <div>
-                <div className="font-semibold text-sm text-text-primary">{token.symbol}</div>
-                <div className="text-xs text-text-muted">{token.name}</div>
-              </div>
-              <div className="ml-auto text-xs font-mono text-text-muted">—</div>
-            </button>
+              token={token}
+              walletAddress={walletAddress}
+              onSelect={onSelect}
+            />
           ))}
         </div>
       </div>
     </div>
+  )
+}
+
+function TokenRow({
+  token, walletAddress, onSelect,
+}: {
+  token: typeof TOKEN_LIST[number]
+  walletAddress?: `0x${string}`
+  onSelect: (key: TokenKey) => void
+}) {
+  const bal = useTokenBalance(token.key, walletAddress)
+  return (
+    <button
+      onClick={() => onSelect(token.key)}
+      className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-bg-raised
+                 transition-colors text-left"
+    >
+      <TokenIcon symbol={token.symbol} />
+      <div>
+        <div className="font-semibold text-sm text-text-primary">{token.symbol}</div>
+        <div className="text-xs text-text-muted">{token.name}</div>
+      </div>
+      <div className="ml-auto text-xs font-mono text-text-muted">{bal.formatted}</div>
+    </button>
   )
 }

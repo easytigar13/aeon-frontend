@@ -2,6 +2,7 @@
 // Replace REPLACE_AFTER_DEPLOY with real addresses after mainnet deploy
 
 export const CONTRACTS = {
+  AeonRouter:       '0x7eB725C9EA96dAB6bf0E734e8D7A54474eb713BB' as `0x${string}`,
   AeonToken:        '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`,
   AeonVotingEscrow: '0xdeC58B16B24536bc5009Ad4AfDd0C48fF69F919A' as `0x${string}`,
   AeonVoter:        '0x05b04A4344520Bb08201Bd9460ec9d37aD5f7918' as `0x${string}`,
