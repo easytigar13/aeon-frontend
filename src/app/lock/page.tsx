@@ -97,6 +97,12 @@ export default function LockPage() {
   const { writeContract, data: txHash, isPending } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash })
 
+  useEffect(() => {
+    if (!isSuccess) return
+    refetchVeAllowance()
+    refetchFurnaceAllowance()
+  }, [isSuccess])
+
   const MAXTIME = 4 * 365
   const multiplier = Math.min(lockDays / MAXTIME, 1)
   const votingPower = lockAmount ? (parseFloat(lockAmount) * multiplier).toFixed(4) : '0'
