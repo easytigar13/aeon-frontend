@@ -7,6 +7,15 @@ import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits } from 'viem'
 import { POOLS, CONTRACTS } from '@/config/contracts'
 import { VOTING_ESCROW_ABI, VOTER_ABI } from '@/config/abis'
+import { usePrices } from '@/hooks/usePrices'
+import { usePoolStats } from '@/hooks/usePoolStats'
+
+function fmtUsd(n: number | null): string {
+  if (n === null) return '$—'
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(2)}K`
+  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 interface VoteAllocation { pool: string; poolAddress: `0x${string}`; weight: number }
 
@@ -61,6 +70,11 @@ export default function VotePage() {
   const { writeContract, data: txHash, isPending } = useWriteContract()
   const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash })
   const isBusy = isPending || isConfirming
+
+  const prices    = usePrices()
+  const poolStats = usePoolStats(prices)
+  const tvlByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
+  const votesByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.votesFormatted]))
 
   const totalWeight = allocations.reduce((s, a) => s + a.weight, 0)
   const remaining   = 100 - totalWeight
@@ -271,7 +285,7 @@ export default function VotePage() {
                     <div className="col-span-1">
                       <span className={clsx('text-2xs font-mono font-bold', pool.type === 'vAMM' ? 'text-blue-400' : pool.type === 'CL' ? 'text-violet-400' : 'text-emerald-400')}>{pool.type}</span>
                     </div>
-                    <div className="col-span-2 text-sm font-mono text-text-secondary">$—</div>
+                    <div className="col-span-2 text-sm font-mono text-text-secondary">{fmtUsd(tvlByAddr[pool.address] ?? null)}</div>
                     <div className="col-span-2 text-sm font-mono text-text-secondary">$—</div>
                     <div className="col-span-2 text-sm font-mono text-emerald-400">—%</div>
                     <div className="col-span-1 text-sm font-mono text-violet-400">—%</div>

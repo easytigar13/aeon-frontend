@@ -7,6 +7,15 @@ import { formatUnits } from 'viem'
 import { POOLS, CONTRACTS } from '@/config/contracts'
 import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI } from '@/config/abis'
 import { clsx } from 'clsx'
+import { usePrices } from '@/hooks/usePrices'
+import { usePoolStats, useTotalTVL } from '@/hooks/usePoolStats'
+
+function fmtUsd(n: number | null, compact = false): string {
+  if (n === null) return '$—'
+  if (compact && n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
+  if (compact && n >= 1_000)    return `$${(n / 1_000).toFixed(2)}K`
+  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 const tvlData = Array.from({ length: 30 }, (_, i) => ({
   day: i + 1,
@@ -26,6 +35,11 @@ function fmt18(v: bigint | undefined, decimals = 2) {
 
 export default function DashboardPage() {
   const [chartTab, setChartTab] = useState<'tvl' | 'volume' | 'emissions'>('tvl')
+
+  const prices    = usePrices()
+  const poolStats = usePoolStats(prices)
+  const totalTVL  = useTotalTVL(poolStats)
+  const statByAddr = Object.fromEntries(poolStats.map(s => [s.address, s]))
 
   const { data: aeonSupply }    = useReadContract({ address: CONTRACTS.AeonToken,        abi: ERC20_ABI,          functionName: 'totalSupply' })
   const { data: totalBurned }   = useReadContract({ address: CONTRACTS.TheFurnace,       abi: FURNACE_ABI,        functionName: 'totalBurned' })
@@ -62,8 +76,8 @@ export default function DashboardPage() {
       {/* KPI cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {[
-          { label: 'Total Value Locked', value: '$—',                                           icon: <TrendingUp size={16} className="text-aeon-400" />,    delta: '+—%' },
-          { label: 'Volume 24h',         value: '$—',                                           icon: <BarChart3  size={16} className="text-violet-400" />,  delta: '+—%' },
+          { label: 'Total Value Locked', value: fmtUsd(totalTVL || null, true),                  icon: <TrendingUp size={16} className="text-aeon-400" />,    delta: `${POOLS.length} pools` },
+          { label: 'Volume 24h',         value: '$—',                                           icon: <BarChart3  size={16} className="text-violet-400" />,  delta: 'on-chain indexing soon' },
           { label: 'AEON Supply',        value: `${fmt18(aeonSupply)} AEON`,                   icon: <Vote       size={16} className="text-emerald-400" />, delta: 'genesis: 1,000' },
           { label: 'AEON Burned',        value: `${fmt18(totalBurned)} AEON`,                  icon: <Flame      size={16} className="text-red-400" />,     delta: `${burnedPct}% of supply` },
         ].map(kpi => (
@@ -138,8 +152,8 @@ export default function DashboardPage() {
           </div>
           <div className="space-y-3">
             {[
-              { label: 'Price',         value: '$—' },
-              { label: 'Market Cap',    value: '$—' },
+              { label: 'Price',         value: prices.AEON ? fmtUsd(prices.AEON) : '$—' },
+              { label: 'Market Cap',    value: (prices.AEON && aeonSupply) ? fmtUsd(prices.AEON * parseFloat(formatUnits(aeonSupply, 18)), true) : '$—' },
               { label: 'Total Supply',  value: aeonSupply !== undefined ? `${fmt18(aeonSupply)} AEON` : '—' },
               { label: 'Total Burned',  value: totalBurned !== undefined ? `${fmt18(totalBurned)} AEON` : '—' },
               { label: '% Burned',      value: `${burnedPct}%` },
@@ -210,26 +224,29 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-bg-border">
-              {POOLS.map(pool => (
-                <tr key={pool.address} className="hover:bg-bg-raised transition-colors">
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="flex -space-x-1">
-                        <div className="w-6 h-6 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-2xs font-bold z-10">{pool.token0[0]}</div>
-                        <div className="w-6 h-6 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-2xs font-bold">{pool.token1[0]}</div>
+              {POOLS.map(pool => {
+                const stat = statByAddr[pool.address]
+                return (
+                  <tr key={pool.address + pool.fee} className="hover:bg-bg-raised transition-colors">
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <div className="flex -space-x-1">
+                          <div className="w-6 h-6 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-2xs font-bold z-10">{pool.token0[0]}</div>
+                          <div className="w-6 h-6 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-2xs font-bold">{pool.token1[0]}</div>
+                        </div>
+                        <span className="text-sm font-medium text-text-primary">{pool.name}</span>
                       </div>
-                      <span className="text-sm font-medium text-text-primary">{pool.name}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3"><span className={clsx('text-2xs font-mono font-bold', pool.type === 'vAMM' ? 'text-blue-400' : pool.type === 'CL' ? 'text-violet-400' : 'text-emerald-400')}>{pool.type}</span></td>
-                  <td className="px-4 py-3 text-xs font-mono text-text-muted">{pool.fee}</td>
-                  <td className="px-4 py-3 text-sm font-mono text-text-secondary">$—</td>
-                  <td className="px-4 py-3 text-sm font-mono text-text-secondary">$—</td>
-                  <td className="px-4 py-3 text-sm font-mono text-emerald-400">—%</td>
-                  <td className="px-4 py-3 text-sm font-mono text-violet-400">—%</td>
-                  <td className="px-4 py-3 text-xs font-mono text-text-muted">— veAEON</td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-4 py-3"><span className={clsx('text-2xs font-mono font-bold', pool.type === 'vAMM' ? 'text-blue-400' : pool.type === 'CL' ? 'text-violet-400' : 'text-emerald-400')}>{pool.type}</span></td>
+                    <td className="px-4 py-3 text-xs font-mono text-text-muted">{pool.fee}</td>
+                    <td className="px-4 py-3 text-sm font-mono text-text-secondary">{fmtUsd(stat?.tvlUsd ?? null)}</td>
+                    <td className="px-4 py-3 text-sm font-mono text-text-secondary">$—</td>
+                    <td className="px-4 py-3 text-sm font-mono text-emerald-400">—%</td>
+                    <td className="px-4 py-3 text-sm font-mono text-violet-400">—%</td>
+                    <td className="px-4 py-3 text-xs font-mono text-text-muted">{stat ? `${stat.votesFormatted} veAEON` : '—'}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

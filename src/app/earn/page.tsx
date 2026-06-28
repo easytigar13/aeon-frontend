@@ -7,13 +7,22 @@ import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CONTRACTS } from '@/config/contracts'
 import { ERC20_ABI, GAUGE_ABI, GAUGE_FACTORY_ABI } from '@/config/abis'
+import { usePrices } from '@/hooks/usePrices'
+import { usePoolStats } from '@/hooks/usePoolStats'
+
+function fmtUsd(n: number | null): string {
+  if (n === null) return '$—'
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
+  if (n >= 1_000)     return `$${(n / 1_000).toFixed(2)}K`
+  return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 // Deduplicate by address, keeping the FIRST occurrence (vAMM before CL/DLMM)
 const UNIQUE_POOLS = POOLS.filter((p, _, arr) => arr.findIndex(x => x.address === p.address) === arr.indexOf(p))
 
 type Step = 'idle' | 'approving' | 'approve_wait' | 'staking' | 'stake_wait' | 'done' | 'unstaking' | 'unstake_wait' | 'claiming' | 'claim_wait'
 
-function PoolRow({ pool, wallet }: { pool: typeof UNIQUE_POOLS[number]; wallet?: `0x${string}` }) {
+function PoolRow({ pool, wallet, tvlUsd }: { pool: typeof UNIQUE_POOLS[number]; wallet?: `0x${string}`; tvlUsd?: number | null }) {
   const [expanded,   setExpanded]   = useState(false)
   const [stakeAmt,   setStakeAmt]   = useState('')
   const [unstakeAmt, setUnstakeAmt] = useState('')
@@ -159,7 +168,7 @@ function PoolRow({ pool, wallet }: { pool: typeof UNIQUE_POOLS[number]; wallet?:
           </div>
         </div>
         <div className="col-span-2 hidden md:block">
-          <div className="text-sm font-mono text-text-secondary">$—</div>
+          <div className="text-sm font-mono text-text-secondary">{fmtUsd(tvlUsd ?? null)}</div>
           <div className="text-2xs text-text-muted">TVL</div>
         </div>
         <div className="col-span-2">
@@ -353,7 +362,10 @@ export default function EarnPage() {
 
   const [filterTab, setFilterTab] = useState<'all' | 'my'>('all')
 
-  const stats = useEarnStats(isConnected ? address : undefined)
+  const stats     = useEarnStats(isConnected ? address : undefined)
+  const prices    = usePrices()
+  const poolStats = usePoolStats(prices)
+  const tvlByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
 
   const stakedDisplay  = isConnected ? `${stats.fmtLP(stats.totalStaked)} LP` : '—'
   const lpDisplay      = isConnected ? `${stats.fmtLP(stats.totalLPUnstaked)} LP` : '—'
@@ -409,7 +421,7 @@ export default function EarnPage() {
 
       <div className="space-y-2">
         {UNIQUE_POOLS.map(pool => (
-          <PoolRow key={pool.address} pool={pool} wallet={isConnected ? address : undefined} />
+          <PoolRow key={pool.address} pool={pool} wallet={isConnected ? address : undefined} tvlUsd={tvlByAddr[pool.address]} />
         ))}
       </div>
     </div>
