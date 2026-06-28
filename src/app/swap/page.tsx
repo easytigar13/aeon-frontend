@@ -55,14 +55,17 @@ export default function SwapPage() {
   const balanceIn  = useTokenBalance(tokenIn,  address)
   const balanceOut = useTokenBalance(tokenOut, address)
 
+  // AVAX and WAVAX are the same asset in pools (router wraps/unwraps)
+  const poolKey = (k: TokenKey) => k === 'AVAX' ? 'WAVAX' : k
+
   // Find the best pool for this pair — prefer lowest fee vAMM first
   const selectedPool = POOLS.find(p =>
     p.type === 'vAMM' &&
-    ((p.token0 === tokenIn  && p.token1 === tokenOut) ||
-     (p.token0 === tokenOut && p.token1 === tokenIn))
+    ((p.token0 === poolKey(tokenIn)  && p.token1 === poolKey(tokenOut)) ||
+     (p.token0 === poolKey(tokenOut) && p.token1 === poolKey(tokenIn)))
   ) ?? POOLS.find(p =>
-    (p.token0 === tokenIn  && p.token1 === tokenOut) ||
-    (p.token0 === tokenOut && p.token1 === tokenIn)
+    (p.token0 === poolKey(tokenIn)  && p.token1 === poolKey(tokenOut)) ||
+    (p.token0 === poolKey(tokenOut) && p.token1 === poolKey(tokenIn))
   )
 
   // Read reserves from the selected pool
@@ -111,7 +114,9 @@ export default function SwapPage() {
 
   if (reserves && poolToken0 && parsedAmountIn > 0n && selectedPool) {
     const [r0, r1] = reserves
-    const tokenInAddr  = TOKENS[tokenIn].address.toLowerCase()
+    // AVAX routes through WAVAX in the pool
+    const effectiveTokenIn = tokenIn === 'AVAX' ? 'WAVAX' : tokenIn
+    const tokenInAddr  = TOKENS[effectiveTokenIn].address.toLowerCase()
     const isToken0In   = poolToken0.toLowerCase() === tokenInAddr
     const reserveIn    = isToken0In ? r0 : r1
     const reserveOut   = isToken0In ? r1 : r0
@@ -160,9 +165,12 @@ export default function SwapPage() {
       return
     }
 
+    const wavaxAddr = TOKENS['WAVAX'].address
+    const routeTokenIn  = tokenIn  === 'AVAX' ? wavaxAddr : TOKENS[tokenIn].address
+    const routeTokenOut = tokenOut === 'AVAX' ? wavaxAddr : TOKENS[tokenOut].address
     const route = [{
-      tokenIn:  TOKENS[tokenIn].address,
-      tokenOut: TOKENS[tokenOut].address,
+      tokenIn:  routeTokenIn,
+      tokenOut: routeTokenOut,
       pool:     selectedPool.address,
       poolType: 0,
       feeBps:   Number(feeToBps(selectedPool.fee)),
