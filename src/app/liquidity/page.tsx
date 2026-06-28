@@ -131,7 +131,8 @@ export default function LiquidityPage() {
 
   function startAddLiquidity() {
     if (!isConnected) { openConnectModal?.(); return }
-    if (!amount0 && !amount1) return
+    if (!amount0 || !amount1) return  // BOTH amounts required
+    if (selectedPool.type !== 'vAMM') return  // CL/DLMM need different logic
     setStep('idle')
     setErrMsg('')
     if (needApprove0) { setStep('approve0'); return }
@@ -144,7 +145,8 @@ export default function LiquidityPage() {
   function stepLabel() {
     if (!isConnected) return 'Connect Wallet'
     if (!helperReady) return 'Helper Not Deployed Yet'
-    if (!amount0 && !amount1) return 'Enter Amounts'
+    if (selectedPool.type !== 'vAMM') return 'CL/DLMM liquidity coming soon'
+    if (!amount0 || !amount1) return 'Enter both amounts'
     if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
     if (step === 'approve1' || step === 'approve1_wait') return `Approving ${selectedPool.token1}…`
     if (step === 'addliq'   || step === 'addliq_wait')  return 'Adding Liquidity…'
