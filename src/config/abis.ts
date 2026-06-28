@@ -241,6 +241,61 @@ export const FURNACE_ABI = [
   },
 ] as const
 
+export const GAUGE_FACTORY_ABI = [
+  {
+    name: 'gaugeForPool',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'pool', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+] as const
+
+export const GAUGE_ABI = [
+  {
+    name: 'deposit',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    name: 'withdraw',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    name: 'getReward',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [],
+  },
+  {
+    name: 'earned',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'totalSupply',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
 export const PAIR_ABI = [
   {
     name: 'getReserves',
