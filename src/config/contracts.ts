@@ -2,20 +2,20 @@
 // Replace REPLACE_AFTER_DEPLOY with real addresses after mainnet deploy
 
 export const CONTRACTS = {
-  AeonToken:        '0x0000000000000000000000000000000000000001' as `0x${string}`,
-  AeonVotingEscrow: '0x0000000000000000000000000000000000000002' as `0x${string}`,
-  AeonVoter:        '0x0000000000000000000000000000000000000003' as `0x${string}`,
-  TheFurnace:       '0x0000000000000000000000000000000000000004' as `0x${string}`,
-  EmissionsEngine:  '0x0000000000000000000000000000000000000005' as `0x${string}`,
-  FeeDistributor:   '0x0000000000000000000000000000000000000006' as `0x${string}`,
-  BuybackEngine:    '0x0000000000000000000000000000000000000007' as `0x${string}`,
-  AeonFactory:      '0x0000000000000000000000000000000000000008' as `0x${string}`,
-  AeonOracle:       '0x0000000000000000000000000000000000000009' as `0x${string}`,
-  AeonGaugeFactory: '0x000000000000000000000000000000000000000a' as `0x${string}`,
+  AeonToken:        '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`,
+  AeonVotingEscrow: '0xdeC58B16B24536bc5009Ad4AfDd0C48fF69F919A' as `0x${string}`,
+  AeonVoter:        '0x05b04A4344520Bb08201Bd9460ec9d37aD5f7918' as `0x${string}`,
+  TheFurnace:       '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`,
+  EmissionsEngine:  '0x4d188106175De919a971B0cB6F8A0e3E885a3410' as `0x${string}`,
+  FeeDistributor:   '0x8e33182d3271e2902Ed36aCA77A79e28c8F22d4e' as `0x${string}`,
+  BuybackEngine:    '0x0337333fdCf79D08f4ac10321796A91f300b5a80' as `0x${string}`,
+  AeonFactory:      '0xe159282352fbD7aF64C22d581cf6338C382b7c5A' as `0x${string}`,
+  AeonOracle:       '0x0b18B0f483f1caAaBB7505bCD8D1C3C43197Add9' as `0x${string}`,
+  AeonGaugeFactory: '0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6' as `0x${string}`,
 } as const
 
 export const TOKENS = {
-  AEON:  { address: '0x0000000000000000000000000000000000000001' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
+  AEON:  { address: '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
   AVAX:  { address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `0x${string}`, symbol: 'AVAX',  decimals: 18, name: 'Avalanche (Native)' },
   WAVAX: { address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7' as `0x${string}`, symbol: 'WAVAX',  decimals: 18, name: 'Wrapped AVAX' },
   USDC:  { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6' as `0x${string}`, symbol: 'USDC',   decimals: 6,  name: 'USD Coin' },
