@@ -1,19 +1,66 @@
 'use client'
-import { useState } from 'react'
-import { Vote, Plus, X, ChevronRight, Info } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Vote, Plus, X } from 'lucide-react'
 import { clsx } from 'clsx'
-import { POOLS } from '@/config/contracts'
+import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useConnectModal } from '@rainbow-me/rainbowkit'
+import { formatUnits } from 'viem'
+import { POOLS, CONTRACTS } from '@/config/contracts'
+import { VOTING_ESCROW_ABI, VOTER_ABI } from '@/config/abis'
 
-interface VoteAllocation {
-  pool: string
-  weight: number
-}
+interface VoteAllocation { pool: string; poolAddress: `0x${string}`; weight: number }
 
 export default function VotePage() {
-  const [selectedNFT,   setSelectedNFT]   = useState<number | null>(null)
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  const { address, isConnected: _isConnected } = useAccount()
+  const isConnected = mounted && _isConnected
+  const { openConnectModal } = useConnectModal()
+
+  const [tokenIdInput,  setTokenIdInput]  = useState('')
   const [allocations,   setAllocations]   = useState<VoteAllocation[]>([])
   const [search,        setSearch]        = useState('')
   const [filterType,    setFilterType]    = useState<'all' | 'vAMM' | 'CL' | 'DLMM'>('all')
+
+  const tokenId = tokenIdInput ? BigInt(tokenIdInput) : undefined
+
+  // Read veNFT count and voting power
+  const { data: veNFTCount } = useReadContract({
+    address: CONTRACTS.AeonVotingEscrow,
+    abi: VOTING_ESCROW_ABI,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+    query: { enabled: !!address },
+  })
+
+  const { data: nftOwner } = useReadContract({
+    address: CONTRACTS.AeonVotingEscrow,
+    abi: VOTING_ESCROW_ABI,
+    functionName: 'ownerOf',
+    args: tokenId ? [tokenId] : undefined,
+    query: { enabled: !!tokenId },
+  })
+
+  const { data: votingPower } = useReadContract({
+    address: CONTRACTS.AeonVotingEscrow,
+    abi: VOTING_ESCROW_ABI,
+    functionName: 'balanceOfNFT',
+    args: tokenId ? [tokenId] : undefined,
+    query: { enabled: !!tokenId },
+  })
+
+  const { data: hasVoted } = useReadContract({
+    address: CONTRACTS.AeonVotingEscrow,
+    abi: VOTING_ESCROW_ABI,
+    functionName: 'voted',
+    args: tokenId ? [tokenId] : undefined,
+    query: { enabled: !!tokenId },
+  })
+
+  const { writeContract, data: txHash, isPending } = useWriteContract()
+  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash })
+  const isBusy = isPending || isConfirming
 
   const totalWeight = allocations.reduce((s, a) => s + a.weight, 0)
   const remaining   = 100 - totalWeight
@@ -23,66 +70,109 @@ export default function VotePage() {
     p.name.toLowerCase().includes(search.toLowerCase())
   )
 
-  const addPool = (poolName: string) => {
+  const isOwner = nftOwner && address && nftOwner.toLowerCase() === address.toLowerCase()
+
+  function addPool(pool: typeof POOLS[number]) {
     if (allocations.length >= 6) return
-    if (allocations.find(a => a.pool === poolName)) return
+    if (allocations.find(a => a.poolAddress === pool.address)) return
     const share = Math.floor(remaining / (6 - allocations.length + 1))
-    setAllocations(prev => [...prev, { pool: poolName, weight: share }])
+    setAllocations(prev => [...prev, { pool: pool.name + ' ' + pool.type, poolAddress: pool.address, weight: share }])
   }
 
-  const removePool = (poolName: string) => {
-    setAllocations(prev => prev.filter(a => a.pool !== poolName))
+  function removePool(poolAddress: `0x${string}`) {
+    setAllocations(prev => prev.filter(a => a.poolAddress !== poolAddress))
   }
 
-  const setWeight = (poolName: string, weight: number) => {
-    setAllocations(prev => prev.map(a =>
-      a.pool === poolName ? { ...a, weight: Math.max(0, Math.min(100, weight)) } : a
-    ))
+  function setWeight(poolAddress: `0x${string}`, weight: number) {
+    setAllocations(prev => prev.map(a => a.poolAddress === poolAddress ? { ...a, weight: Math.max(0, Math.min(100, weight)) } : a))
   }
 
-  const distribute = () => {
+  function distribute() {
     if (allocations.length === 0) return
     const share = Math.floor(100 / allocations.length)
     const rem   = 100 - share * allocations.length
-    setAllocations(prev => prev.map((a, i) => ({
-      ...a,
-      weight: i === 0 ? share + rem : share
-    })))
+    setAllocations(prev => prev.map((a, i) => ({ ...a, weight: i === 0 ? share + rem : share })))
+  }
+
+  function handleVote() {
+    if (!isConnected) { openConnectModal?.(); return }
+    if (!tokenId || !isOwner || totalWeight !== 100 || allocations.length === 0) return
+    const poolAddresses = allocations.map(a => a.poolAddress)
+    const weights       = allocations.map(a => BigInt(Math.round(a.weight * 100)))
+    writeContract({ address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'vote', args: [tokenId, poolAddresses, weights] })
+  }
+
+  function handleReset() {
+    if (!tokenId) return
+    writeContract({ address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'reset', args: [tokenId] })
   }
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-12">
       <div className="mb-8">
         <h1 className="font-display font-bold text-3xl text-text-primary mb-2">Vote</h1>
-        <p className="text-text-secondary">
-          Direct emissions by voting with your veNFT. Earn fees from pools you vote for.
-        </p>
+        <p className="text-text-secondary">Direct emissions by voting with your veNFT. Earn fees from pools you vote for.</p>
       </div>
 
       <div className="grid lg:grid-cols-3 gap-6">
-        {/* Left: veNFT selector + vote builder */}
         <div className="lg:col-span-1 space-y-4">
           {/* veNFT selector */}
           <div className="card p-4">
-            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">
-              Your veNFTs
-            </div>
-            <div className="text-center py-6 text-text-muted text-sm">
-              Connect wallet to see your veNFTs
-            </div>
+            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Your veNFT</div>
+            {!isConnected ? (
+              <div className="text-center py-4 text-text-muted text-sm">Connect wallet to vote</div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-text-muted">veNFTs owned</span>
+                  <span className="font-mono text-violet-400 font-bold">{veNFTCount?.toString() ?? '—'}</span>
+                </div>
+                <div>
+                  <label className="text-xs text-text-muted mb-1 block">Enter veNFT Token ID</label>
+                  <input
+                    type="number"
+                    value={tokenIdInput}
+                    onChange={e => setTokenIdInput(e.target.value)}
+                    placeholder="e.g. 1"
+                    className="input-base w-full text-sm py-2"
+                  />
+                </div>
+                {tokenId && (
+                  <div className="space-y-1.5 p-3 bg-bg-raised rounded-xl">
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-muted">Owner</span>
+                      <span className={clsx('font-mono', isOwner ? 'text-emerald-400' : 'text-red-400')}>
+                        {nftOwner ? (isOwner ? 'You ✓' : 'Not yours') : '—'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-muted">Voting Power</span>
+                      <span className="font-mono text-aeon-400">
+                        {votingPower !== undefined ? parseFloat(formatUnits(votingPower, 18)).toFixed(4) : '—'} veAEON
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-muted">Has Voted</span>
+                      <span className={clsx('font-mono', hasVoted ? 'text-yellow-400' : 'text-emerald-400')}>
+                        {hasVoted === undefined ? '—' : hasVoted ? 'Yes (reset first)' : 'No'}
+                      </span>
+                    </div>
+                    {hasVoted && (
+                      <button onClick={handleReset} disabled={isBusy} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 mt-1">
+                        Reset Vote
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Vote builder */}
           <div className="card p-4">
             <div className="flex items-center justify-between mb-4">
-              <div className="text-xs font-mono text-text-muted uppercase tracking-wider">
-                Vote Allocation
-              </div>
-              <button
-                onClick={distribute}
-                className="text-2xs font-mono text-aeon-400 hover:text-aeon-300 transition-colors"
-                disabled={allocations.length === 0}
-              >
+              <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Vote Allocation</div>
+              <button onClick={distribute} className="text-2xs font-mono text-aeon-400 hover:text-aeon-300 transition-colors" disabled={allocations.length === 0}>
                 Distribute evenly
               </button>
             </div>
@@ -90,38 +180,20 @@ export default function VotePage() {
             {allocations.length === 0 ? (
               <div className="text-center py-6">
                 <Vote size={24} className="text-text-muted mx-auto mb-2" />
-                <p className="text-sm text-text-muted">Select pools from the list to allocate votes</p>
+                <p className="text-sm text-text-muted">Select pools from the list</p>
               </div>
             ) : (
               <div className="space-y-3">
                 {allocations.map(alloc => (
-                  <div key={alloc.pool} className="space-y-1.5">
+                  <div key={alloc.poolAddress} className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-text-primary">{alloc.pool}</span>
-                      <button onClick={() => removePool(alloc.pool)} className="text-text-muted hover:text-red-400 transition-colors">
-                        <X size={14} />
-                      </button>
+                      <button onClick={() => removePool(alloc.poolAddress)} className="text-text-muted hover:text-red-400 transition-colors"><X size={14} /></button>
                     </div>
                     <div className="flex items-center gap-2">
-                      <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        value={alloc.weight}
-                        onChange={e => setWeight(alloc.pool, parseInt(e.target.value))}
-                        className="flex-1 accent-aeon-400"
-                      />
+                      <input type="range" min={0} max={100} value={alloc.weight} onChange={e => setWeight(alloc.poolAddress, parseInt(e.target.value))} className="flex-1 accent-aeon-400" />
                       <div className="flex items-center gap-1 w-16">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={alloc.weight}
-                          onChange={e => setWeight(alloc.pool, parseInt(e.target.value) || 0)}
-                          className="w-12 bg-bg-base border border-bg-border rounded-lg px-2 py-1
-                                     text-xs font-mono text-center text-text-primary focus:outline-none
-                                     focus:border-aeon-400"
-                        />
+                        <input type="number" min={0} max={100} value={alloc.weight} onChange={e => setWeight(alloc.poolAddress, parseInt(e.target.value) || 0)} className="w-12 bg-bg-base border border-bg-border rounded-lg px-2 py-1 text-xs font-mono text-center text-text-primary focus:outline-none focus:border-aeon-400" />
                         <span className="text-xs text-text-muted">%</span>
                       </div>
                     </div>
@@ -130,174 +202,84 @@ export default function VotePage() {
               </div>
             )}
 
-            {/* Total bar */}
             <div className="mt-4 pt-4 border-t border-bg-border">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-text-muted">Total weight</span>
-                <span className={clsx(
-                  'text-sm font-mono font-bold',
-                  totalWeight === 100 ? 'text-emerald-400' :
-                  totalWeight > 100  ? 'text-red-400'     : 'text-text-primary'
-                )}>
+                <span className={clsx('text-sm font-mono font-bold', totalWeight === 100 ? 'text-emerald-400' : totalWeight > 100 ? 'text-red-400' : 'text-text-primary')}>
                   {totalWeight}%
                 </span>
               </div>
               <div className="h-1.5 bg-bg-base rounded-full overflow-hidden">
-                <div
-                  className={clsx(
-                    'h-full rounded-full transition-all',
-                    totalWeight === 100 ? 'bg-emerald-400' :
-                    totalWeight > 100  ? 'bg-red-400'     : 'bg-aeon-400'
-                  )}
-                  style={{ width: `${Math.min(totalWeight, 100)}%` }}
-                />
+                <div className={clsx('h-full rounded-full transition-all', totalWeight === 100 ? 'bg-emerald-400' : totalWeight > 100 ? 'bg-red-400' : 'bg-aeon-400')} style={{ width: `${Math.min(totalWeight, 100)}%` }} />
               </div>
-              {totalWeight !== 100 && allocations.length > 0 && (
-                <p className="text-2xs text-text-muted mt-1">
-                  {totalWeight > 100
-                    ? `${totalWeight - 100}% over limit`
-                    : `${remaining}% unallocated`}
-                </p>
-              )}
             </div>
 
             <button
-              disabled={totalWeight !== 100 || allocations.length === 0 || !selectedNFT}
+              onClick={handleVote}
+              disabled={isBusy || (isConnected && (totalWeight !== 100 || allocations.length === 0 || !tokenId || !isOwner || !!hasVoted))}
               className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
             >
               <Vote size={16} />
-              Cast Vote
+              {!isConnected ? 'Connect Wallet' : isBusy ? 'Voting...' : 'Cast Vote'}
             </button>
-            {!selectedNFT && (
-              <p className="text-2xs text-text-muted text-center mt-2">Select a veNFT above to vote</p>
-            )}
+            {isConnected && !tokenId && <p className="text-2xs text-text-muted text-center mt-2">Enter your veNFT ID above to vote</p>}
+            {isConnected && tokenId && hasVoted && <p className="text-2xs text-yellow-400 text-center mt-2">Reset your vote first before re-voting</p>}
           </div>
 
           {/* Epoch info */}
           <div className="card p-4">
-            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">
-              Epoch Info
-            </div>
-            <div className="space-y-2">
-              {[
-                { label: 'Current Epoch', value: '—' },
-                { label: 'Epoch Ends',    value: '— days' },
-                { label: 'Total Votes',   value: '— veAEON' },
-                { label: 'Next Emissions',value: '— AEON' },
-              ].map(item => (
-                <div key={item.label} className="flex justify-between text-sm">
-                  <span className="text-text-muted">{item.label}</span>
-                  <span className="font-mono text-text-primary">{item.value}</span>
-                </div>
-              ))}
-            </div>
+            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Epoch Info</div>
+            <EpochInfo />
           </div>
         </div>
 
-        {/* Right: Pool list */}
+        {/* Pool list */}
         <div className="lg:col-span-2">
-          {/* Filters */}
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
-            <input
-              type="text"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search pools..."
-              className="input-base flex-1 text-sm py-2"
-            />
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search pools..." className="input-base flex-1 text-sm py-2" />
             <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl">
               {(['all', 'vAMM', 'CL', 'DLMM'] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => setFilterType(t)}
-                  className={clsx(
-                    'px-3 py-1.5 rounded-lg text-sm font-medium transition-all capitalize',
-                    filterType === t
-                      ? 'bg-bg-base text-text-primary'
-                      : 'text-text-muted hover:text-text-secondary'
-                  )}
-                >
+                <button key={t} onClick={() => setFilterType(t)} className={clsx('px-3 py-1.5 rounded-lg text-sm font-medium transition-all capitalize', filterType === t ? 'bg-bg-base text-text-primary' : 'text-text-muted hover:text-text-secondary')}>
                   {t}
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Pool table */}
           <div className="card overflow-hidden">
             <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-bg-border">
               {['Pool', 'Type', 'TVL', 'Volume 24h', 'APR', 'vAPR', ''].map((h, i) => (
-                <div key={h} className={clsx(
-                  'text-2xs font-mono text-text-muted uppercase tracking-wider',
-                  i === 0 ? 'col-span-3' :
-                  i === 1 ? 'col-span-1' :
-                  i === 6 ? 'col-span-1 text-right' : 'col-span-2'
-                )}>
-                  {h}
-                </div>
+                <div key={h + i} className={clsx('text-2xs font-mono text-text-muted uppercase tracking-wider', i === 0 ? 'col-span-3' : i === 1 ? 'col-span-1' : i === 6 ? 'col-span-1 text-right' : 'col-span-2')}>{h}</div>
               ))}
             </div>
 
             <div className="divide-y divide-bg-border">
               {filteredPools.slice(0, 30).map(pool => {
-                const isSelected = allocations.some(a => a.pool === pool.name + ' ' + pool.type)
-                const poolKey = pool.name + ' ' + pool.type
-
+                const isSelected = allocations.some(a => a.poolAddress === pool.address)
                 return (
-                  <div
-                    key={pool.address}
-                    className={clsx(
-                      'grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-bg-raised transition-colors',
-                      isSelected && 'bg-aeon-400/5'
-                    )}
-                  >
-                    {/* Pool name */}
+                  <div key={pool.address} className={clsx('grid grid-cols-12 gap-2 px-4 py-3 items-center hover:bg-bg-raised transition-colors', isSelected && 'bg-aeon-400/5')}>
                     <div className="col-span-3 flex items-center gap-2">
                       <div className="flex -space-x-1">
-                        <div className="w-6 h-6 rounded-full bg-bg-raised border border-bg-border
-                                        flex items-center justify-center text-2xs font-bold z-10">
-                          {pool.token0[0]}
-                        </div>
-                        <div className="w-6 h-6 rounded-full bg-bg-raised border border-bg-border
-                                        flex items-center justify-center text-2xs font-bold">
-                          {pool.token1[0]}
-                        </div>
+                        <div className="w-6 h-6 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-2xs font-bold z-10">{pool.token0[0]}</div>
+                        <div className="w-6 h-6 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-2xs font-bold">{pool.token1[0]}</div>
                       </div>
                       <div>
                         <div className="text-sm font-medium text-text-primary leading-tight">{pool.name}</div>
                         <div className="text-2xs font-mono text-text-muted">{pool.fee}</div>
                       </div>
                     </div>
-
-                    {/* Type */}
                     <div className="col-span-1">
-                      <span className={clsx(
-                        'text-2xs font-mono font-bold',
-                        pool.type === 'vAMM' ? 'text-blue-400' :
-                        pool.type === 'CL'   ? 'text-violet-400' : 'text-emerald-400'
-                      )}>
-                        {pool.type}
-                      </span>
+                      <span className={clsx('text-2xs font-mono font-bold', pool.type === 'vAMM' ? 'text-blue-400' : pool.type === 'CL' ? 'text-violet-400' : 'text-emerald-400')}>{pool.type}</span>
                     </div>
-
-                    {/* Stats */}
                     <div className="col-span-2 text-sm font-mono text-text-secondary">$—</div>
                     <div className="col-span-2 text-sm font-mono text-text-secondary">$—</div>
-                    <div className="col-span-2 text-sm font-mono text-emerald-400 apr-value">—%</div>
+                    <div className="col-span-2 text-sm font-mono text-emerald-400">—%</div>
                     <div className="col-span-1 text-sm font-mono text-violet-400">—%</div>
-
-                    {/* Add button */}
                     <div className="col-span-1 flex justify-end">
                       <button
-                        onClick={() => isSelected ? removePool(poolKey) : addPool(poolKey)}
-                        className={clsx(
-                          'w-7 h-7 rounded-lg flex items-center justify-center transition-all',
-                          isSelected
-                            ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20'
-                            : 'bg-aeon-400/10 text-aeon-400 hover:bg-aeon-400/20',
-                          allocations.length >= 6 && !isSelected && 'opacity-30 cursor-not-allowed'
-                        )}
+                        onClick={() => isSelected ? removePool(pool.address) : addPool(pool)}
                         disabled={allocations.length >= 6 && !isSelected}
+                        className={clsx('w-7 h-7 rounded-lg flex items-center justify-center transition-all', isSelected ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-aeon-400/10 text-aeon-400 hover:bg-aeon-400/20', allocations.length >= 6 && !isSelected && 'opacity-30 cursor-not-allowed')}
                       >
                         {isSelected ? <X size={12} /> : <Plus size={12} />}
                       </button>
@@ -307,12 +289,41 @@ export default function VotePage() {
               })}
             </div>
           </div>
-
-          <p className="text-xs text-text-muted mt-3 text-center font-mono">
-            {filteredPools.length} pools · Max 6 pools per vote
-          </p>
+          <p className="text-xs text-text-muted mt-3 text-center font-mono">{filteredPools.length} pools · Max 6 pools per vote</p>
         </div>
       </div>
+    </div>
+  )
+}
+
+function EpochInfo() {
+  const EPOCH_LENGTH = 7 * 24 * 60 * 60 * 1000
+  const now        = Date.now()
+  const epochNum   = Math.floor(now / EPOCH_LENGTH)
+  const epochStart = epochNum * EPOCH_LENGTH
+  const remaining  = epochStart + EPOCH_LENGTH - now
+  const days       = Math.floor(remaining / (24 * 60 * 60 * 1000))
+  const hours      = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+
+  const { data: totalWeight } = useReadContract({
+    address: CONTRACTS.AeonVoter,
+    abi: VOTER_ABI,
+    functionName: 'totalWeight',
+  })
+
+  return (
+    <div className="space-y-2">
+      {[
+        { label: 'Current Epoch', value: `#${epochNum}` },
+        { label: 'Epoch Ends',    value: `${days}d ${hours}h` },
+        { label: 'Total Votes',   value: totalWeight !== undefined ? `${parseFloat(formatUnits(totalWeight, 18)).toFixed(2)} veAEON` : '—' },
+        { label: 'Next Emissions',value: '— AEON' },
+      ].map(item => (
+        <div key={item.label} className="flex justify-between text-sm">
+          <span className="text-text-muted">{item.label}</span>
+          <span className="font-mono text-text-primary">{item.value}</span>
+        </div>
+      ))}
     </div>
   )
 }
