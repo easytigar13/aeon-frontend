@@ -79,7 +79,7 @@ export function usePrices(): PriceMap {
   const aeon  = avax ? derivePrice(get(1) as Reserves | undefined, get(2) as string | undefined, TOKENS.WAVAX.address, avax, 18, 18) : null
   const wbtce = derivePrice(get(5) as Reserves | undefined, get(6) as string | undefined, TOKENS.USDC.address, 1, 6, 8)
   const wethe = derivePrice(get(7) as Reserves | undefined, get(8) as string | undefined, TOKENS.USDC.address, 1, 6, 18)
-  const spx   = derivePrice(get(9) as Reserves | undefined, get(10) as string | undefined, TOKENS.USDC.address, 1, 6, 8)
+  const spx   = derivePrice(get(9) as Reserves | undefined, get(10) as string | undefined, TOKENS.USDC.address, 1, 6, 18)
   const gunz  = derivePrice(get(11) as Reserves | undefined, get(12) as string | undefined, TOKENS.USDC.address, 1, 6, 18)
   const arena = derivePrice(get(13) as Reserves | undefined, get(14) as string | undefined, TOKENS.USDC.address, 1, 6, 18)
   const coq   = derivePrice(get(15) as Reserves | undefined, get(16) as string | undefined, TOKENS.USDC.address, 1, 6, 18)

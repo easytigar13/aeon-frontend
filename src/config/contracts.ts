@@ -25,7 +25,7 @@ export const TOKENS = {
   WBTCE: { address: '0x50b7545627a5162F82A992c33b87aDc75187B218' as `0x${string}`, symbol: 'WBTC.e', decimals: 8,  name: 'Wrapped Bitcoin' },
   WBTCB: { address: '0x152b9d0fdc40c096757f570a51e494bd4b943e50' as `0x${string}`, symbol: 'WBTC.b', decimals: 8,  name: 'Bitcoin (Native)' },
   WETHE: { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB' as `0x${string}`, symbol: 'WETH.e', decimals: 18, name: 'Wrapped Ether' },
-  SPX:   { address: '0x6f911b6b39bcc665a463129c94b5380a4387b7eb' as `0x${string}`, symbol: 'SPX6900', decimals: 8,  name: 'SPX6900' },
+  SPX:   { address: '0x6F911b6B39Bcc665A463129c94B5380A4387b7eb' as `0x${string}`, symbol: 'SPX6900', decimals: 18, name: 'SPX6900' },
   GUNZ:  { address: '0x26deBD39D5eD069770406FCa10A0E4f8d2c743eB' as `0x${string}`, symbol: 'GUNZ',   decimals: 18, name: 'GUNZ' },
   ARENA: { address: '0xB8d7710f7d8349A506b75dD184F05777c82dAd0C' as `0x${string}`, symbol: 'ARENA',  decimals: 18, name: 'Arena' },
   COQ:   { address: '0x420FcA0121DC28039145009570975747295f2329' as `0x${string}`, symbol: 'COQ',    decimals: 18, name: 'Coq Inu' },
