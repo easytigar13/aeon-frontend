@@ -8,7 +8,7 @@ import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { CONTRACTS, TOKENS } from '@/config/contracts'
 import { VOTING_ESCROW_ABI, FURNACE_ABI, ERC20_ABI } from '@/config/abis'
 
-type Tab = 'lock' | 'furnace'
+type Tab = 'lock' | 'furnace' | 'manage'
 
 const LOCK_DURATIONS = [
   { label: '1 Week',   days: 7,    multiplier: 0.003 },
@@ -27,10 +27,14 @@ export default function LockPage() {
   const isConnected = mounted && _isConnected
   const { openConnectModal } = useConnectModal()
 
-  const [tab,        setTab]        = useState<Tab>('lock')
-  const [lockAmount, setLockAmount] = useState('')
-  const [lockDays,   setLockDays]   = useState(1461)
-  const [burnAmount, setBurnAmount] = useState('')
+  const [tab,           setTab]          = useState<Tab>('lock')
+  const [lockAmount,    setLockAmount]    = useState('')
+  const [lockDays,      setLockDays]      = useState(1461)
+  const [burnAmount,    setBurnAmount]    = useState('')
+  const [mergeFrom,     setMergeFrom]     = useState('')
+  const [mergeTo,       setMergeTo]       = useState('')
+  const [increaseId,    setIncreaseId]    = useState('')
+  const [increaseAmt,   setIncreaseAmt]   = useState('')
 
   // AEON balance
   const { data: aeonBalance } = useReadContract({
@@ -153,6 +157,26 @@ export default function LockPage() {
     writeContract({ address: CONTRACTS.TheFurnace, abi: FURNACE_ABI, functionName: 'claimRewards' })
   }
 
+  function handleMerge() {
+    if (!isConnected) { openConnectModal?.(); return }
+    const from = mergeFrom ? BigInt(mergeFrom) : undefined
+    const to   = mergeTo   ? BigInt(mergeTo)   : undefined
+    if (!from || !to || from === to) return
+    writeContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'merge', args: [from, to] })
+  }
+
+  function handleIncreaseAmount() {
+    if (!isConnected) { openConnectModal?.(); return }
+    const id  = increaseId  ? BigInt(increaseId) : undefined
+    const amt = safeParseUnits18(increaseAmt)
+    if (!id || amt === 0n) return
+    if (needsVeApproval || (veAllowance !== undefined && veAllowance < amt)) {
+      writeContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonVotingEscrow, maxUint256] })
+      return
+    }
+    writeContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'increaseAmount', args: [id, amt] })
+  }
+
   function lockButtonLabel() {
     if (!isConnected) return 'Connect Wallet'
     if (isBusy) return isPending ? 'Confirm in wallet...' : 'Locking...'
@@ -180,6 +204,9 @@ export default function LockPage() {
         </button>
         <button onClick={() => setTab('furnace')} className={clsx('flex-1 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2', tab === 'furnace' ? 'bg-bg-base text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary')}>
           <Flame size={14} className={tab === 'furnace' ? 'text-aeon-400' : ''} /> The Furnace
+        </button>
+        <button onClick={() => setTab('manage')} className={clsx('flex-1 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2', tab === 'manage' ? 'bg-bg-base text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary')}>
+          Manage
         </button>
       </div>
 
@@ -355,6 +382,64 @@ export default function LockPage() {
             <Flame size={16} />
             {burnButtonLabel()}
           </button>
+        </div>
+      )}
+
+      {tab === 'manage' && (
+        <div className="space-y-4">
+          {/* Increase Amount */}
+          <div className="card p-5">
+            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-4">Increase Lock Amount</div>
+            <p className="text-sm text-text-secondary mb-4">Add more AEON to an existing veNFT lock without changing the unlock date.</p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-text-muted mb-1 block">veNFT Token ID</label>
+                <input type="number" value={increaseId} onChange={e => setIncreaseId(e.target.value)} placeholder="e.g. 1" className="input-base w-full text-sm py-2" />
+              </div>
+              <div>
+                <label className="text-xs text-text-muted mb-1 block">Additional AEON amount</label>
+                <div className="flex items-center gap-2">
+                  <input type="number" value={increaseAmt} onChange={e => setIncreaseAmt(e.target.value)} placeholder="0.0" className="input-base flex-1 text-sm py-2" />
+                  <span className="text-sm font-mono text-text-muted">AEON</span>
+                </div>
+                <div className="text-2xs text-text-muted font-mono mt-1">Balance: {aeonFormatted}</div>
+              </div>
+            </div>
+            <button
+              onClick={handleIncreaseAmount}
+              disabled={isBusy || !increaseId || !increaseAmt || parseFloat(increaseAmt) <= 0}
+              className="btn-primary w-full mt-4"
+            >
+              {isBusy ? 'Confirming...' : veAllowance !== undefined && safeParseUnits18(increaseAmt) > veAllowance ? 'Approve AEON' : 'Increase Lock Amount'}
+            </button>
+          </div>
+
+          {/* Merge */}
+          <div className="card p-5">
+            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-4">Merge veNFTs</div>
+            <p className="text-sm text-text-secondary mb-4">Combine two veNFTs into one. The "From" NFT is burned and its locked AEON is added to the "To" NFT. Both must be owned by you and not currently voting.</p>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-text-muted mb-1 block">From (NFT to burn)</label>
+                <input type="number" value={mergeFrom} onChange={e => setMergeFrom(e.target.value)} placeholder="Token ID to merge from" className="input-base w-full text-sm py-2" />
+              </div>
+              <div>
+                <label className="text-xs text-text-muted mb-1 block">Into (NFT to keep)</label>
+                <input type="number" value={mergeTo} onChange={e => setMergeTo(e.target.value)} placeholder="Token ID to merge into" className="input-base w-full text-sm py-2" />
+              </div>
+            </div>
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-xl p-3 flex gap-2 mt-3">
+              <Info size={14} className="text-yellow-400 shrink-0 mt-0.5" />
+              <p className="text-xs text-yellow-400">The "From" NFT will be permanently burned. Make sure both NFTs have been reset (not voted this epoch) before merging.</p>
+            </div>
+            <button
+              onClick={handleMerge}
+              disabled={isBusy || !mergeFrom || !mergeTo || mergeFrom === mergeTo}
+              className="btn-primary w-full mt-4"
+            >
+              {isBusy ? 'Confirming...' : 'Merge veNFTs'}
+            </button>
+          </div>
         </div>
       )}
 

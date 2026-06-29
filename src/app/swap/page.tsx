@@ -8,6 +8,7 @@ import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { TOKENS, CONTRACTS } from '@/config/contracts'
 import { AEON_ROUTER_ABI, ERC20_ABI } from '@/config/abis'
 import { useRouting } from '@/hooks/useRouting'
+import { usePrices } from '@/hooks/usePrices'
 
 type TokenKey = keyof typeof TOKENS
 
@@ -68,6 +69,7 @@ export default function SwapPage() {
 
   const balanceIn  = useTokenBalance(tokenIn,  address)
   const balanceOut = useTokenBalance(tokenOut, address)
+  const prices     = usePrices()
 
   const isWrapUnwrap = (tokenIn === 'AVAX' && tokenOut === 'WAVAX') || (tokenIn === 'WAVAX' && tokenOut === 'AVAX')
 
@@ -208,6 +210,18 @@ export default function SwapPage() {
 
   const disabled = isConnected && (!hasAmount || overBal || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy)
 
+  function fmtUsd(n: number | null): string {
+    if (!n || n <= 0) return ''
+    if (n >= 1_000_000) return `≈ $${(n / 1_000_000).toFixed(2)}M`
+    if (n >= 1_000)    return `≈ $${(n / 1_000).toFixed(2)}K`
+    return `≈ $${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  }
+
+  const priceIn  = prices[tokenIn]  ?? null
+  const priceOut = prices[tokenOut] ?? null
+  const valueIn  = amountIn && parseFloat(amountIn) > 0 && priceIn  ? parseFloat(amountIn)          * priceIn  : null
+  const valueOut = amountOutFormatted && priceOut                    ? parseFloat(amountOutFormatted) * priceOut : null
+
   // Route label for display
   const routeLabel = isWrapUnwrap
     ? `${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
@@ -269,7 +283,7 @@ export default function SwapPage() {
             </div>
           </div>
           <div className="flex items-center justify-between mt-2">
-            <span className="text-xs text-text-muted font-mono">≈ $—</span>
+            <span className="text-xs text-text-muted font-mono">{valueIn ? fmtUsd(valueIn) : '≈ $—'}</span>
             <div className="flex gap-1">
               {(['25', '50', 'MAX'] as const).map(label => (
                 <button key={label} onClick={() => setPercent(label === 'MAX' ? 100 : parseInt(label))} disabled={!isConnected} className="text-2xs text-text-muted hover:text-aeon-400 px-1.5 py-0.5 rounded border border-bg-border hover:border-aeon-400/30 transition-all font-mono disabled:opacity-40">
@@ -315,7 +329,7 @@ export default function SwapPage() {
             </div>
           </div>
           <div className="flex items-center justify-between mt-2">
-            <span className="text-xs text-text-muted font-mono">≈ $—</span>
+            <span className="text-xs text-text-muted font-mono">{valueOut ? fmtUsd(valueOut) : '≈ $—'}</span>
             {route && route.steps.length > 1 && (
               <span className="text-2xs font-mono text-violet-400">Multi-hop</span>
             )}

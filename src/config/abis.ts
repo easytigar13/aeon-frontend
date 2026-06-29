@@ -94,6 +94,27 @@ export const ERC20_ABI = [
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
   },
+  {
+    name: 'name',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    name: 'symbol',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'string' }],
+  },
+  {
+    name: 'decimals',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint8' }],
+  },
 ] as const
 
 export const VOTING_ESCROW_ABI = [
@@ -189,6 +210,26 @@ export const VOTING_ESCROW_ABI = [
     stateMutability: 'view',
     inputs: [{ name: 'tokenId', type: 'uint256' }],
     outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'merge',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: '_from', type: 'uint256' },
+      { name: '_to',   type: 'uint256' },
+    ],
+    outputs: [],
+  },
+] as const
+
+export const VOTER_ABI_WHITELIST = [
+  {
+    name: 'whitelist',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: '_token', type: 'address' }],
+    outputs: [],
   },
 ] as const
 

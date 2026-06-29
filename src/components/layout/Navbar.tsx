@@ -1,4 +1,4 @@
-'use client'
+﻿'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ConnectButton } from '@rainbow-me/rainbowkit'
@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: '/vote',       label: 'Vote'      },
   { href: '/lock',       label: 'Lock'      },
   { href: '/dashboard',  label: 'Dashboard' },
+  { href: '/whitelist',  label: 'Whitelist' },
 ]
 
 export function Navbar() {

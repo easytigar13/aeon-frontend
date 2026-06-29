@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowRight, Flame, Lock, Vote, TrendingUp, Zap, Shield } from 'lucide-react'
+import { ArrowRight, Flame, Lock, Vote, TrendingUp, Zap, Shield, BadgeCheck } from 'lucide-react'
 
 export default function HomePage() {
   return (
@@ -196,6 +196,39 @@ export default function HomePage() {
               </div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Pre-Genesis Protocol Liquidity */}
+      <section className="max-w-7xl mx-auto px-4 py-8">
+        <div className="card p-8 border-aeon-400/20 bg-gradient-to-r from-aeon-400/5 to-transparent">
+          <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
+            <div className="w-14 h-14 rounded-2xl bg-aeon-400/15 flex items-center justify-center shrink-0">
+              <TrendingUp size={24} className="text-aeon-400" />
+            </div>
+            <div className="flex-1">
+              <h3 className="font-display font-bold text-xl text-text-primary mb-2">
+                Protocol-Owned Liquidity — Forever
+              </h3>
+              <p className="text-text-secondary text-sm leading-relaxed max-w-2xl">
+                10% of the total AEON supply is held by the protocol at genesis. This allocation is never sold — it is permanently deployed as liquidity in the AEON/USDC pool and continuously compounds. Every epoch, fees earned are re-added to the pool. This ensures baseline liquidity exists at all times and grows with the protocol, with no team extraction ever.
+              </p>
+              <div className="flex gap-4 mt-4 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-aeon-400" />
+                  <span className="text-xs font-mono text-text-muted">10% of supply, protocol-controlled</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="text-xs font-mono text-text-muted">100% compounding into AEON/USDC</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-violet-400" />
+                  <span className="text-xs font-mono text-text-muted">Never withdrawable, never sold</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 

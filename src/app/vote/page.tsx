@@ -72,7 +72,7 @@ export default function VotePage() {
     query: { enabled: !!tokenId },
   })
 
-  const { data: hasVoted } = useReadContract({
+  const { data: hasVoted, refetch: refetchHasVoted } = useReadContract({
     address: CONTRACTS.AeonVotingEscrow,
     abi: VOTING_ESCROW_ABI,
     functionName: 'voted',
@@ -81,7 +81,11 @@ export default function VotePage() {
   })
 
   const { writeContract, data: txHash, isPending } = useWriteContract()
-  const { isLoading: isConfirming } = useWaitForTransactionReceipt({ hash: txHash })
+  const { isLoading: isConfirming, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash })
+
+  useEffect(() => {
+    if (txSuccess) { refetchHasVoted() }
+  }, [txSuccess])
   const isBusy = isPending || isConfirming
 
   const prices    = usePrices()
