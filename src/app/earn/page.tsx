@@ -257,6 +257,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr }: { pool: typeof UNIQUE_POOLS[numb
           ) : !gauge ? (
             <div className="p-4 text-center text-xs text-yellow-400">Gauge not deployed for this pool yet</div>
           ) : (
+            <>
             {/* Pool price / range status */}
             <div className={clsx('mb-4 p-3 rounded-xl flex items-center justify-between text-xs font-mono',
               poolPrice.hasLiquidity ? 'bg-emerald-500/5 border border-emerald-500/20' : 'bg-red-500/5 border border-red-500/20'
@@ -348,6 +349,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr }: { pool: typeof UNIQUE_POOLS[numb
                 </div>
               </div>
             </div>
+            </>
           )}
 
           <div className="mt-4 pt-3 border-t border-bg-border flex items-center justify-between">
