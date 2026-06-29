@@ -9,6 +9,7 @@ import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI } from '@/config/a
 import { clsx } from 'clsx'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useTotalTVL } from '@/hooks/usePoolStats'
+import { useVolume24h } from '@/hooks/useVolume24h'
 
 function fmtUsd(n: number | null, compact = false): string {
   if (n === null) return '$—'
@@ -39,6 +40,9 @@ export default function DashboardPage() {
   const prices    = usePrices()
   const poolStats = usePoolStats(prices)
   const totalTVL  = useTotalTVL(poolStats)
+  const volResult = useVolume24h(prices)
+  const volume24h = volResult.total
+  const volByAddr = volResult.byPool
   const statByAddr = Object.fromEntries(poolStats.map(s => [s.address, s]))
 
   const { data: aeonSupply }    = useReadContract({ address: CONTRACTS.AeonToken,        abi: ERC20_ABI,          functionName: 'totalSupply' })
@@ -77,7 +81,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {[
           { label: 'Total Value Locked', value: fmtUsd(totalTVL || null, true),                  icon: <TrendingUp size={16} className="text-aeon-400" />,    delta: `${POOLS.length} pools` },
-          { label: 'Volume 24h',         value: '$—',                                           icon: <BarChart3  size={16} className="text-violet-400" />,  delta: 'on-chain indexing soon' },
+          { label: 'Volume 24h',         value: fmtUsd(volume24h, true),                        icon: <BarChart3  size={16} className="text-violet-400" />,  delta: 'from on-chain swap events' },
           { label: 'AEON Supply',        value: `${fmt18(aeonSupply)} AEON`,                   icon: <Vote       size={16} className="text-emerald-400" />, delta: 'genesis: 1,000' },
           { label: 'AEON Burned',        value: `${fmt18(totalBurned)} AEON`,                  icon: <Flame      size={16} className="text-red-400" />,     delta: `${burnedPct}% of supply` },
         ].map(kpi => (
@@ -240,7 +244,7 @@ export default function DashboardPage() {
                     <td className="px-4 py-3"><span className={clsx('text-2xs font-mono font-bold', pool.type === 'vAMM' ? 'text-blue-400' : pool.type === 'CL' ? 'text-violet-400' : 'text-emerald-400')}>{pool.type}</span></td>
                     <td className="px-4 py-3 text-xs font-mono text-text-muted">{pool.fee}</td>
                     <td className="px-4 py-3 text-sm font-mono text-text-secondary">{fmtUsd(stat?.tvlUsd ?? null)}</td>
-                    <td className="px-4 py-3 text-sm font-mono text-text-secondary">$—</td>
+                    <td className="px-4 py-3 text-sm font-mono text-text-secondary">{fmtUsd(volByAddr[pool.address.toLowerCase()] ?? null)}</td>
                     <td className="px-4 py-3 text-sm font-mono text-emerald-400">—%</td>
                     <td className="px-4 py-3 text-sm font-mono text-violet-400">—%</td>
                     <td className="px-4 py-3 text-xs font-mono text-text-muted">{stat ? `${stat.votesFormatted} veAEON` : '—'}</td>
