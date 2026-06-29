@@ -83,10 +83,19 @@ export default function VotePage() {
   const { writeContract, data: txHash, isPending } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash })
 
+  const { writeContract: writeReset, data: resetHash, isPending: resetPending } = useWriteContract()
+  const { isLoading: resetConfirming, isSuccess: resetSuccess } = useWaitForTransactionReceipt({ hash: resetHash })
+
   useEffect(() => {
     if (txSuccess) { refetchHasVoted() }
   }, [txSuccess])
-  const isBusy = isPending || isConfirming
+
+  useEffect(() => {
+    if (resetSuccess) { refetchHasVoted() }
+  }, [resetSuccess])
+
+  const isBusy      = isPending || isConfirming
+  const isResetting = resetPending || resetConfirming
 
   const prices    = usePrices()
   const poolStats = usePoolStats(prices)
@@ -146,7 +155,7 @@ export default function VotePage() {
 
   function handleReset() {
     if (!tokenId) return
-    writeContract({ address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'reset', args: [tokenId] })
+    writeReset({ address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'reset', args: [tokenId] })
   }
 
   return (
@@ -200,8 +209,8 @@ export default function VotePage() {
                       </span>
                     </div>
                     {hasVoted && (
-                      <button onClick={handleReset} disabled={isBusy} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 mt-1">
-                        Reset Vote
+                      <button onClick={handleReset} disabled={isResetting} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 mt-1 flex items-center justify-center gap-1.5">
+                        {isResetting ? 'Resetting…' : 'Reset Vote'}
                       </button>
                     )}
                   </div>

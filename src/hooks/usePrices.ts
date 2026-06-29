@@ -19,6 +19,8 @@ const POOL_WETHE_USDC  = '0x306B89922bccea64545e701795Ffbf20FB5a0f70' as `0x${st
 const POOL_GUNZ_USDC   = '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd' as `0x${string}`
 const POOL_ARENA_USDC  = '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77' as `0x${string}`
 const POOL_COQ_USDC    = '0x19aE273606588fb17D99572321eAD9b0B060DF00' as `0x${string}`
+const POOL_AEON_SPX    = '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e' as `0x${string}`
+const POOL_AEON_WBTCB  = '0x04de9ee7b6355ec643db415b2212734390fcb2f8' as `0x${string}`
 
 type Reserves = readonly [bigint, bigint, number]
 
@@ -47,7 +49,7 @@ export type PriceMap = Record<string, number | null>
 export function usePrices(): PriceMap {
   const pools = [
     POOL_AEON_WAVAX, POOL_WAVAX_USDC, POOL_WBTCE_USDC, POOL_WETHE_USDC,
-    POOL_GUNZ_USDC, POOL_ARENA_USDC, POOL_COQ_USDC,
+    POOL_GUNZ_USDC, POOL_ARENA_USDC, POOL_COQ_USDC, POOL_AEON_SPX, POOL_AEON_WBTCB,
   ]
 
   const contracts: any[] = [
@@ -63,7 +65,7 @@ export function usePrices(): PriceMap {
   const get = (i: number) => data?.[i]?.status === 'success' ? data[i].result : undefined
 
   // Index layout: 0=chainlink, 1,2=aeon/wavax, 3,4=wavax/usdc, 5,6=wbtce/usdc, 7,8=wethe/usdc
-  // 9,10=gunz/usdc, 11,12=arena/usdc, 13,14=coq/usdc
+  // 9,10=gunz/usdc, 11,12=arena/usdc, 13,14=coq/usdc, 15,16=aeon/spx, 17,18=aeon/wbtcb
   const chainlinkAvax = get(0) as bigint | undefined
   let avax = chainlinkAvax ? Number(chainlinkAvax) / 1e8 : null
 
@@ -81,9 +83,10 @@ export function usePrices(): PriceMap {
   const gunz  = derivePrice(get(9) as Reserves | undefined, get(10) as string | undefined, TOKENS.USDC.address, 1, 6, 18)
   const arena = derivePrice(get(11) as Reserves | undefined, get(12) as string | undefined, TOKENS.USDC.address, 1, 6, 18)
   const coq   = derivePrice(get(13) as Reserves | undefined, get(14) as string | undefined, TOKENS.USDC.address, 1, 6, 18)
+  const spx   = aeon ? derivePrice(get(15) as Reserves | undefined, get(16) as string | undefined, TOKENS.AEON.address, aeon, 18, 18) : null
+  // WBTCB: derive from AEON/WBTCB pool, fallback to same price as WBTCE
+  const wbtcbDerived = aeon ? derivePrice(get(17) as Reserves | undefined, get(18) as string | undefined, TOKENS.AEON.address, aeon, 18, 8) : null
+  const wbtcb = wbtcbDerived ?? wbtce
 
-  // WBTCB is the same underlying asset as WBTCE (both wrapped BTC on Avalanche)
-  const wbtcb = wbtce
-
-  return { AVAX: avax, WAVAX: avax, AEON: aeon, USDC: 1, WUSDT: 1, WBTCE: wbtce, WBTCB: wbtcb, WETHE: wethe, GUNZ: gunz, ARENA: arena, COQ: coq }
+  return { AVAX: avax, WAVAX: avax, AEON: aeon, USDC: 1, WUSDT: 1, WBTCE: wbtce, WBTCB: wbtcb, WETHE: wethe, GUNZ: gunz, ARENA: arena, COQ: coq, SPX: spx }
 }

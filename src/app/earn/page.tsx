@@ -216,6 +216,9 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
             </div>
             <input type="number" value={amt1} onChange={e => autoFill1(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
           </div>
+          {!prices[pool.token0] && !prices[pool.token1] && (
+            <div className="text-2xs text-yellow-400 font-mono px-1">No price feed yet — enter both amounts manually to set the initial ratio</div>
+          )}
           <button
             disabled={!amt0 || !amt1 || parseFloat(amt0 || '0') <= 0 || parseFloat(amt1 || '0') <= 0 || addBusy || remBusy}
             onClick={handleAdd}
