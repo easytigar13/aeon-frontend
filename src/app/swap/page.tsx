@@ -11,6 +11,26 @@ import { useRouting } from '@/hooks/useRouting'
 
 type TokenKey = keyof typeof TOKENS
 
+// Clamp slippage to a safe range; returns a valid number between 0.01 and 49
+function safeSlippage(raw: string): number {
+  const n = parseFloat(raw)
+  if (!isFinite(n) || n < 0.01) return 0.5   // bad input → safe default
+  if (n > 49) return 49                        // cap — above 49% is almost certainly a mistake
+  return n
+}
+
+// Safe parseUnits that handles excess decimals without throwing
+function safeParseUnits(val: string, decimals: number): bigint {
+  if (!val || parseFloat(val) <= 0) return 0n
+  try {
+    return parseUnits(val, decimals)
+  } catch {
+    // Truncate to allowed decimal places and retry
+    const [int, dec = ''] = val.split('.')
+    return parseUnits(`${int}.${dec.slice(0, decimals)}`, decimals)
+  }
+}
+
 const TOKEN_LIST = Object.entries(TOKENS).map(([key, val]) => ({ key: key as TokenKey, ...val }))
 
 function useTokenBalance(tokenKey: TokenKey, address?: `0x${string}`) {
@@ -70,9 +90,7 @@ export default function SwapPage() {
 
   const flip = useCallback(() => { setTokenIn(tokenOut); setTokenOut(tokenIn); setAmountIn('') }, [tokenIn, tokenOut])
 
-  const parsedAmountIn = amountIn && parseFloat(amountIn) > 0
-    ? parseUnits(amountIn, TOKENS[tokenIn].decimals)
-    : 0n
+  const parsedAmountIn = safeParseUnits(amountIn, TOKENS[tokenIn].decimals)
 
   // Multi-hop routing (skipped for wrap/unwrap)
   const route = useRouting(
@@ -97,7 +115,9 @@ export default function SwapPage() {
 
   const hasAmount      = parsedAmountIn > 0n
   const needsApproval  = !isNativeIn && hasAmount && allowance !== undefined && allowance < parsedAmountIn
-  const slippagePct    = parseFloat(slippage) / 100
+  const slippageSafe   = safeSlippage(slippage)          // always 0.01–49, never NaN
+  const slippagePct    = slippageSafe / 100
+  const highSlippage   = slippageSafe >= 5
   const amountOutMin   = amountOutWei > 0n
     ? (amountOutWei * BigInt(Math.floor((1 - slippagePct) * 10000))) / 10000n
     : 0n
@@ -160,7 +180,13 @@ export default function SwapPage() {
   }
 
   const isBusy  = isApproving || isApproveConfirming || isSwapping || isSwapConfirming
-  const errMsg  = approveError?.message.slice(0, 150) ?? swapError?.message.slice(0, 150) ?? ''
+
+  function sanitizeErr(msg?: string): string {
+    if (!msg) return ''
+    // Strip URLs and long hex strings that could be used for social engineering
+    return msg.replace(/https?:\/\/\S+/g, '[url]').replace(/0x[0-9a-fA-F]{20,}/g, '[addr]').slice(0, 120)
+  }
+  const errMsg  = sanitizeErr(approveError?.message ?? swapError?.message)
 
   const noRoute     = hasAmount && !route && !isWrapUnwrap
   const overBal     = hasAmount && balanceIn.raw > 0n && parsedAmountIn > balanceIn.raw
@@ -293,12 +319,19 @@ export default function SwapPage() {
           </div>
         )}
 
+        {/* High slippage warning */}
+        {highSlippage && (
+          <div className="mt-3 mx-1 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 text-center font-mono">
+            ⚠ Slippage {slippageSafe}% — high risk of sandwich attack
+          </div>
+        )}
+
         {/* Quote info */}
         {hasAmount && route && amountOutWei > 0n && (
           <div className="mt-3 mx-1 p-3 bg-bg-base rounded-xl space-y-1.5">
             {[
               { label: 'Rate',         value: spotRate > 0 ? `1 ${TOKENS[tokenIn].symbol} = ${spotRate.toFixed(6)} ${TOKENS[tokenOut].symbol}` : '—' },
-              { label: 'Price Impact', value: route.steps.length > 1 ? 'N/A (multi-hop)' : priceImpact < 0.01 ? '< 0.01%' : `${priceImpact.toFixed(2)}%`, warn: priceImpact > 2 },
+              { label: 'Price Impact', value: priceImpact < 0.01 ? '< 0.01%' : `${priceImpact.toFixed(2)}%`, warn: priceImpact > 2 },
               { label: 'Min Received', value: `${parseFloat(formatUnits(amountOutMin, TOKENS[tokenOut].decimals)).toFixed(6)} ${TOKENS[tokenOut].symbol}` },
               { label: 'Route',        value: routeLabel },
               { label: 'Via',          value: route.via },

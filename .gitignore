@@ -1,2 +1,21 @@
-node_modules/ 
-.next/ 
+node_modules/
+.next/
+
+# Environment variables — NEVER commit keys
+.env
+.env.*
+!.env.example
+
+# Python deploy/admin scripts that may contain private keys
+scripts/
+*.py
+deploy*.js
+deploy*.ts
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/settings.json

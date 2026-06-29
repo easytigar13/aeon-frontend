@@ -137,13 +137,16 @@ export function useRouting(
           const out = amtOut(mid, r2.rIn, r2.rOut, feeToBps(p2.fee))
           if (out > bestOut) {
             bestOut = out
+            // Approximate combined price impact: product of both hops
+            const impact1 = r1.rIn > 0n ? Math.max(0, (1 - Number(mid) * Number(r1.rIn) / (Number(amountIn) * Number(r1.rOut))) * 100) : 0
+            const impact2 = r2.rIn > 0n ? Math.max(0, (1 - Number(out) * Number(r2.rIn) / (Number(mid) * Number(r2.rOut))) * 100) : 0
             best = {
               steps: [
                 { poolAddress: p1.address, tokenIn: tkIn, tokenOut: hub,   feeBps: feeToBps(p1.fee) },
                 { poolAddress: p2.address, tokenIn: hub,  tokenOut: tkOut, feeBps: feeToBps(p2.fee) },
               ],
               amountOut: out,
-              priceImpact: 0,
+              priceImpact: impact1 + impact2,
               label: `${tkIn} → ${hub} → ${tkOut}`,
               via: `${p1.name} + ${p2.name}`,
             }

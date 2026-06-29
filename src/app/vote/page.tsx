@@ -42,7 +42,10 @@ export default function VotePage() {
   const [search,        setSearch]        = useState('')
   const [filterType,    setFilterType]    = useState<'all' | 'vAMM' | 'CL' | 'DLMM'>('all')
 
-  const tokenId = tokenIdInput ? BigInt(tokenIdInput) : undefined
+  // Safe conversion — BigInt throws on non-integer strings
+  const tokenId = (() => {
+    try { return tokenIdInput ? BigInt(Math.trunc(parseFloat(tokenIdInput))) : undefined } catch { return undefined }
+  })()
 
   // Read veNFT count and voting power
   const { data: veNFTCount } = useReadContract({

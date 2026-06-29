@@ -108,10 +108,18 @@ export default function LockPage() {
   const votingPower = lockAmount ? (parseFloat(lockAmount) * multiplier).toFixed(4) : '0'
   const preset = LOCK_DURATIONS.find(d => d.days === lockDays)
 
-  const parsedLockAmount = lockAmount ? parseUnits(lockAmount, 18) : 0n
+  function safeParseUnits18(val: string): bigint {
+    if (!val || parseFloat(val) <= 0) return 0n
+    try { return parseUnits(val, 18) } catch {
+      const [int, dec = ''] = val.split('.')
+      return parseUnits(`${int}.${dec.slice(0, 18)}`, 18)
+    }
+  }
+
+  const parsedLockAmount = safeParseUnits18(lockAmount)
   const needsVeApproval = !!address && parsedLockAmount > 0n && veAllowance !== undefined && veAllowance < parsedLockAmount
 
-  const parsedBurnAmount = burnAmount ? parseUnits(burnAmount, 18) : 0n
+  const parsedBurnAmount = safeParseUnits18(burnAmount)
   const needsFurnaceApproval = !!address && parsedBurnAmount > 0n && furnaceAllowance !== undefined && furnaceAllowance < parsedBurnAmount
 
   const isBusy = isPending || isConfirming
