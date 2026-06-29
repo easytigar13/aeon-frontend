@@ -195,7 +195,9 @@ export default function LiquidityPage() {
   function stepLabel() {
     if (!isConnected) return 'Connect Wallet'
     if (!helperReady) return 'Helper Not Deployed Yet'
-    if (!amount0 || !amount1) return 'Enter both amounts'
+    if (!amount0 && !amount1) return 'Enter amounts'
+    if (!amount1) return `Enter ${selectedPool.token1} amount`
+    if (!amount0) return `Enter ${selectedPool.token0} amount`
     if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
     if (step === 'approve1' || step === 'approve1_wait') return `Approving ${selectedPool.token1}…`
     if (step === 'addliq'   || step === 'addliq_wait')  return 'Adding Liquidity…'
@@ -307,9 +309,9 @@ export default function LiquidityPage() {
             </div>
           </div>
 
-          {!hasLiquidity && amount0 && !amount1 && (
+          {!hasLiquidity && (
             <div className="p-3 rounded-xl bg-aeon-400/10 border border-aeon-400/20 text-xs text-aeon-400">
-              New pool — enter both amounts to set your initial price ratio.
+              New pool — no existing liquidity. Enter both token amounts manually to set your initial price ratio.
             </div>
           )}
 
@@ -404,7 +406,7 @@ export default function LiquidityPage() {
 
           <button
             onClick={startAddLiquidity}
-            disabled={isConnected && (isProcessing || (!amount0 && !amount1) || !helperReady)}
+            disabled={isConnected && (isProcessing || (!amount0 || !amount1) || !helperReady)}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}
