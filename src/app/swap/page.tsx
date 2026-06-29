@@ -153,7 +153,7 @@ export default function SwapPage() {
       tokenIn:  step.tokenIn  === 'AVAX' ? wavaxAddr : TOKENS[step.tokenIn  as keyof typeof TOKENS].address,
       tokenOut: step.tokenOut === 'AVAX' ? wavaxAddr : TOKENS[step.tokenOut as keyof typeof TOKENS].address,
       pool:     step.poolAddress,
-      poolType: step.poolType,
+      poolType: 0,  // router only implements poolType=0; all pool types share the same swap interface
       feeBps:   Number(step.feeBps),
     }))
   }
