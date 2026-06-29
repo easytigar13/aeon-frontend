@@ -147,7 +147,7 @@ export default function DashboardPage() {
         </div>
         {chartEmpty ? (
           <div className="h-[200px] flex items-center justify-center text-text-muted text-sm font-mono">
-            {chartTab === 'volume' ? 'No swaps in the last 24h' : 'No liquidity yet — add to a pool to see TVL here'}
+            {chartTab === 'volume' ? 'No swaps through AEON pools yet — pools need rebalancing by LPs before trading is active' : 'No liquidity yet — add to a pool to see TVL here'}
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 36)}>

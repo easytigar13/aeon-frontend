@@ -5,19 +5,19 @@ import { decodeEventLog, formatUnits } from 'viem'
 import { POOLS, TOKENS } from '@/config/contracts'
 import type { PriceMap } from './usePrices'
 
-// Uniswap V2 Swap event topic0
-// keccak256("Swap(address,uint256,uint256,uint256,uint256,address)")
-const SWAP_TOPIC = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822' as `0x${string}`
+// Solidly/Velodrome vAMM Swap event — different from UniswapV2 ('to' is 2nd indexed, not last)
+// keccak256("Swap(address,address,uint256,uint256,uint256,uint256)")
+const SWAP_TOPIC = '0xb3e2773606abfd36b5bd91394b3a54d1398336c65005baf7bf7a05efeffaf75b' as `0x${string}`
 
 const SWAP_ABI = [{
   name: 'Swap', type: 'event',
   inputs: [
     { name: 'sender',     type: 'address', indexed: true  },
+    { name: 'to',         type: 'address', indexed: true  },
     { name: 'amount0In',  type: 'uint256', indexed: false },
     { name: 'amount1In',  type: 'uint256', indexed: false },
     { name: 'amount0Out', type: 'uint256', indexed: false },
     { name: 'amount1Out', type: 'uint256', indexed: false },
-    { name: 'to',         type: 'address', indexed: true  },
   ],
 }] as const
 

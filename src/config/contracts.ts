@@ -34,8 +34,8 @@ export const TOKENS = {
 
 export const POOLS = [
   // vAMM
-  { name: 'AEON/WAVAX', token0: 'AEON', token1: 'WAVAX', type: 'vAMM', fee: '1%',    address: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489' as `0x${string}` },
-  { name: 'AEON/USDC',  token0: 'AEON', token1: 'USDC',  type: 'vAMM', fee: '1%',    address: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
+  { name: 'AEON/WAVAX', token0: 'WAVAX', token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489' as `0x${string}` },
+  { name: 'AEON/USDC',  token0: 'USDC',  token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
   { name: 'WAVAX/USDC', token0: 'WAVAX',token1: 'USDC',  type: 'vAMM', fee: '0.3%',  address: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086' as `0x${string}` },
   // CL
   { name: 'AEON/WAVAX', token0: 'AEON', token1: 'WAVAX', type: 'CL',   fee: '0.3%',  address: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6' as `0x${string}` },
