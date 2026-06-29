@@ -61,8 +61,9 @@ export default function LiquidityPage() {
 
   const filteredPools = POOLS.filter(p => p.type === poolType)
 
-  const token0Key = Object.keys(TOKENS).find(k => (TOKENS as any)[k].symbol === selectedPool.token0) as keyof typeof TOKENS | undefined
-  const token1Key = Object.keys(TOKENS).find(k => (TOKENS as any)[k].symbol === selectedPool.token1) as keyof typeof TOKENS | undefined
+  // Use pool config key directly (not symbol — they can differ e.g. SPX vs SPX6900)
+  const token0Key  = selectedPool.token0 in TOKENS ? selectedPool.token0 as keyof typeof TOKENS : undefined
+  const token1Key  = selectedPool.token1 in TOKENS ? selectedPool.token1 as keyof typeof TOKENS : undefined
   const token0Addr = token0Key ? TOKENS[token0Key].address : undefined
   const token1Addr = token1Key ? TOKENS[token1Key].address : undefined
   const token0Dec  = token0Key ? TOKENS[token0Key].decimals : 18
@@ -74,7 +75,7 @@ export default function LiquidityPage() {
   const allowance0 = useAllowance(token0Addr, address)
   const allowance1 = useAllowance(token1Addr, address)
 
-  // Read pool reserves for ratio calculation
+  // Read pool reserves + actual on-chain token addresses
   const { data: reserves } = useReadContract({
     address: selectedPool.address,
     abi: PAIR_ABI,
@@ -86,6 +87,27 @@ export default function LiquidityPage() {
     abi: PAIR_ABI,
     functionName: 'token0',
   })
+  const { data: poolToken1Addr } = useReadContract({
+    address: selectedPool.address,
+    abi: PAIR_ABI,
+    functionName: 'token1',
+  })
+
+  // Detect if configured token addresses match what the pool actually holds on-chain
+  const poolT0 = poolToken0Addr?.toLowerCase() ?? ''
+  const poolT1 = poolToken1Addr?.toLowerCase() ?? ''
+  const cfgA0  = token0Addr?.toLowerCase() ?? ''
+  const cfgA1  = token1Addr?.toLowerCase() ?? ''
+
+  const poolAddrsLoaded  = !!poolToken0Addr && !!poolToken1Addr && !!token0Addr && !!token1Addr
+  const cfgMatchesDirect  = poolT0 === cfgA0 && poolT1 === cfgA1
+  const cfgMatchesFlipped = poolT0 === cfgA1  && poolT1 === cfgA0
+  const tokenMismatch     = poolAddrsLoaded && !cfgMatchesDirect && !cfgMatchesFlipped
+
+  // Always use pool's actual on-chain addresses for the addLiquidity call
+  const actualToken0Addr  = (poolToken0Addr ?? token0Addr) as `0x${string}` | undefined
+  const actualToken1Addr  = (poolToken1Addr ?? token1Addr) as `0x${string}` | undefined
+  // (actualAmountXWei are computed below after amount0Wei/amount1Wei are declared)
 
   // Determine which reserve maps to token0/token1 in our display order
   const isToken0First = !poolToken0Addr || !token0Addr ||
@@ -126,6 +148,9 @@ export default function LiquidityPage() {
 
   const amount0Wei = amount0 ? parseUnits(amount0, token0Dec) : 0n
   const amount1Wei = amount1 ? parseUnits(amount1, token1Dec) : 0n
+  // Amount ordering for addLiquidity: if pool tokens are flipped vs our display, swap amounts
+  const actualAmount0Wei  = cfgMatchesFlipped ? amount1Wei : amount0Wei
+  const actualAmount1Wei  = cfgMatchesFlipped ? amount0Wei : amount1Wei
 
   const needApprove0 = amount0Wei > 0n && allowance0 < amount0Wei
   const needApprove1 = amount1Wei > 0n && allowance1 < amount1Wei
@@ -161,11 +186,16 @@ export default function LiquidityPage() {
       setStep('approve1_wait')
     }
     if (step === 'addliq') {
+      if (tokenMismatch || !actualToken0Addr || !actualToken1Addr) {
+        setErrMsg('Token address mismatch — pool on-chain tokens differ from config. Cannot add safely.')
+        setStep('idle')
+        return
+      }
       writeContract({
         address: HELPER,
         abi: LIQUIDITY_HELPER_ABI,
         functionName: 'addLiquidity',
-        args: [selectedPool.address, token0Addr, amount0Wei, token1Addr, amount1Wei, address],
+        args: [selectedPool.address, actualToken0Addr, actualAmount0Wei, actualToken1Addr, actualAmount1Wei, address],
       })
       setStep('addliq_wait')
     }
@@ -404,9 +434,16 @@ export default function LiquidityPage() {
             </div>
           )}
 
+          {tokenMismatch && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+              ⚠ Token address mismatch — this pool uses different token contracts than configured.
+              Pool expects: <span className="font-mono">{poolToken0Addr?.slice(0,10)}…</span> / <span className="font-mono">{poolToken1Addr?.slice(0,10)}…</span>
+            </div>
+          )}
+
           <button
             onClick={startAddLiquidity}
-            disabled={isConnected && (isProcessing || (!amount0 || !amount1) || !helperReady)}
+            disabled={isConnected && (isProcessing || (!amount0 || !amount1) || !helperReady || tokenMismatch)}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}
