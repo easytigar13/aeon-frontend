@@ -12,6 +12,10 @@ scripts/
 deploy*.js
 deploy*.ts
 
+# Keeper bot — private key must never be committed
+keeper/.env
+keeper/node_modules/
+
 # OS / editor
 .DS_Store
 Thumbs.db
