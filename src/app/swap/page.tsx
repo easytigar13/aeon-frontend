@@ -131,6 +131,15 @@ export default function SwapPage() {
         parseFloat(formatUnits(parsedAmountIn, TOKENS[tokenIn].decimals))
       : 0
 
+  // Market-price deviation: compare route rate vs oracle prices
+  // If the pool is mis-priced vs market, users would lose money even at 0% AMM impact.
+  const marketDeviation = (() => {
+    if (isWrapUnwrap || !priceIn || !priceOut || spotRate <= 0) return 0
+    const marketRate = priceIn / priceOut          // expected tokenOut per tokenIn
+    return ((marketRate - spotRate) / marketRate) * 100  // % below fair value
+  })()
+  const badPrice = marketDeviation > 5   // pool price more than 5% worse than market
+
   function setPercent(pct: number) {
     if (!isConnected || balanceIn.raw === 0n) return
     const portion = (balanceIn.raw * BigInt(pct)) / 100n
@@ -203,12 +212,13 @@ export default function SwapPage() {
     if (isApproving || isApproveConfirming) return 'Approving…'
     if (isSwapping   || isSwapConfirming)   return 'Swapping…'
     if (swapSuccess)   return '✓ Swap complete!'
+    if (badPrice)      return 'Pool price too far from market'
     if (needsApproval) return `Approve ${TOKENS[tokenIn].symbol}`
     if (isWrapUnwrap)  return tokenIn === 'AVAX' ? 'Wrap AVAX → WAVAX' : 'Unwrap WAVAX → AVAX'
     return `Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
   }
 
-  const disabled = isConnected && (!hasAmount || overBal || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy)
+  const disabled = isConnected && (!hasAmount || overBal || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy || badPrice)
 
   function fmtUsd(n: number | null): string {
     if (!n || n <= 0) return ''
@@ -359,6 +369,18 @@ export default function SwapPage() {
         {highSlippage && (
           <div className="mt-3 mx-1 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 text-center font-mono">
             ⚠ Slippage {slippageSafe}% — high risk of sandwich attack
+          </div>
+        )}
+
+        {/* Pool price vs market warning */}
+        {badPrice && hasAmount && route && amountOutWei > 0n && (
+          <div className="mt-3 mx-1 p-3 rounded-xl bg-orange-500/10 border border-orange-500/30 text-xs text-orange-400 space-y-1">
+            <div className="font-semibold">⚠ Pool price is {marketDeviation.toFixed(1)}% below market</div>
+            <div className="text-orange-400/80">
+              This pool has low liquidity and is out of sync with market prices.
+              You would receive significantly less than fair value. Consider waiting
+              for an LP to rebalance, or swap on a larger aggregator.
+            </div>
           </div>
         )}
 
