@@ -6,7 +6,7 @@ import { useAccount, useReadContract, useReadContracts, useWriteContract, useWai
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CONTRACTS, TOKENS } from '@/config/contracts'
-import { ERC20_ABI, GAUGE_ABI, GAUGE_FACTORY_ABI, PAIR_ABI, LIQUIDITY_HELPER_ABI } from '@/config/abis'
+import { ERC20_ABI, GAUGE_ABI, GAUGE_FACTORY_ABI, PAIR_ABI, LIQUIDITY_HELPER_ABI, VOTER_ABI, BRIBE_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -27,7 +27,7 @@ function tokenIcon(sym: string) {
 
 const UNIQUE_POOLS = POOLS.filter((p, _, arr) => arr.findIndex(x => x.address === p.address) === arr.indexOf(p))
 
-type Step    = 'idle' | 'approving' | 'approve_wait' | 'staking' | 'stake_wait' | 'done' | 'unstaking' | 'unstake_wait' | 'claiming' | 'claim_wait'
+type Step    = 'idle' | 'approving' | 'approve_wait' | 'staking' | 'stake_wait' | 'done' | 'unstaking' | 'unstake_wait' | 'claiming' | 'claim_wait' | 'fee_claiming' | 'fee_claim_wait'
 type LiqStep = 'idle' | 'app0' | 'app0_wait' | 'app1' | 'app1_wait' | 'adding' | 'adding_wait' | 'rem_app' | 'rem_app_wait' | 'removing' | 'removing_wait' | 'done'
 
 function parseFeeRate(fee: string): number { return parseFloat(fee.replace('%', '')) / 100 }
@@ -311,16 +311,69 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   })
   const allowance = (allowanceRaw as bigint | undefined) ?? 0n
 
+  // vAPR — gauge emission rate vs pool TVL
+  const { data: rewardRateRaw } = useReadContract({
+    address: gauge, abi: GAUGE_ABI, functionName: 'rewardRate',
+    query: { enabled: !!gauge, refetchInterval: 60000 },
+  })
+  const { data: periodFinishRaw } = useReadContract({
+    address: gauge, abi: GAUGE_ABI, functionName: 'periodFinish',
+    query: { enabled: !!gauge },
+  })
+  const rewardRate = (rewardRateRaw as bigint | undefined) ?? 0n
+  const periodFinish = (periodFinishRaw as bigint | undefined) ?? 0n
+  const isEmitting = periodFinish > BigInt(Math.floor(Date.now() / 1000))
+  const aeonPrice = prices['AEON'] ?? null
+  const vApr = isEmitting && rewardRate > 0n && aeonPrice !== null && tvlUsd && tvlUsd > 0
+    ? (Number(formatUnits(rewardRate, 18)) * 365 * 24 * 3600 * aeonPrice) / tvlUsd * 100
+    : null
+
+  // Fee rewards — for veNFT voters
+  const { data: tokenIdRaw } = useReadContract({
+    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'lastVotedTokenId',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!wallet && expanded, refetchInterval: 30000 },
+  })
+  const veTokenId = (tokenIdRaw as bigint | undefined)
+
+  const { data: bribeAddrRaw } = useReadContract({
+    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'internalBribes',
+    args: gauge ? [gauge] : undefined, query: { enabled: !!gauge && expanded },
+  })
+  const bribe = bribeAddrRaw && bribeAddrRaw !== '0x0000000000000000000000000000000000000000'
+    ? bribeAddrRaw as `0x${string}` : undefined
+
+  const tok0Addr = TOKENS[pool.token0 as keyof typeof TOKENS]?.address
+  const tok1Addr = TOKENS[pool.token1 as keyof typeof TOKENS]?.address
+  const tok0Dec  = TOKENS[pool.token0 as keyof typeof TOKENS]?.decimals ?? 18
+  const tok1Dec  = TOKENS[pool.token1 as keyof typeof TOKENS]?.decimals ?? 18
+
+  const { data: feeEarned0Raw, refetch: refetchFee0 } = useReadContract({
+    address: bribe, abi: BRIBE_ABI, functionName: 'earned',
+    args: veTokenId && tok0Addr ? [veTokenId, tok0Addr] : undefined,
+    query: { enabled: !!bribe && !!veTokenId && !!tok0Addr && veTokenId > 0n, refetchInterval: 30000 },
+  })
+  const { data: feeEarned1Raw, refetch: refetchFee1 } = useReadContract({
+    address: bribe, abi: BRIBE_ABI, functionName: 'earned',
+    args: veTokenId && tok1Addr ? [veTokenId, tok1Addr] : undefined,
+    query: { enabled: !!bribe && !!veTokenId && !!tok1Addr && veTokenId > 0n, refetchInterval: 30000 },
+  })
+  const fee0 = (feeEarned0Raw as bigint | undefined) ?? 0n
+  const fee1 = (feeEarned1Raw as bigint | undefined) ?? 0n
+  const fee0Fmt = fee0 > 0n ? parseFloat(formatUnits(fee0, tok0Dec)).toFixed(4) : '0'
+  const fee1Fmt = fee1 > 0n ? parseFloat(formatUnits(fee1, tok1Dec)).toFixed(4) : '0'
+  const hasFeeRewards = fee0 > 0n || fee1 > 0n
+
   const { writeContract, data: txHash, error: writeError } = useWriteContract()
   const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash })
 
   useEffect(() => {
     if (!txSuccess) return
     refetchLP(); refetchStaked(); refetchEarned(); refetchAllowance()
-    if (step === 'approve_wait') { setStep('staking');  return }
-    if (step === 'stake_wait')   { setStep('done');     setStakeAmt('');   return }
-    if (step === 'unstake_wait') { setStep('idle');     setUnstakeAmt(''); return }
-    if (step === 'claim_wait')   { setStep('idle');     return }
+    if (step === 'approve_wait')    { setStep('staking');  return }
+    if (step === 'stake_wait')      { setStep('done');     setStakeAmt('');   return }
+    if (step === 'unstake_wait')    { setStep('idle');     setUnstakeAmt(''); return }
+    if (step === 'claim_wait')      { setStep('idle');     return }
+    if (step === 'fee_claim_wait')  { setStep('idle');     refetchFee0(); refetchFee1(); return }
   }, [txSuccess])
 
   useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
@@ -348,6 +401,11 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
       writeContract({ address: gauge, abi: GAUGE_ABI, functionName: 'getReward', args: [wallet as `0x${string}`] })
       setStep('claim_wait')
     }
+    if (step === 'fee_claiming') {
+      if (!bribe || !veTokenId || !tok0Addr || !tok1Addr) { setStep('idle'); return }
+      writeContract({ address: bribe, abi: BRIBE_ABI, functionName: 'getReward', args: [veTokenId, [tok0Addr, tok1Addr] as `0x${string}`[]] })
+      setStep('fee_claim_wait')
+    }
   }, [step])
 
   function handleStake() {
@@ -356,7 +414,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
     setStep('staking')
   }
 
-  const isBusy = ['approving','approve_wait','staking','stake_wait','unstaking','unstake_wait','claiming','claim_wait'].includes(step)
+  const isBusy = ['approving','approve_wait','staking','stake_wait','unstaking','unstake_wait','claiming','claim_wait','fee_claiming','fee_claim_wait'].includes(step)
 
   function stakeLabel() {
     if (step === 'approving' || step === 'approve_wait') return 'Approving…'
@@ -403,7 +461,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
           <div className="text-2xs text-text-muted">Fee APR</div>
         </div>
         <div className="col-span-2 hidden sm:block">
-          <div className="text-sm font-mono font-bold text-violet-400">—%</div>
+          <div className="text-sm font-mono font-bold text-violet-400">{fmtApr(vApr)}</div>
           <div className="text-2xs text-text-muted">vAPR</div>
         </div>
         <div className="col-span-2">
@@ -505,16 +563,26 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
                       <div>
                         <h4 className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Fee Rewards — From Your veNFT Vote</h4>
                         <div className="space-y-2">
-                          {[pool.token0, pool.token1].map(tok => (
-                            <div key={tok} className="flex items-center justify-between p-3 bg-bg-raised rounded-xl">
-                              <span className="text-sm text-text-muted">{tok} fees</span>
-                              <div className="flex items-center gap-2">
-                                <span className="font-mono text-sm text-text-primary">—</span>
-                                <button disabled className="text-xs btn-ghost py-1 px-2 text-emerald-400 opacity-40">Claim</button>
-                              </div>
-                            </div>
-                          ))}
-                          <div className="text-2xs text-text-muted mt-2 text-center">Vote for this pool with your veNFT to earn fee rewards</div>
+                          <div className="flex items-center justify-between p-3 bg-bg-raised rounded-xl">
+                            <span className="text-sm text-text-muted">{pool.token0} fees</span>
+                            <span className={`font-mono text-sm ${fee0 > 0n ? 'text-emerald-400 font-bold' : 'text-text-muted'}`}>{fee0Fmt}</span>
+                          </div>
+                          <div className="flex items-center justify-between p-3 bg-bg-raised rounded-xl">
+                            <span className="text-sm text-text-muted">{pool.token1} fees</span>
+                            <span className={`font-mono text-sm ${fee1 > 0n ? 'text-emerald-400 font-bold' : 'text-text-muted'}`}>{fee1Fmt}</span>
+                          </div>
+                          {veTokenId && veTokenId > 0n ? (
+                            <button
+                              disabled={!hasFeeRewards || isBusy || !bribe}
+                              onClick={() => setStep('fee_claiming')}
+                              className="w-full btn-ghost border border-bg-border text-sm py-2 flex items-center justify-center gap-1.5 disabled:opacity-40 text-emerald-400"
+                            >
+                              {(step === 'fee_claiming' || step === 'fee_claim_wait') && <Loader2 size={12} className="animate-spin" />}
+                              {hasFeeRewards ? 'Claim Fee Rewards' : 'No fee rewards yet'}
+                            </button>
+                          ) : (
+                            <div className="text-2xs text-text-muted text-center pt-1">Vote for this pool with your veNFT to earn fee rewards</div>
+                          )}
                         </div>
                       </div>
                     </div>

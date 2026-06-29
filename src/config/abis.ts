@@ -338,6 +338,43 @@ export const GAUGE_ABI = [
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
   },
+  {
+    name: 'rewardRate',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'periodFinish',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
+export const BRIBE_ABI = [
+  {
+    name: 'earned',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'tokenId', type: 'uint256' },
+      { name: 'token',   type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'getReward',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'tokenId', type: 'uint256' },
+      { name: 'tokens',  type: 'address[]' },
+    ],
+    outputs: [],
+  },
 ] as const
 
 export const PAIR_ABI = [
@@ -452,5 +489,12 @@ export const VOTER_ABI = [
     stateMutability: 'view',
     inputs: [{ name: 'voter', type: 'address' }],
     outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'internalBribes',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'gauge', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
   },
 ] as const

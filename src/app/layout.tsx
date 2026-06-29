@@ -25,6 +25,11 @@ const spaceMono = Space_Mono({
 export const metadata: Metadata = {
   title: 'AEON Protocol — ve(3,3) DEX on Avalanche',
   description: 'The first fee-anchored DEX. Emissions = Fees ÷ 10. Built on Avalanche C-Chain.',
+  icons: {
+    icon: '/logo.png',
+    apple: '/logo.png',
+    shortcut: '/logo.png',
+  },
   openGraph: {
     title: 'AEON Protocol',
     description: 'Fee-anchored ve(3,3) DEX on Avalanche',
