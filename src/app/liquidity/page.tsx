@@ -53,6 +53,7 @@ export default function LiquidityPage() {
   const [clRange,        setClRange]        = useState('normal')
   const [customLow,      setCustomLow]      = useState('')
   const [customHigh,     setCustomHigh]     = useState('')
+  const [numBins,        setNumBins]        = useState(200)
   const [removeAmount,   setRemoveAmount]   = useState(50)
   const [showPoolPicker, setShowPoolPicker] = useState(false)
   const [step,           setStep]           = useState<Step>('idle')
@@ -104,7 +105,7 @@ export default function LiquidityPage() {
 
   function handleAmount0Change(val: string) {
     setAmount0(val)
-    if (!val || !hasLiquidity) { return }
+    if (!val || !hasLiquidity) return  // new pool: let user set both freely
     try {
       const wei = parseUnits(val, token0Dec)
       setAmount1(calcPaired(wei, reserve0, reserve1, token1Dec))
@@ -113,7 +114,7 @@ export default function LiquidityPage() {
 
   function handleAmount1Change(val: string) {
     setAmount1(val)
-    if (!val || !hasLiquidity) { return }
+    if (!val || !hasLiquidity) return  // new pool: let user set both freely
     try {
       const wei = parseUnits(val, token1Dec)
       setAmount0(calcPaired(wei, reserve1, reserve0, token0Dec))
@@ -306,6 +307,12 @@ export default function LiquidityPage() {
             </div>
           </div>
 
+          {!hasLiquidity && amount0 && !amount1 && (
+            <div className="p-3 rounded-xl bg-aeon-400/10 border border-aeon-400/20 text-xs text-aeon-400">
+              New pool — enter both amounts to set your initial price ratio.
+            </div>
+          )}
+
           {poolType === 'CL' && (
             <div className="card p-4">
               <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Price Range</div>
@@ -331,11 +338,36 @@ export default function LiquidityPage() {
           )}
 
           {poolType === 'DLMM' && (
-            <div className="card p-4">
-              <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-2">Bin Step</div>
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-text-secondary">Active bin step</span>
+            <div className="card p-4 space-y-4">
+              <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Bin Configuration</div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-text-muted">Bin Step</span>
                 <span className="font-mono text-aeon-400 font-bold">{'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps` : '—'}</span>
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm text-text-muted">Number of Bins</span>
+                  <span className="font-mono text-aeon-400 font-bold">{numBins}</span>
+                </div>
+                <input
+                  type="range" min={1} max={800} value={numBins}
+                  onChange={e => setNumBins(parseInt(e.target.value))}
+                  className="w-full accent-aeon-400"
+                />
+                <div className="flex justify-between text-2xs font-mono text-text-muted mt-1">
+                  <span>1</span><span>200</span><span>400</span><span>600</span><span>800</span>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                {[10, 50, 100, 200, 400, 800].map(n => (
+                  <button key={n} onClick={() => setNumBins(n)}
+                    className={clsx('flex-1 py-1.5 rounded-lg text-xs font-mono transition-all', numBins === n ? 'bg-aeon-400/20 text-aeon-400 border border-aeon-400/30' : 'bg-bg-raised text-text-muted border border-bg-border hover:border-bg-hover')}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <div className="text-2xs text-text-muted">
+                Price range: ±{((numBins / 2) * (('binStep' in selectedPool ? (selectedPool as any).binStep : 100) / 10000) * 100).toFixed(1)}% from current price
               </div>
             </div>
           )}
