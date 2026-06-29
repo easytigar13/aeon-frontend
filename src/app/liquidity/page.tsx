@@ -5,7 +5,7 @@ import { clsx } from 'clsx'
 import { useAccount, useBalance, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_RANGE_PRESETS, TOKENS, CONTRACTS } from '@/config/contracts'
+import { POOLS, TOKENS, CONTRACTS } from '@/config/contracts'
 import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI } from '@/config/abis'
 
 type Tab = 'add' | 'remove'
@@ -50,9 +50,6 @@ export default function LiquidityPage() {
   const [selectedPool,   setSelectedPool]   = useState(POOLS[0])
   const [amount0,        setAmount0]        = useState('')
   const [amount1,        setAmount1]        = useState('')
-  const [clRange,        setClRange]        = useState('normal')
-  const [customLow,      setCustomLow]      = useState('')
-  const [customHigh,     setCustomHigh]     = useState('')
   const [numBins,        setNumBins]        = useState(200)
   const [removeAmount,   setRemoveAmount]   = useState(50)
   const [showPoolPicker, setShowPoolPicker] = useState(false)
@@ -353,60 +350,49 @@ export default function LiquidityPage() {
           )}
 
           {poolType === 'CL' && (
-            <div className="card p-4">
-              <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Price Range</div>
-              <div className="grid grid-cols-4 gap-2 mb-3">
-                {CL_RANGE_PRESETS.map(preset => (
-                  <button key={preset.key} onClick={() => { setClRange(preset.key); setCustomLow(''); setCustomHigh('') }} className={clsx('py-2 rounded-xl text-xs font-medium transition-all text-center', clRange === preset.key ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30' : 'bg-bg-raised text-text-muted border border-bg-border hover:border-bg-hover')}>
-                    <div className="font-bold">{preset.label}</div>
-                    <div className="text-2xs opacity-70">{preset.desc}</div>
-                  </button>
-                ))}
+            <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-violet-400" />
+                <span className="text-xs font-semibold text-violet-300">CL Pool — Full-Range Liquidity</span>
               </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-2xs text-text-muted mb-1 block">Min Price</label>
-                  <input type="number" value={customLow} onChange={e => { setCustomLow(e.target.value); setClRange('custom') }} placeholder="0.0" className="input-base w-full text-sm py-2" />
-                </div>
-                <div>
-                  <label className="text-2xs text-text-muted mb-1 block">Max Price</label>
-                  <input type="number" value={customHigh} onChange={e => { setCustomHigh(e.target.value); setClRange('custom') }} placeholder="∞" className="input-base w-full text-sm py-2" />
-                </div>
+              <p className="text-xs text-text-muted leading-relaxed">
+                AeonDEX CL pools use a <strong className="text-text-secondary">0.3% fee tier</strong> and provide liquidity across the full price range (equivalent to Uniswap V2 mechanics). Tick-based concentrated ranges are not yet supported by this implementation.
+              </p>
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                {[
+                  { label: 'Fee Tier', value: selectedPool.fee },
+                  { label: 'Range',    value: 'Full Range' },
+                  { label: 'In Range', value: 'Always' },
+                ].map(s => (
+                  <div key={s.label} className="bg-bg-raised rounded-lg p-2 text-center">
+                    <div className="text-2xs text-text-muted">{s.label}</div>
+                    <div className="text-xs font-mono text-violet-300 font-bold">{s.value}</div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
           {poolType === 'DLMM' && (
-            <div className="card p-4 space-y-4">
-              <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Bin Configuration</div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-text-muted">Bin Step</span>
-                <span className="font-mono text-aeon-400 font-bold">{'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps` : '—'}</span>
+            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                <span className="text-xs font-semibold text-emerald-300">DLMM Pool — Full-Range Liquidity</span>
               </div>
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-text-muted">Number of Bins</span>
-                  <span className="font-mono text-aeon-400 font-bold">{numBins}</span>
-                </div>
-                <input
-                  type="range" min={1} max={800} value={numBins}
-                  onChange={e => setNumBins(parseInt(e.target.value))}
-                  className="w-full accent-aeon-400"
-                />
-                <div className="flex justify-between text-2xs font-mono text-text-muted mt-1">
-                  <span>1</span><span>200</span><span>400</span><span>600</span><span>800</span>
-                </div>
-              </div>
-              <div className="flex gap-2">
-                {[10, 50, 100, 200, 400, 800].map(n => (
-                  <button key={n} onClick={() => setNumBins(n)}
-                    className={clsx('flex-1 py-1.5 rounded-lg text-xs font-mono transition-all', numBins === n ? 'bg-aeon-400/20 text-aeon-400 border border-aeon-400/30' : 'bg-bg-raised text-text-muted border border-bg-border hover:border-bg-hover')}>
-                    {n}
-                  </button>
+              <p className="text-xs text-text-muted leading-relaxed">
+                AeonDEX DLMM pools use a <strong className="text-text-secondary">1% fee tier</strong> with a fixed bin step of <strong className="text-text-secondary">{'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps` : '800 bps'}</strong>. Liquidity is provided across the full price range. Discrete bin positioning is not yet supported by this implementation.
+              </p>
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                {[
+                  { label: 'Fee Tier', value: selectedPool.fee },
+                  { label: 'Bin Step', value: 'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps` : '—' },
+                  { label: 'Range',    value: 'Full Range' },
+                ].map(s => (
+                  <div key={s.label} className="bg-bg-raised rounded-lg p-2 text-center">
+                    <div className="text-2xs text-text-muted">{s.label}</div>
+                    <div className="text-xs font-mono text-emerald-300 font-bold">{s.value}</div>
+                  </div>
                 ))}
-              </div>
-              <div className="text-2xs text-text-muted">
-                Price range: ±{((numBins / 2) * (('binStep' in selectedPool ? (selectedPool as any).binStep : 100) / 10000) * 100).toFixed(1)}% from current price
               </div>
             </div>
           )}
