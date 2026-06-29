@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import { useReadContract } from 'wagmi'
 import { formatUnits } from 'viem'
 import { POOLS, CONTRACTS } from '@/config/contracts'
-import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI } from '@/config/abis'
+import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI } from '@/config/abis'
 import { clsx } from 'clsx'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useTotalTVL } from '@/hooks/usePoolStats'
@@ -42,7 +42,9 @@ export default function DashboardPage() {
   const { data: totalBurned }   = useReadContract({ address: CONTRACTS.TheFurnace,       abi: FURNACE_ABI,        functionName: 'totalBurned' })
   const { data: veTotalSupply } = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'totalSupply' })
   const { data: veTokenCount }  = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId' })
-  const { data: totalVotes }    = useReadContract({ address: CONTRACTS.AeonVoter,        abi: VOTER_ABI,          functionName: 'totalWeight' })
+  const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight' })
+  const { data: weeklyEmissions } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'weeklyEmissions' })
+  const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'epochFees' })
 
   const WEEK_MS       = 7 * 24 * 60 * 60 * 1000
   const WEEK_S        = 7 * 24 * 60 * 60
@@ -56,6 +58,26 @@ export default function DashboardPage() {
   const epochLabel    = `${fmtDate(epochStartMs)} – ${fmtDate(epochEndMs)}`
   const GENESIS_S     = 1751000000
   const protocolEpoch = Math.floor((now / 1000 - GENESIS_S) / WEEK_S) + 1
+
+  // Epoch timing
+  const elapsedMs      = now - epochStartMs
+  const elapsedDays    = elapsedMs / (24 * 60 * 60 * 1000)
+  const blendedFeePct  = 0.003 // ~0.3% blended across pools
+  const aeonPrice      = prices.AEON ?? null
+
+  // Projected emissions — prefer on-chain, fall back to volume estimate
+  const projectedEmissionsAeon = weeklyEmissions
+    ? parseFloat(formatUnits(weeklyEmissions as bigint, 18))
+    : (volume24h !== null && aeonPrice && aeonPrice > 0)
+      ? (volume24h * 7 * blendedFeePct) / 10 / aeonPrice
+      : null
+
+  // Fees this epoch — prefer on-chain, fall back to volume estimate
+  const feesThisEpoch = epochFeesRaw
+    ? parseFloat(formatUnits(epochFeesRaw as bigint, 18)) * (aeonPrice ?? 0)
+    : (volume24h !== null)
+      ? volume24h * elapsedDays * blendedFeePct
+      : null
 
   const burnedPct = aeonSupply && totalBurned && aeonSupply > 0n
     ? ((Number(totalBurned) / Number(aeonSupply)) * 100).toFixed(2)
@@ -157,8 +179,8 @@ export default function DashboardPage() {
               { label: 'Current Epoch',       value: `#${protocolEpoch} (${epochLabel})` },
               { label: 'Epoch Ends',          value: `${days}d ${hours}h remaining` },
               { label: 'Total Votes',         value: totalVotes !== undefined ? `${fmt18(totalVotes)} veAEON` : '—' },
-              { label: 'Fees This Epoch',     value: '$—' },
-              { label: 'Projected Emissions', value: '— AEON' },
+              { label: 'Fees This Epoch',     value: feesThisEpoch !== null ? fmtUsd(feesThisEpoch, true) : '$—' },
+              { label: 'Projected Emissions', value: projectedEmissionsAeon !== null ? `~${projectedEmissionsAeon.toLocaleString(undefined, { maximumFractionDigits: 0 })} AEON` : '— AEON' },
               { label: 'Emissions Status',    value: totalVotes && totalVotes > 0n ? 'Active' : 'Awaiting first vote + distribute()', highlight: true },
             ].map(item => (
               <div key={item.label} className="flex justify-between items-center">

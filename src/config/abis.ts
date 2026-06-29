@@ -223,6 +223,30 @@ export const VOTING_ESCROW_ABI = [
   },
 ] as const
 
+export const EMISSIONS_ENGINE_ABI = [
+  {
+    name: 'weeklyEmissions',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'epochFees',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'lastEpochFees',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
 export const VOTER_ABI_WHITELIST = [
   {
     name: 'whitelist',
