@@ -9,6 +9,7 @@ import { POOLS, CONTRACTS } from '@/config/contracts'
 import { ERC20_ABI, GAUGE_ABI, GAUGE_FACTORY_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
+import { useVolume24h } from '@/hooks/useVolume24h'
 
 function fmtUsd(n: number | null): string {
   if (n === null) return '$—'
@@ -22,7 +23,17 @@ const UNIQUE_POOLS = POOLS.filter((p, _, arr) => arr.findIndex(x => x.address ==
 
 type Step = 'idle' | 'approving' | 'approve_wait' | 'staking' | 'stake_wait' | 'done' | 'unstaking' | 'unstake_wait' | 'claiming' | 'claim_wait'
 
-function PoolRow({ pool, wallet, tvlUsd }: { pool: typeof UNIQUE_POOLS[number]; wallet?: `0x${string}`; tvlUsd?: number | null }) {
+function parseFeeRate(fee: string): number {
+  return parseFloat(fee.replace('%', '')) / 100
+}
+
+function fmtApr(apr: number | null): string {
+  if (apr === null) return '—%'
+  if (apr >= 1000) return '>1000%'
+  return apr.toFixed(2) + '%'
+}
+
+function PoolRow({ pool, wallet, tvlUsd, apr }: { pool: typeof UNIQUE_POOLS[number]; wallet?: `0x${string}`; tvlUsd?: number | null; apr?: number | null }) {
   const [expanded,   setExpanded]   = useState(false)
   const [stakeAmt,   setStakeAmt]   = useState('')
   const [unstakeAmt, setUnstakeAmt] = useState('')
@@ -172,8 +183,8 @@ function PoolRow({ pool, wallet, tvlUsd }: { pool: typeof UNIQUE_POOLS[number]; 
           <div className="text-2xs text-text-muted">TVL</div>
         </div>
         <div className="col-span-2">
-          <div className="text-sm font-mono font-bold text-emerald-400">—%</div>
-          <div className="text-2xs text-text-muted">APR</div>
+          <div className="text-sm font-mono font-bold text-emerald-400">{fmtApr(apr ?? null)}</div>
+          <div className="text-2xs text-text-muted">Fee APR</div>
         </div>
         <div className="col-span-2 hidden sm:block">
           <div className="text-sm font-mono font-bold text-violet-400">—%</div>
@@ -289,7 +300,7 @@ function PoolRow({ pool, wallet, tvlUsd }: { pool: typeof UNIQUE_POOLS[number]; 
 }
 
 function useEarnStats(wallet?: `0x${string}`) {
-  // Batch read LP balances (unstaked) from all pool contracts
+  // Batch LP balances per pool
   const { data: lpBalances } = useReadContracts({
     contracts: UNIQUE_POOLS.map(p => ({
       address: p.address as `0x${string}`,
@@ -300,7 +311,7 @@ function useEarnStats(wallet?: `0x${string}`) {
     query: { enabled: !!wallet, refetchInterval: 30000 },
   })
 
-  // Batch read gauge addresses
+  // Batch gauge addresses (index-aligned with UNIQUE_POOLS)
   const { data: gaugeAddrs } = useReadContracts({
     contracts: UNIQUE_POOLS.map(p => ({
       address: CONTRACTS.AeonGaugeFactory as `0x${string}`,
@@ -311,45 +322,56 @@ function useEarnStats(wallet?: `0x${string}`) {
     query: { refetchInterval: 60000 },
   })
 
-  const validGauges = (gaugeAddrs ?? [])
-    .map(r => r.status === 'success' ? r.result as `0x${string}` : null)
-    .filter((g): g is `0x${string}` => !!g && g !== '0x0000000000000000000000000000000000000000')
+  // Keep alignment: null for pools with no gauge
+  const gaugeByIndex: (`0x${string}` | null)[] = (gaugeAddrs ?? []).map(r =>
+    r.status === 'success' && r.result && r.result !== '0x0000000000000000000000000000000000000000'
+      ? r.result as `0x${string}` : null
+  )
 
-  // Batch read staked balances
+  // Batch staked + earned using same index alignment; use zero-address for missing gauges
+  const ZERO = '0x0000000000000000000000000000000000000000' as `0x${string}`
   const { data: stakedBalances } = useReadContracts({
-    contracts: validGauges.map(g => ({
-      address: g,
+    contracts: gaugeByIndex.map(g => ({
+      address: g ?? ZERO,
       abi: GAUGE_ABI,
       functionName: 'balanceOf' as const,
-      args: [wallet!] as [`0x${string}`],
+      args: [wallet ?? ZERO],
     })),
-    query: { enabled: !!wallet && validGauges.length > 0, refetchInterval: 30000 },
+    query: { enabled: !!wallet, refetchInterval: 30000 },
   })
-
-  // Batch read earned emissions
   const { data: earnedAmounts } = useReadContracts({
-    contracts: validGauges.map(g => ({
-      address: g,
+    contracts: gaugeByIndex.map(g => ({
+      address: g ?? ZERO,
       abi: GAUGE_ABI,
       functionName: 'earned' as const,
-      args: [wallet!] as [`0x${string}`],
+      args: [wallet ?? ZERO],
     })),
-    query: { enabled: !!wallet && validGauges.length > 0, refetchInterval: 15000 },
+    query: { enabled: !!wallet, refetchInterval: 15000 },
   })
 
-  const totalStaked = (stakedBalances ?? []).reduce((sum, r) =>
-    sum + (r.status === 'success' ? r.result as bigint : 0n), 0n)
+  // Per-pool maps (keyed by pool address lowercase)
+  const lpByAddr: Record<string, bigint> = {}
+  const stakedByAddr: Record<string, bigint> = {}
+  const earnedByAddr: Record<string, bigint> = {}
+  let totalStaked = 0n, totalLPUnstaked = 0n, totalEarned = 0n
 
-  const totalLPUnstaked = (lpBalances ?? []).reduce((sum, r) =>
-    sum + (r.status === 'success' ? r.result as bigint : 0n), 0n)
+  UNIQUE_POOLS.forEach((p, i) => {
+    const addr = p.address.toLowerCase()
+    const lp     = lpBalances?.[i]?.status === 'success'      ? lpBalances[i].result as bigint      : 0n
+    const staked = stakedBalances?.[i]?.status === 'success'   ? stakedBalances[i].result as bigint  : 0n
+    const earned = earnedAmounts?.[i]?.status === 'success'    ? earnedAmounts[i].result as bigint   : 0n
+    lpByAddr[addr]     = lp
+    stakedByAddr[addr] = staked
+    earnedByAddr[addr] = earned
+    totalLPUnstaked   += lp
+    totalStaked       += staked
+    totalEarned       += earned
+  })
 
-  const totalEarned = (earnedAmounts ?? []).reduce((sum, r) =>
-    sum + (r.status === 'success' ? r.result as bigint : 0n), 0n)
-
-  const fmtLP = (wei: bigint) => wei > 0n ? parseFloat(formatUnits(wei, 18)).toFixed(4) : '0'
+  const fmtLP   = (wei: bigint) => wei > 0n ? parseFloat(formatUnits(wei, 18)).toFixed(4) : '0'
   const fmtAEON = (wei: bigint) => wei > 0n ? parseFloat(formatUnits(wei, 18)).toFixed(4) : '0'
 
-  return { totalStaked, totalLPUnstaked, totalEarned, fmtLP, fmtAEON }
+  return { totalStaked, totalLPUnstaked, totalEarned, lpByAddr, stakedByAddr, earnedByAddr, fmtLP, fmtAEON }
 }
 
 export default function EarnPage() {
@@ -366,10 +388,29 @@ export default function EarnPage() {
   const prices    = usePrices()
   const poolStats = usePoolStats(prices)
   const tvlByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
+  const volResult = useVolume24h(prices)
+
+  // Fee APR per pool: vol24h × feeRate × 365 / TVL
+  const aprByAddr: Record<string, number | null> = {}
+  for (const pool of UNIQUE_POOLS) {
+    const tvl = tvlByAddr[pool.address] ?? null
+    const vol = volResult.byPool[pool.address.toLowerCase()] ?? null
+    aprByAddr[pool.address] = (tvl && tvl > 0 && vol !== null)
+      ? (vol * parseFeeRate(pool.fee) * 365 / tvl) * 100
+      : null
+  }
 
   const stakedDisplay  = isConnected ? `${stats.fmtLP(stats.totalStaked)} LP` : '—'
   const lpDisplay      = isConnected ? `${stats.fmtLP(stats.totalLPUnstaked)} LP` : '—'
   const earnedDisplay  = isConnected ? `${stats.fmtAEON(stats.totalEarned)} AEON` : '—'
+
+  // "My Positions" filter: pools with any LP balance or staked LP
+  const displayPools = filterTab === 'my' && isConnected
+    ? UNIQUE_POOLS.filter(p => {
+        const addr = p.address.toLowerCase()
+        return (stats.lpByAddr[addr] ?? 0n) > 0n || (stats.stakedByAddr[addr] ?? 0n) > 0n
+      })
+    : UNIQUE_POOLS
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-12">
@@ -419,9 +460,13 @@ export default function EarnPage() {
         ))}
       </div>
 
+      {filterTab === 'my' && isConnected && displayPools.length === 0 && (
+        <div className="card p-8 text-center text-sm text-text-muted">No LP positions found — add liquidity first.</div>
+      )}
+
       <div className="space-y-2">
-        {UNIQUE_POOLS.map(pool => (
-          <PoolRow key={pool.address} pool={pool} wallet={isConnected ? address : undefined} tvlUsd={tvlByAddr[pool.address]} />
+        {displayPools.map(pool => (
+          <PoolRow key={pool.address} pool={pool} wallet={isConnected ? address : undefined} tvlUsd={tvlByAddr[pool.address]} apr={aprByAddr[pool.address]} />
         ))}
       </div>
     </div>

@@ -9,6 +9,16 @@ import { POOLS, CONTRACTS } from '@/config/contracts'
 import { VOTING_ESCROW_ABI, VOTER_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
+import { useVolume24h } from '@/hooks/useVolume24h'
+
+function parseFeeRate(fee: string): number {
+  return parseFloat(fee.replace('%', '')) / 100
+}
+function fmtApr(apr: number | null): string {
+  if (apr === null) return '—%'
+  if (apr >= 1000) return '>1000%'
+  return apr.toFixed(2) + '%'
+}
 
 function fmtUsd(n: number | null): string {
   if (n === null) return '$—'
@@ -73,8 +83,19 @@ export default function VotePage() {
 
   const prices    = usePrices()
   const poolStats = usePoolStats(prices)
-  const tvlByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
+  const tvlByAddr   = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
   const votesByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.votesFormatted]))
+  const volResult   = useVolume24h(prices)
+
+  // Fee APR per pool: vol24h × feeRate × 365 / TVL × 100
+  const aprByAddr: Record<string, number | null> = {}
+  for (const pool of POOLS) {
+    const tvl = tvlByAddr[pool.address] ?? null
+    const vol = volResult.byPool[pool.address.toLowerCase()] ?? null
+    aprByAddr[pool.address] = (tvl && tvl > 0 && vol !== null)
+      ? (vol * parseFeeRate(pool.fee) * 365 / tvl) * 100
+      : null
+  }
 
   const totalWeight = allocations.reduce((s, a) => s + a.weight, 0)
   const remaining   = 100 - totalWeight
@@ -286,8 +307,8 @@ export default function VotePage() {
                       <span className={clsx('text-2xs font-mono font-bold', pool.type === 'vAMM' ? 'text-blue-400' : pool.type === 'CL' ? 'text-violet-400' : 'text-emerald-400')}>{pool.type}</span>
                     </div>
                     <div className="col-span-2 text-sm font-mono text-text-secondary">{fmtUsd(tvlByAddr[pool.address] ?? null)}</div>
-                    <div className="col-span-2 text-sm font-mono text-text-secondary">$—</div>
-                    <div className="col-span-2 text-sm font-mono text-emerald-400">—%</div>
+                    <div className="col-span-2 text-sm font-mono text-text-secondary">{fmtUsd(volResult.byPool[pool.address.toLowerCase()] ?? null)}</div>
+                    <div className="col-span-2 text-sm font-mono text-emerald-400">{fmtApr(aprByAddr[pool.address] ?? null)}</div>
                     <div className="col-span-1 text-sm font-mono text-violet-400">—%</div>
                     <div className="col-span-1 flex justify-end">
                       <button
