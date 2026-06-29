@@ -12,6 +12,7 @@ const NAV_LINKS = [
   { href: '/lock',       label: 'Lock'      },
   { href: '/dashboard',  label: 'Dashboard' },
   { href: '/whitelist',  label: 'Whitelist' },
+  { href: '/docs',       label: 'Docs'      },
 ]
 
 export function Navbar() {
