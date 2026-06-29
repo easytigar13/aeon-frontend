@@ -251,11 +251,22 @@ export default function SwapPage() {
           </div>
           <div className="flex items-center gap-3">
             <input type="number" value={amountIn} onChange={e => setAmountIn(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-2xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
-            <button onClick={() => setShowTokenInModal(true)} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all shrink-0">
-              <TokenIcon symbol={TOKENS[tokenIn].symbol} />
-              <span className="font-display font-semibold text-sm">{TOKENS[tokenIn].symbol}</span>
-              <ChevronDown size={14} className="text-text-muted" />
-            </button>
+            <div className="flex flex-col items-end gap-0.5 shrink-0">
+              <button onClick={() => setShowTokenInModal(true)} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all">
+                <TokenIcon symbol={TOKENS[tokenIn].symbol} />
+                <span className="font-display font-semibold text-sm">{TOKENS[tokenIn].symbol}</span>
+                <ChevronDown size={14} className="text-text-muted" />
+              </button>
+              {TOKENS[tokenIn].address !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' && (
+                <button
+                  onClick={() => navigator.clipboard.writeText(TOKENS[tokenIn].address)}
+                  title="Copy contract address"
+                  className="text-2xs font-mono text-text-muted hover:text-aeon-400 transition-colors px-1"
+                >
+                  {TOKENS[tokenIn].address.slice(0, 6)}…{TOKENS[tokenIn].address.slice(-4)} 📋
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex items-center justify-between mt-2">
             <span className="text-xs text-text-muted font-mono">≈ $—</span>
@@ -286,11 +297,22 @@ export default function SwapPage() {
             <div className="flex-1 text-2xl font-mono text-text-primary">
               {amountOutFormatted || <span className="text-text-muted">0.0</span>}
             </div>
-            <button onClick={() => setShowTokenOutModal(true)} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all shrink-0">
-              <TokenIcon symbol={TOKENS[tokenOut].symbol} />
-              <span className="font-display font-semibold text-sm">{TOKENS[tokenOut].symbol}</span>
-              <ChevronDown size={14} className="text-text-muted" />
-            </button>
+            <div className="flex flex-col items-end gap-0.5 shrink-0">
+              <button onClick={() => setShowTokenOutModal(true)} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all">
+                <TokenIcon symbol={TOKENS[tokenOut].symbol} />
+                <span className="font-display font-semibold text-sm">{TOKENS[tokenOut].symbol}</span>
+                <ChevronDown size={14} className="text-text-muted" />
+              </button>
+              {TOKENS[tokenOut].address !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' && (
+                <button
+                  onClick={() => navigator.clipboard.writeText(TOKENS[tokenOut].address)}
+                  title="Copy contract address"
+                  className="text-2xs font-mono text-text-muted hover:text-aeon-400 transition-colors px-1"
+                >
+                  {TOKENS[tokenOut].address.slice(0, 6)}…{TOKENS[tokenOut].address.slice(-4)} 📋
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex items-center justify-between mt-2">
             <span className="text-xs text-text-muted font-mono">≈ $—</span>
@@ -381,10 +403,12 @@ function TokenIcon({ symbol }: { symbol: string }) {
     WUSDT: 'bg-green-500/20 text-green-400', SPX6900: 'bg-purple-500/20 text-purple-400',
     GUNZ: 'bg-cyan-500/20 text-cyan-400', ARENA: 'bg-pink-500/20 text-pink-400',
     COQ: 'bg-yellow-500/20 text-yellow-400',
+    'WBTC.b': 'bg-orange-500/20 text-orange-400', 'WBTC.e': 'bg-orange-500/20 text-orange-400',
+    'WETH.e': 'bg-indigo-500/20 text-indigo-400',
   }
   return (
     <div className={clsx('w-6 h-6 rounded-full flex items-center justify-center text-2xs font-bold font-mono shrink-0', colors[symbol] || 'bg-bg-raised text-text-muted')}>
-      {symbol[0]}
+      {symbol.startsWith('WBTC') ? '₿' : symbol[0]}
     </div>
   )
 }
@@ -418,6 +442,9 @@ function TokenRow({ token, walletAddress, onSelect }: { token: typeof TOKEN_LIST
       <div>
         <div className="font-semibold text-sm text-text-primary">{token.symbol}</div>
         <div className="text-xs text-text-muted">{token.name}</div>
+        {token.address !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' && (
+          <div className="text-2xs font-mono text-text-muted/60">{token.address.slice(0, 6)}…{token.address.slice(-4)}</div>
+        )}
       </div>
       <div className="ml-auto text-xs font-mono text-text-muted">{bal.formatted}</div>
     </button>

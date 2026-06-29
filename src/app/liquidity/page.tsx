@@ -288,8 +288,8 @@ export default function LiquidityPage() {
         <button onClick={() => setShowPoolPicker(!showPoolPicker)} className="w-full flex items-center justify-between p-3 bg-bg-raised rounded-xl border border-bg-border hover:border-bg-hover transition-all">
           <div className="flex items-center gap-3">
             <div className="flex -space-x-1">
-              <div className="w-7 h-7 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-xs font-bold z-10">{selectedPool.token0[0]}</div>
-              <div className="w-7 h-7 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-xs font-bold">{selectedPool.token1[0]}</div>
+              <div className="w-7 h-7 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-xs font-bold z-10">{selectedPool.token0.startsWith('WBTC') ? '₿' : selectedPool.token0[0]}</div>
+              <div className="w-7 h-7 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-xs font-bold">{selectedPool.token1.startsWith('WBTC') ? '₿' : selectedPool.token1[0]}</div>
             </div>
             <div>
               <div className="text-sm font-medium text-text-primary">{selectedPool.name}</div>
@@ -304,8 +304,8 @@ export default function LiquidityPage() {
             {filteredPools.map(pool => (
               <button key={pool.address + pool.fee} onClick={() => { setSelectedPool(pool); setShowPoolPicker(false); setStep('idle') }} className={clsx('w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-bg-raised transition-colors text-left', selectedPool.address === pool.address && selectedPool.fee === pool.fee && 'bg-aeon-400/5 border border-aeon-400/20')}>
                 <div className="flex -space-x-1">
-                  <div className="w-6 h-6 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-2xs font-bold z-10">{pool.token0[0]}</div>
-                  <div className="w-6 h-6 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-2xs font-bold">{pool.token1[0]}</div>
+                  <div className="w-6 h-6 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-2xs font-bold z-10">{pool.token0.startsWith('WBTC') ? '₿' : pool.token0[0]}</div>
+                  <div className="w-6 h-6 rounded-full bg-bg-base border border-bg-border flex items-center justify-center text-2xs font-bold">{pool.token1.startsWith('WBTC') ? '₿' : pool.token1[0]}</div>
                 </div>
                 <span className="text-sm text-text-primary">{pool.name}</span>
                 <span className="text-xs text-text-muted font-mono ml-auto">{pool.fee}</span>

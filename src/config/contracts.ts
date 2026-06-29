@@ -26,7 +26,7 @@ export const TOKENS = {
   WBTCE: { address: '0x50b7545627a5162F82A992c33b87aDc75187B218' as `0x${string}`, symbol: 'WBTC.e', decimals: 8,  name: 'Wrapped Bitcoin' },
   WBTCB: { address: '0x152b9d0fdc40c096757f570a51e494bd4b943e50' as `0x${string}`, symbol: 'WBTC.b', decimals: 8,  name: 'Bitcoin (Native)' },
   WETHE: { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB' as `0x${string}`, symbol: 'WETH.e', decimals: 18, name: 'Wrapped Ether' },
-  SPX:   { address: '0x3Bb4445D30AC020A84c1b5A8a2C6248EBC9779D0' as `0x${string}`, symbol: 'SPX6900', decimals: 18, name: 'SPX6900' },
+  SPX:   { address: '0x6F911b6B39Bcc665A463129c94B5380A4387b7eb' as `0x${string}`, symbol: 'SPX6900', decimals: 18, name: 'SPX6900' },
   GUNZ:  { address: '0x26deBD39D5eD069770406FCa10A0E4f8d2c743eB' as `0x${string}`, symbol: 'GUNZ',   decimals: 18, name: 'GUNZ' },
   ARENA: { address: '0xB8d7710f7d8349A506b75dD184F05777c82dAd0C' as `0x${string}`, symbol: 'ARENA',  decimals: 18, name: 'Arena' },
   COQ:   { address: '0x420FcA0121DC28039145009570975747295f2329' as `0x${string}`, symbol: 'COQ',    decimals: 18, name: 'Coq Inu' },
@@ -85,6 +85,13 @@ export const POOLS = [
   { name: 'SPX6900/WAVAX',  token0: 'SPX',  token1: 'WAVAX', type: 'DLMM', fee: '0.3%',  binStep: 800, address: '0x836Aeed458857E5Fd4134c7dAF7B36EE20B73DBc' as `0x${string}` },
   { name: 'USDC/WUSDT', token0: 'USDC', token1: 'WUSDT', type: 'DLMM', fee: '0.01%', binStep: 1,   address: '0xB1a5295A8133097E389221df70Ee1dd021B088F0' as `0x${string}` },
   { name: 'WBTCB/WBTCE',token0: 'WBTCB',token1: 'WBTCE', type: 'DLMM', fee: '0.05%', binStep: 5,   address: '0xeDdBA3C2A4491D77e8d4b69502f7c862C538DC76' as `0x${string}` },
+  // New pools — deployed 2026-06-29
+  { name: 'AEON/WBTCB',  token0: 'AEON',  token1: 'WBTCB', type: 'CL',   fee: '0.3%',  address: '0x04de9ee7b6355ec643db415b2212734390fcb2f8' as `0x${string}` },
+  { name: 'AEON/WBTCB',  token0: 'AEON',  token1: 'WBTCB', type: 'DLMM', fee: '1%',    binStep: 800, address: '0x0d94e9bd42cbddeef6804b9813da82a42617cc01' as `0x${string}` },
+  { name: 'WAVAX/WBTCB', token0: 'WAVAX', token1: 'WBTCB', type: 'CL',   fee: '0.3%',  address: '0xeb55b531c1881751d6c83ce343ee3870a3ed6cb3' as `0x${string}` },
+  { name: 'WAVAX/WBTCB', token0: 'WAVAX', token1: 'WBTCB', type: 'DLMM', fee: '1%',    binStep: 800, address: '0x10235223cba1939eb5dee67a08cf1c065bc17a6e' as `0x${string}` },
+  { name: 'AEON/SPX6900 (v2)', token0: 'AEON', token1: 'SPX', type: 'CL',   fee: '0.3%',  address: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e' as `0x${string}` },
+  { name: 'AEON/SPX6900 (v2)', token0: 'AEON', token1: 'SPX', type: 'DLMM', fee: '1%',    binStep: 800, address: '0xeac2c4b5b9a1169c7e46a44ed6a5e4836ba3bb95' as `0x${string}` },
 ]
 
 export const CL_RANGE_PRESETS = [

@@ -66,7 +66,8 @@ const TOKENS: Record<string, Token> = {
   GUNZ:  { address: '0x26deBD39D5eD069770406FCa10A0E4f8d2c743eB', symbol: 'GUNZ',    decimals: 18 },
   WETHE: { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', symbol: 'WETH.e',  decimals: 18 },
   WBTCE: { address: '0x50b7545627a5162F82A992c33b87aDc75187B218', symbol: 'WBTC.e',  decimals: 8  },
-  SPX:   { address: '0x3Bb4445D30AC020A84c1b5A8a2C6248EBC9779D0', symbol: 'SPX6900', decimals: 18 },
+  WBTCB: { address: '0x152b9d0fdc40c096757f570a51e494bd4b943e50', symbol: 'WBTC.b',  decimals: 8  },
+  SPX:   { address: '0x6F911b6B39Bcc665A463129c94B5380A4387b7eb', symbol: 'SPX6900', decimals: 18 },
 }
 
 // Only pools that are confirmed deployed and have unique addresses
@@ -84,6 +85,13 @@ const POOLS: Pool[] = [
   { address: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b', token0: 'WAVAX', token1: 'USDC',  feeBps: 5n   },
   // DLMM pools (1% fee)
   { address: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7', token0: 'ARENA', token1: 'AEON',  feeBps: 100n },
+  // New pools — deployed 2026-06-29
+  { address: '0x04de9ee7b6355ec643db415b2212734390fcb2f8', token0: 'AEON',  token1: 'WBTCB', feeBps: 30n  },
+  { address: '0x0d94e9bd42cbddeef6804b9813da82a42617cc01', token0: 'AEON',  token1: 'WBTCB', feeBps: 100n },
+  { address: '0xeb55b531c1881751d6c83ce343ee3870a3ed6cb3', token0: 'WAVAX', token1: 'WBTCB', feeBps: 30n  },
+  { address: '0x10235223cba1939eb5dee67a08cf1c065bc17a6e', token0: 'WAVAX', token1: 'WBTCB', feeBps: 100n },
+  { address: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e', token0: 'AEON',  token1: 'SPX',   feeBps: 30n  },
+  { address: '0xeac2c4b5b9a1169c7e46a44ed6a5e4836ba3bb95', token0: 'AEON',  token1: 'SPX',   feeBps: 100n },
 ]
 
 // ─── ABIs (minimal) ───────────────────────────────────────────────────────────
