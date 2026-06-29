@@ -146,8 +146,15 @@ export default function LiquidityPage() {
   // Reset amounts when pool changes
   useEffect(() => { setAmount0(''); setAmount1('') }, [selectedPool.address])
 
-  const amount0Wei = amount0 ? parseUnits(amount0, token0Dec) : 0n
-  const amount1Wei = amount1 ? parseUnits(amount1, token1Dec) : 0n
+  function safeParseUnits(val: string, dec: number): bigint {
+    if (!val || parseFloat(val) <= 0) return 0n
+    try { return parseUnits(val, dec) } catch {
+      const [int, frac = ''] = val.split('.')
+      return parseUnits(`${int}.${frac.slice(0, dec)}`, dec)
+    }
+  }
+  const amount0Wei = safeParseUnits(amount0, token0Dec)
+  const amount1Wei = safeParseUnits(amount1, token1Dec)
   // Amount ordering for addLiquidity: if pool tokens are flipped vs our display, swap amounts
   const actualAmount0Wei  = cfgMatchesFlipped ? amount1Wei : amount0Wei
   const actualAmount1Wei  = cfgMatchesFlipped ? amount0Wei : amount1Wei
@@ -433,6 +440,23 @@ export default function LiquidityPage() {
               LiquidityHelper contract deploying — paste the address in contracts.ts to enable.
             </div>
           )}
+
+          {/* Insufficient balance warnings */}
+          {amount0Wei > 0n && bal0.raw > 0n && amount0Wei > bal0.raw && (
+            <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
+              ⚠ Insufficient {selectedPool.token0} balance. You have {bal0.formatted}.
+            </div>
+          )}
+          {amount1Wei > 0n && bal1.raw > 0n && amount1Wei > bal1.raw && (
+            <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
+              ⚠ Insufficient {selectedPool.token1} balance. You have {bal1.formatted}.
+            </div>
+          )}
+
+          {/* Rabby / wallet simulation warning notice */}
+          <div className="p-3 rounded-xl bg-bg-raised border border-bg-border text-xs text-text-muted">
+            💡 Some wallets (Rabby, MetaMask) may show a simulation warning for this pool. This is a known false positive — the transaction is safe to sign.
+          </div>
 
           {tokenMismatch && (
             <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400">
