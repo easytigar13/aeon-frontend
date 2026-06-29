@@ -71,16 +71,19 @@ const TOKENS: Record<string, Token> = {
 
 // Only pools that are confirmed deployed and have unique addresses
 const POOLS: Pool[] = [
+  // vAMM pools (1% fee)
   { address: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489', token0: 'AEON',  token1: 'WAVAX', feeBps: 100n },
   { address: '0xFD029a446632618f218189d4a0B572896CD29B58', token0: 'AEON',  token1: 'USDC',  feeBps: 100n },
   { address: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086', token0: 'WAVAX', token1: 'USDC',  feeBps: 30n  },
-  { address: '0x1C95905E0C7D290A46E1d970BeCD315BE10b3421', token0: 'AEON',  token1: 'ARENA', feeBps: 30n  },
-  { address: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7', token0: 'ARENA', token1: 'AEON',  feeBps: 100n },
   { address: '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77', token0: 'ARENA', token1: 'USDC',  feeBps: 30n  },
   { address: '0x19aE273606588fb17D99572321eAD9b0B060DF00', token0: 'COQ',   token1: 'USDC',  feeBps: 30n  },
-  { address: '0x29c818b0929F9D247157f7b17a49B89664C9efcE', token0: 'AEON',  token1: 'USDC',  feeBps: 30n  },
+  // CL pools (0.3% fee) — same pairs, different pools → main arb targets
   { address: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6', token0: 'AEON',  token1: 'WAVAX', feeBps: 30n  },
+  { address: '0x29c818b0929F9D247157f7b17a49B89664C9efcE', token0: 'AEON',  token1: 'USDC',  feeBps: 30n  },
+  { address: '0x1C95905E0C7D290A46E1d970BeCD315BE10b3421', token0: 'AEON',  token1: 'ARENA', feeBps: 30n  },
   { address: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b', token0: 'WAVAX', token1: 'USDC',  feeBps: 5n   },
+  // DLMM pools (1% fee)
+  { address: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7', token0: 'ARENA', token1: 'AEON',  feeBps: 100n },
 ]
 
 // ─── ABIs (minimal) ───────────────────────────────────────────────────────────
@@ -203,18 +206,21 @@ function findArbs(states: PoolState[]): ArbOpp[] {
 
       // Find tokens in common
       const common = A_tok.filter(t => B_tok.includes(t))
-      if (common.length !== 1) continue   // need exactly 1 shared token (the mid)
+      if (common.length === 0) continue   // unrelated pools
 
-      const mid  = common[0]
-      const base = A_tok.find(t => t !== mid)!
-      if (!B_tok.includes(base) === false && !B_tok.find(t => t !== mid)) continue
+      // Build (base, mid) pairs to try:
+      //   • 1 shared token:  standard cross-pair arb  (base = non-shared, mid = shared)
+      //   • 2 shared tokens: same-pair across pools    (try each token as mid)
+      const pairs: [string, string][] = common.length === 2
+        ? [[A_tok[0], A_tok[1]], [A_tok[1], A_tok[0]]]   // (base=tok0,mid=tok1) + flipped
+        : [[A_tok.find(t => !common.includes(t))!, common[0]]]
 
-      // We want: base → mid in pool A, mid → base in pool B (or vice versa)
+      for (const [base, mid] of pairs) {
       const tokenBase = TOKENS[base]
       const tokenMid  = TOKENS[mid]
       if (!tokenBase || !tokenMid) continue
 
-      for (const [pBuy, pSell] of [[A, B], [B, A]]) {
+      for (const [pBuy, pSell] of [[A, B], [B, A]] as [PoolState, PoolState][]) {
         // pBuy: sell tokenBase → get tokenMid
         const midIsT0_buy  = pBuy.onchain0 === tokenMid.address.toLowerCase()
         const [rBaseIn, rMidOut] = midIsT0_buy
@@ -255,7 +261,8 @@ function findArbs(states: PoolState[]): ArbOpp[] {
           profitRaw,
           profitPct,
         })
-      }
+      }   // end direction loop
+      }   // end (base, mid) pairs loop
     }
   }
 
