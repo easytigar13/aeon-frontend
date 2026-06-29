@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowRight, Flame, Lock, Vote, TrendingUp, Zap, Shield, BadgeCheck } from 'lucide-react'
+import { ArrowRight, Flame, Lock, TrendingUp, Zap, Shield, Crown, AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react'
 
 export default function HomePage() {
   return (
@@ -57,6 +57,148 @@ export default function HomePage() {
               <div className="text-2xs text-text-muted">{stat.sub}</div>
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* Why AEON is Different — The Core Pitch */}
+      <section className="max-w-7xl mx-auto px-4 py-16">
+        <div className="text-center mb-14">
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 mb-6">
+            <AlertTriangle size={12} className="text-red-400" />
+            <span className="text-xs font-mono text-red-400 font-bold tracking-wider uppercase">Why most ve(3,3) fail</span>
+          </div>
+          <h2 className="font-display font-bold text-4xl md:text-5xl text-text-primary mb-6 leading-tight">
+            Farmers killed every<br />protocol before this one.
+          </h2>
+          <p className="text-text-secondary text-lg max-w-2xl mx-auto leading-relaxed">
+            Mercenary capital arrives, chases the highest APR, dumps the token, and leaves.
+            The protocol bleeds to zero. It's happened every single time — until now.
+          </p>
+        </div>
+
+        {/* The flip */}
+        <div className="grid md:grid-cols-2 gap-6 mb-16">
+          {/* Before / broken model */}
+          <div className="card p-8 border-red-500/20 bg-red-500/5 relative overflow-hidden">
+            <div className="absolute top-4 right-4 text-xs font-mono text-red-400/40 font-bold uppercase tracking-widest">Every other ve(3,3)</div>
+            <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mb-5">
+              <AlertTriangle size={20} className="text-red-400" />
+            </div>
+            <h3 className="font-display font-bold text-xl text-text-primary mb-4">The broken loop</h3>
+            <div className="space-y-3">
+              {[
+                'Farmer arrives for the highest APR',
+                'Farmer votes for their own pool',
+                'Farmer earns emissions → sells',
+                'Token price collapses',
+                'APR collapses. Everyone leaves.',
+              ].map((step, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-2xs font-mono text-red-400">{i + 1}</span>
+                  </div>
+                  <span className="text-sm text-text-secondary">{step}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
+              <span className="text-xs font-mono text-red-400">Result: −99% in 3 months. Every time.</span>
+            </div>
+          </div>
+
+          {/* AEON model */}
+          <div className="card p-8 border-aeon-400/20 bg-aeon-400/5 relative overflow-hidden">
+            <div className="absolute top-4 right-4 text-xs font-mono text-aeon-400/40 font-bold uppercase tracking-widest">AEON</div>
+            <div className="w-10 h-10 rounded-xl bg-aeon-400/10 flex items-center justify-center mb-5">
+              <Crown size={20} className="text-aeon-400" />
+            </div>
+            <h3 className="font-display font-bold text-xl text-text-primary mb-4">Farmers serve token holders</h3>
+            <div className="space-y-3">
+              {[
+                'Farmer must provide real LP first',
+                'LP generates real trading fees',
+                'Fees flow to veNFT voters (token holders)',
+                'Token holders vote → decide who earns',
+                'Farmers who serve holders get rewarded',
+              ].map((step, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-aeon-400/20 border border-aeon-400/30 flex items-center justify-center shrink-0 mt-0.5">
+                    <CheckCircle2 size={10} className="text-aeon-400" />
+                  </div>
+                  <span className="text-sm text-text-secondary">{step}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 p-3 rounded-xl bg-aeon-400/10 border border-aeon-400/20">
+              <span className="text-xs font-mono text-aeon-400">Token holders are the bosses. Always.</span>
+            </div>
+          </div>
+        </div>
+
+        {/* The big insight */}
+        <div className="card-raised border-gradient p-10 md:p-14 text-center relative overflow-hidden mb-16">
+          <div className="absolute inset-0 bg-gradient-to-br from-aeon-400/5 via-transparent to-violet-500/5 pointer-events-none" />
+          <div className="relative">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-aeon-400/10 border border-aeon-400/20 mb-6">
+              <Zap size={12} className="text-aeon-400" />
+              <span className="text-xs font-mono text-aeon-400 font-bold tracking-wider uppercase">The Inversion</span>
+            </div>
+            <h2 className="font-display font-bold text-4xl md:text-5xl text-text-primary mb-6 leading-tight">
+              You can't farm AEON<br />
+              <span className="text-gradient-aeon">without feeding the holders first.</span>
+            </h2>
+            <p className="text-text-secondary text-lg max-w-2xl mx-auto leading-relaxed mb-10">
+              Every emission in AEON is backed by a fee that already happened.
+              Every farmer that wants a reward must first create value for someone who already holds.
+              That's not a rule — it's the architecture.
+            </p>
+            <div className="flex flex-wrap justify-center gap-3">
+              <Link href="/lock" className="btn-primary flex items-center gap-2">
+                Become a Holder <Crown size={16} />
+              </Link>
+              <Link href="/earn" className="btn-secondary flex items-center gap-2">
+                Provide Liquidity <ChevronRight size={16} />
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* The Sticky LP Flywheel teaser */}
+        <div className="grid md:grid-cols-3 gap-4 mb-4">
+          {[
+            {
+              icon: <TrendingUp size={20} className="text-aeon-400" />,
+              title: 'APR with a floor',
+              body: 'If APR is 20% and price is $1, price is defended for the entire year — every emission is paid for by fees that already exist. No dilution from thin air.',
+              color: 'aeon',
+            },
+            {
+              icon: <Crown size={20} className="text-violet-400" />,
+              title: 'Sticky LP magnet',
+              body: 'LPs who earn real fees don\'t leave. Holders who earn from those fees don\'t sell. Both groups reinforce each other. That\'s the magnet.',
+              color: 'violet',
+            },
+            {
+              icon: <Flame size={20} className="text-emerald-400" />,
+              title: 'Flywheel, not spiral',
+              body: 'Once the loop is running, more LP → more fees → more holder yield → higher price → better APR for everyone. Upward only.',
+              color: 'emerald',
+            },
+          ].map(item => (
+            <div key={item.title} className={`card p-6 border-${item.color === 'aeon' ? 'aeon-400' : item.color === 'violet' ? 'violet-400' : 'emerald-400'}/10`}>
+              <div className="w-10 h-10 rounded-xl bg-bg-raised flex items-center justify-center mb-4">
+                {item.icon}
+              </div>
+              <h3 className="font-display font-semibold text-text-primary mb-2">{item.title}</h3>
+              <p className="text-text-secondary text-sm leading-relaxed">{item.body}</p>
+            </div>
+          ))}
+        </div>
+
+        <div className="text-center mt-8">
+          <p className="font-display font-bold text-2xl text-text-primary">
+            Join the revolution of the new era ve(3,3). <span className="text-gradient-aeon">Be early. Be a holder.</span>
+          </p>
         </div>
       </section>
 
