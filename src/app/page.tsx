@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ArrowRight, Flame, Lock, TrendingUp, Zap, Shield, Crown, AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react'
+import { LiveHomepageStats } from '@/components/LiveHomepageStats'
 
 export default function HomePage() {
   return (
@@ -44,20 +45,7 @@ export default function HomePage() {
         </div>
 
         {/* Live stats bar */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-4xl mx-auto">
-          {[
-            { label: 'Total Value Locked', value: '$—',     sub: 'across 46 pools' },
-            { label: 'AEON Price',         value: '$—',     sub: 'Chainlink + TWAP' },
-            { label: 'Total Burned',        value: '— AEON', sub: 'via buybacks + furnace' },
-            { label: 'Epoch APR',           value: '—%',    sub: 'current epoch' },
-          ].map(stat => (
-            <div key={stat.label} className="card p-4 text-center">
-              <div className="stat-value text-2xl mb-1">{stat.value}</div>
-              <div className="stat-label mb-1">{stat.label}</div>
-              <div className="text-2xs text-text-muted">{stat.sub}</div>
-            </div>
-          ))}
-        </div>
+        <LiveHomepageStats />
       </section>
 
       {/* Why AEON is Different — The Core Pitch */}
