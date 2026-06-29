@@ -5,8 +5,8 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
-import { POOLS, CONTRACTS } from '@/config/contracts'
-import { ERC20_ABI, GAUGE_ABI, GAUGE_FACTORY_ABI } from '@/config/abis'
+import { POOLS, CONTRACTS, TOKENS } from '@/config/contracts'
+import { ERC20_ABI, GAUGE_ABI, GAUGE_FACTORY_ABI, PAIR_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -33,12 +33,56 @@ function fmtApr(apr: number | null): string {
   return apr.toFixed(2) + '%'
 }
 
+function usePoolPrice(pool: typeof UNIQUE_POOLS[number]) {
+  const { data: reservesData } = useReadContracts({
+    contracts: [
+      { address: pool.address as `0x${string}`, abi: PAIR_ABI, functionName: 'getReserves' as const },
+      { address: pool.address as `0x${string}`, abi: PAIR_ABI, functionName: 'token0'      as const },
+    ],
+    query: { refetchInterval: 15000 },
+  })
+  if (!reservesData || reservesData[0].status !== 'success' || reservesData[1].status !== 'success') {
+    return { hasLiquidity: false, price: null, priceLabel: null }
+  }
+  const [r0, r1] = reservesData[0].result as [bigint, bigint, number]
+  const onChainToken0 = (reservesData[1].result as string).toLowerCase()
+  const hasLiquidity  = r0 > 0n && r1 > 0n
+
+  // Identify token decimals
+  const tk0 = Object.values(TOKENS).find(t => t.address.toLowerCase() === onChainToken0)
+  const tk1Key = Object.entries(TOKENS).find(([, t]) => t.address.toLowerCase() !== onChainToken0 &&
+    [pool.token0, pool.token1].some(k => TOKENS[k as keyof typeof TOKENS]?.address.toLowerCase() === t.address.toLowerCase()))
+  const dec0 = tk0?.decimals ?? 18
+  // find dec1 from pool config
+  const cfgT0 = TOKENS[pool.token0 as keyof typeof TOKENS]
+  const cfgT1 = TOKENS[pool.token1 as keyof typeof TOKENS]
+  const isFlipped = cfgT0 && onChainToken0 !== cfgT0.address.toLowerCase()
+  const dec1 = isFlipped ? (cfgT0?.decimals ?? 18) : (cfgT1?.decimals ?? 18)
+
+  if (!hasLiquidity) return { hasLiquidity: false, price: null, priceLabel: null }
+
+  // price = r1/r0 adjusted for decimals, expressed as token0_cfg per token1_cfg
+  const adjR0 = Number(r0) / 10 ** dec0
+  const adjR1 = Number(r1) / 10 ** dec1
+  // price of token1-cfg in terms of token0-cfg
+  const price = isFlipped ? adjR0 / adjR1 : adjR1 / adjR0
+  const sym0 = cfgT0?.symbol ?? pool.token0
+  const sym1 = cfgT1?.symbol ?? pool.token1
+  const priceLabel = price < 0.001
+    ? `1 ${sym1} = ${(1 / price).toFixed(2)} ${sym0}`
+    : `1 ${sym1} = ${price < 1 ? price.toFixed(6) : price.toFixed(4)} ${sym0}`
+
+  return { hasLiquidity, price, priceLabel }
+}
+
 function PoolRow({ pool, wallet, tvlUsd, apr }: { pool: typeof UNIQUE_POOLS[number]; wallet?: `0x${string}`; tvlUsd?: number | null; apr?: number | null }) {
   const [expanded,   setExpanded]   = useState(false)
   const [stakeAmt,   setStakeAmt]   = useState('')
   const [unstakeAmt, setUnstakeAmt] = useState('')
   const [step,       setStep]       = useState<Step>('idle')
   const [errMsg,     setErrMsg]     = useState('')
+
+  const poolPrice = usePoolPrice(pool)
 
   // Read gauge address from factory
   const { data: gaugeAddr } = useReadContract({
@@ -167,14 +211,21 @@ function PoolRow({ pool, wallet, tvlUsd, apr }: { pool: typeof UNIQUE_POOLS[numb
       >
         <div className="col-span-3 flex items-center gap-2">
           <div className="flex -space-x-1">
-            <div className="w-7 h-7 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-xs font-bold z-10">{pool.token0[0]}</div>
-            <div className="w-7 h-7 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-xs font-bold">{pool.token1[0]}</div>
+            <div className="w-7 h-7 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-xs font-bold z-10">{pool.token0.startsWith('WBTC') ? '₿' : pool.token0[0]}</div>
+            <div className="w-7 h-7 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-xs font-bold">{pool.token1.startsWith('WBTC') ? '₿' : pool.token1[0]}</div>
           </div>
           <div>
-            <div className="text-sm font-medium text-text-primary">{pool.name}</div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm font-medium text-text-primary">{pool.name}</span>
+              {poolPrice.hasLiquidity
+                ? <span className="text-2xs px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-mono font-bold">● Active</span>
+                : <span className="text-2xs px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-mono font-bold">● No Liquidity</span>
+              }
+            </div>
             <div className="flex items-center gap-1 mt-0.5">
               <span className={clsx('text-2xs font-mono font-bold', pool.type === 'vAMM' ? 'text-blue-400' : pool.type === 'CL' ? 'text-violet-400' : 'text-emerald-400')}>{pool.type}</span>
               <span className="text-2xs text-text-muted">· {pool.fee}</span>
+              {poolPrice.priceLabel && <span className="text-2xs text-text-muted font-mono ml-1">· {poolPrice.priceLabel}</span>}
             </div>
           </div>
         </div>
@@ -206,6 +257,16 @@ function PoolRow({ pool, wallet, tvlUsd, apr }: { pool: typeof UNIQUE_POOLS[numb
           ) : !gauge ? (
             <div className="p-4 text-center text-xs text-yellow-400">Gauge not deployed for this pool yet</div>
           ) : (
+            {/* Pool price / range status */}
+            <div className={clsx('mb-4 p-3 rounded-xl flex items-center justify-between text-xs font-mono',
+              poolPrice.hasLiquidity ? 'bg-emerald-500/5 border border-emerald-500/20' : 'bg-red-500/5 border border-red-500/20'
+            )}>
+              <span className={poolPrice.hasLiquidity ? 'text-emerald-400' : 'text-red-400'}>
+                {poolPrice.hasLiquidity ? '● Pool is active — earning fees on every trade' : '● Pool has no liquidity — add funds to start earning'}
+              </span>
+              {poolPrice.priceLabel && <span className="text-text-muted">{poolPrice.priceLabel}</span>}
+            </div>
+
             <div className="grid md:grid-cols-2 gap-6">
               {/* Stake / Unstake */}
               <div>
