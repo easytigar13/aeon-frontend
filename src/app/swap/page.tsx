@@ -153,7 +153,7 @@ export default function SwapPage() {
       tokenIn:  step.tokenIn  === 'AVAX' ? wavaxAddr : TOKENS[step.tokenIn  as keyof typeof TOKENS].address,
       tokenOut: step.tokenOut === 'AVAX' ? wavaxAddr : TOKENS[step.tokenOut as keyof typeof TOKENS].address,
       pool:     step.poolAddress,
-      poolType: 0,
+      poolType: step.poolType,
       feeBps:   Number(step.feeBps),
     }))
   }

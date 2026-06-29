@@ -5,7 +5,7 @@ import { clsx } from 'clsx'
 import { useAccount, useBalance, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, TOKENS, CONTRACTS } from '@/config/contracts'
+import { POOLS, TOKENS, CONTRACTS, CL_RANGE_PRESETS } from '@/config/contracts'
 import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI } from '@/config/abis'
 
 type Tab = 'add' | 'remove'
@@ -51,6 +51,7 @@ export default function LiquidityPage() {
   const [amount0,        setAmount0]        = useState('')
   const [amount1,        setAmount1]        = useState('')
   const [numBins,        setNumBins]        = useState(200)
+  const [clPreset,       setClPreset]       = useState<string>('full')
   const [removeAmount,   setRemoveAmount]   = useState(50)
   const [showPoolPicker, setShowPoolPicker] = useState(false)
   const [step,           setStep]           = useState<Step>('idle')
@@ -350,43 +351,103 @@ export default function LiquidityPage() {
           )}
 
           {poolType === 'CL' && (
-            <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-violet-400" />
-                <span className="text-xs font-semibold text-violet-300">CL Pool — Full-Range Liquidity</span>
+            <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-violet-400" />
+                  <span className="text-xs font-semibold text-violet-300">CL Pool — Price Range</span>
+                </div>
+                <span className="text-xs text-text-muted font-mono">{selectedPool.fee} fee</span>
               </div>
-              <p className="text-xs text-text-muted leading-relaxed">
-                AeonDEX CL pools use a <strong className="text-text-secondary">0.3% fee tier</strong> and provide liquidity across the full price range (equivalent to Uniswap V2 mechanics). Tick-based concentrated ranges are not yet supported by this implementation.
-              </p>
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                {[
-                  { label: 'Fee Tier', value: selectedPool.fee },
-                  { label: 'Range',    value: 'Full Range' },
-                  { label: 'In Range', value: 'Always' },
-                ].map(s => (
-                  <div key={s.label} className="bg-bg-raised rounded-lg p-2 text-center">
-                    <div className="text-2xs text-text-muted">{s.label}</div>
-                    <div className="text-xs font-mono text-violet-300 font-bold">{s.value}</div>
-                  </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {CL_RANGE_PRESETS.map(p => (
+                  <button
+                    key={p.key}
+                    onClick={() => setClPreset(p.key)}
+                    className={clsx(
+                      'py-2 rounded-lg text-xs font-medium transition-all border',
+                      clPreset === p.key
+                        ? 'bg-violet-500/20 text-violet-300 border-violet-500/40'
+                        : 'bg-bg-raised text-text-muted border-bg-border hover:border-bg-hover'
+                    )}
+                  >
+                    <div>{p.label}</div>
+                    <div className="text-2xs opacity-60 mt-0.5">{p.desc}</div>
+                  </button>
                 ))}
               </div>
+              {clPreset !== 'full' && (
+                <div className="flex gap-2">
+                  {(() => {
+                    const preset = CL_RANGE_PRESETS.find(p => p.key === clPreset)!
+                    return (
+                      <>
+                        <div className="flex-1 bg-bg-raised rounded-lg p-2 text-center">
+                          <div className="text-2xs text-text-muted">Min Price</div>
+                          <div className="text-xs font-mono text-violet-300 font-bold">{preset.pctLow > 0 ? '+' : ''}{preset.pctLow}%</div>
+                        </div>
+                        <div className="flex-1 bg-bg-raised rounded-lg p-2 text-center">
+                          <div className="text-2xs text-text-muted">Max Price</div>
+                          <div className="text-xs font-mono text-violet-300 font-bold">+{preset.pctHigh}%</div>
+                        </div>
+                        <div className="flex-1 bg-bg-raised rounded-lg p-2 text-center">
+                          <div className="text-2xs text-text-muted">Liquidity</div>
+                          <div className="text-xs font-mono text-violet-300 font-bold">Concentrated</div>
+                        </div>
+                      </>
+                    )
+                  })()}
+                </div>
+              )}
             </div>
           )}
 
           {poolType === 'DLMM' && (
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                <span className="text-xs font-semibold text-emerald-300">DLMM Pool — Full-Range Liquidity</span>
+            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span className="text-xs font-semibold text-emerald-300">DLMM Pool — Bin Distribution</span>
+                </div>
+                <span className="text-xs text-text-muted font-mono">
+                  {selectedPool.fee} · {'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps/bin` : '800 bps/bin'}
+                </span>
               </div>
-              <p className="text-xs text-text-muted leading-relaxed">
-                AeonDEX DLMM pools use a <strong className="text-text-secondary">1% fee tier</strong> with a fixed bin step of <strong className="text-text-secondary">{'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps` : '800 bps'}</strong>. Liquidity is provided across the full price range. Discrete bin positioning is not yet supported by this implementation.
-              </p>
-              <div className="grid grid-cols-3 gap-2 pt-1">
+              <div>
+                <div className="flex justify-between mb-1.5">
+                  <span className="text-xs text-text-muted">Number of Bins</span>
+                  <span className="text-xs font-mono text-emerald-300 font-bold">{numBins} bins</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={69}
+                  value={numBins}
+                  onChange={e => setNumBins(parseInt(e.target.value))}
+                  className="w-full accent-emerald-400 mb-2"
+                />
+                <div className="flex gap-1.5">
+                  {[1, 5, 10, 20, 50, 69].map(n => (
+                    <button
+                      key={n}
+                      onClick={() => setNumBins(n)}
+                      className={clsx(
+                        'flex-1 py-1.5 rounded-lg text-xs font-mono transition-all border',
+                        numBins === n
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                          : 'bg-bg-raised text-text-muted border-bg-border hover:border-bg-hover'
+                      )}
+                    >
+                      {n}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: 'Fee Tier', value: selectedPool.fee },
-                  { label: 'Bin Step', value: 'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps` : '—' },
-                  { label: 'Range',    value: 'Full Range' },
+                  { label: 'Bin Step', value: 'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps` : '800 bps' },
+                  { label: 'Active Bins', value: `${numBins}` },
+                  { label: 'Distribution', value: 'Uniform' },
                 ].map(s => (
                   <div key={s.label} className="bg-bg-raised rounded-lg p-2 text-center">
                     <div className="text-2xs text-text-muted">{s.label}</div>
