@@ -10,7 +10,7 @@ import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI } from '@/config/abis'
 
 type Tab = 'add' | 'remove'
 type PoolType = 'vAMM' | 'CL' | 'DLMM'
-type Step = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done' | 'remove' | 'remove_wait' | 'remove_done'
+type Step = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done' | 'approve_lp' | 'approve_lp_wait' | 'remove' | 'remove_wait' | 'remove_done'
 
 const HELPER = CONTRACTS.LiquidityHelper
 const MAX_UINT = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
@@ -70,6 +70,36 @@ export default function LiquidityPage() {
 
   const bal0 = useTokenBal(token0Addr, address)
   const bal1 = useTokenBal(token1Addr, address)
+
+  // LP token balance for remove tab
+  const { data: lpBalRaw, refetch: refetchLpBal } = useReadContract({
+    address: selectedPool.address,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+    query: { enabled: !!address },
+  })
+  const lpBal = (lpBalRaw as bigint | undefined) ?? 0n
+  const lpBalFormatted = parseFloat(formatUnits(lpBal, 18)).toFixed(8)
+
+  // LP allowance for helper
+  const { data: lpAllowanceRaw } = useReadContract({
+    address: selectedPool.address,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: address ? [address, HELPER] : undefined,
+    query: { enabled: !!address },
+  })
+  const lpAllowance = (lpAllowanceRaw as bigint | undefined) ?? 0n
+
+  // Pool total supply for preview calculation
+  const { data: totalSupplyRaw } = useReadContract({
+    address: selectedPool.address,
+    abi: ERC20_ABI,
+    functionName: 'totalSupply',
+    query: { refetchInterval: 15000 },
+  })
+  const totalSupply = (totalSupplyRaw as bigint | undefined) ?? 0n
 
   const allowance0 = useAllowance(token0Addr, address)
   const allowance1 = useAllowance(token1Addr, address)
@@ -194,10 +224,11 @@ export default function LiquidityPage() {
   // Advance step state when tx confirms
   useEffect(() => {
     if (!txSuccess) return
-    if (step === 'approve0_wait')  { setStep('approve1'); return }
-    if (step === 'approve1_wait')  { setStep('addliq');   return }
-    if (step === 'addliq_wait')    { setStep('done');      setAmount0(''); setAmount1(''); return }
-    if (step === 'remove_wait')    { setStep('remove_done'); return }
+    if (step === 'approve0_wait')    { setStep('approve1'); return }
+    if (step === 'approve1_wait')    { setStep('addliq');   return }
+    if (step === 'addliq_wait')      { setStep('done');      setAmount0(''); setAmount1(''); return }
+    if (step === 'approve_lp_wait')  { setStep('remove');    return }
+    if (step === 'remove_wait')      { setStep('remove_done'); refetchLpBal(); return }
   }, [txSuccess])
 
   // Execute the right tx for the current step
@@ -226,9 +257,19 @@ export default function LiquidityPage() {
       })
       setStep('addliq_wait')
     }
+    if (step === 'approve_lp') {
+      writeContract({ address: selectedPool.address, abi: ERC20_ABI, functionName: 'approve', args: [HELPER, MAX_UINT] })
+      setStep('approve_lp_wait')
+    }
     if (step === 'remove') {
-      // For remove: user needs LP token balance — we pass a placeholder of removing removeAmount% of nothing for now
-      // This requires knowing the LP balance; for now we just call with 0 to show the flow
+      const lpToRemove = lpBal * BigInt(removeAmount) / 100n
+      if (lpToRemove === 0n) { setStep('idle'); return }
+      writeContract({
+        address: HELPER,
+        abi: LIQUIDITY_HELPER_ABI,
+        functionName: 'removeLiquidity',
+        args: [selectedPool.address, lpToRemove, address!],
+      })
       setStep('remove_wait')
     }
   }, [step])
@@ -598,25 +639,65 @@ export default function LiquidityPage() {
             </div>
           </div>
 
-          <div className="card p-4">
-            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">You Receive</div>
-            <div className="space-y-2">
-              <div className="flex justify-between"><span className="text-sm text-text-muted">{selectedPool.token0}</span><span className="font-mono text-text-primary">—</span></div>
-              <div className="flex justify-between"><span className="text-sm text-text-muted">{selectedPool.token1}</span><span className="font-mono text-text-primary">—</span></div>
-            </div>
-          </div>
+          {(() => {
+            const lpToRemove = lpBal * BigInt(removeAmount) / 100n
+            const recv0 = totalSupply > 0n ? lpToRemove * reserve0 / totalSupply : 0n
+            const recv1 = totalSupply > 0n ? lpToRemove * reserve1 / totalSupply : 0n
+            const recv0Fmt = parseFloat(formatUnits(isToken0First ? recv0 : recv1, token0Dec)).toFixed(6)
+            const recv1Fmt = parseFloat(formatUnits(isToken0First ? recv1 : recv0, token1Dec)).toFixed(6)
+            return (
+              <div className="card p-4">
+                <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">You Receive</div>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-text-muted">{selectedPool.token0}</span>
+                    <span className="font-mono text-text-primary">{lpBal > 0n ? recv0Fmt : '—'}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-text-muted">{selectedPool.token1}</span>
+                    <span className="font-mono text-text-primary">{lpBal > 0n ? recv1Fmt : '—'}</span>
+                  </div>
+                </div>
+                {isConnected && lpBal > 0n && (
+                  <div className="mt-3 pt-3 border-t border-bg-border text-xs text-text-muted flex justify-between">
+                    <span>LP Balance</span>
+                    <span className="font-mono">{lpBalFormatted}</span>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {errMsg && (
             <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">{errMsg}</div>
           )}
 
+          {step === 'remove_done' && (
+            <div className="p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-xs text-green-400 font-mono flex items-center gap-2">
+              <CheckCircle2 size={14} /> Liquidity removed successfully!
+            </div>
+          )}
+
           <button
-            onClick={() => { if (!isConnected) { openConnectModal?.(); return } }}
-            disabled={isConnected && !helperReady}
+            onClick={() => {
+              if (!isConnected) { openConnectModal?.(); return }
+              if (lpBal === 0n) return
+              setErrMsg('')
+              if (lpAllowance < lpBal * BigInt(removeAmount) / 100n) {
+                setStep('approve_lp')
+              } else {
+                setStep('remove')
+              }
+            }}
+            disabled={isConnected && (lpBal === 0n || ['approve_lp','approve_lp_wait','remove','remove_wait'].includes(step))}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             <Minus size={16} />
-            {!isConnected ? 'Connect Wallet' : !helperReady ? 'Helper Not Deployed' : 'Remove Liquidity'}
+            {!isConnected ? 'Connect Wallet'
+              : lpBal === 0n ? 'No LP Balance'
+              : step === 'approve_lp' || step === 'approve_lp_wait' ? 'Approving LP…'
+              : step === 'remove' || step === 'remove_wait' ? 'Removing…'
+              : 'Remove Liquidity'}
           </button>
         </div>
       )}
