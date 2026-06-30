@@ -1,5 +1,60 @@
 // ABI fragments — only what the frontend needs
 
+// Algebra Integral NonfungiblePositionManager — mint a concentrated-liquidity position
+export const ALGEBRA_POSITION_MANAGER_ABI = [
+  {
+    name: 'mint',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [{
+      name: 'params', type: 'tuple',
+      components: [
+        { name: 'token0',          type: 'address' },
+        { name: 'token1',          type: 'address' },
+        { name: 'tickLower',       type: 'int24'   },
+        { name: 'tickUpper',       type: 'int24'   },
+        { name: 'amount0Desired',  type: 'uint256' },
+        { name: 'amount1Desired',  type: 'uint256' },
+        { name: 'amount0Min',      type: 'uint256' },
+        { name: 'amount1Min',      type: 'uint256' },
+        { name: 'recipient',       type: 'address' },
+        { name: 'deadline',        type: 'uint256' },
+      ],
+    }],
+    outputs: [
+      { name: 'tokenId',   type: 'uint256' },
+      { name: 'liquidity', type: 'uint128' },
+      { name: 'amount0',   type: 'uint256' },
+      { name: 'amount1',   type: 'uint256' },
+    ],
+  },
+] as const
+
+// Algebra Integral pool — tick spacing and global state (sqrtPrice, current tick)
+export const ALGEBRA_POOL_ABI = [
+  {
+    name: 'tickSpacing',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'int24' }],
+  },
+  {
+    name: 'globalState',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [
+      { name: 'price',        type: 'uint160' },
+      { name: 'tick',         type: 'int24'   },
+      { name: 'lastFee',      type: 'uint16'  },
+      { name: 'pluginConfig', type: 'uint8'   },
+      { name: 'communityFee', type: 'uint16'  },
+      { name: 'unlocked',     type: 'bool'    },
+    ],
+  },
+] as const
+
 export const AEON_ROUTER_ABI = [
   {
     name: 'swapExactTokensForTokens',
@@ -670,3 +725,4 @@ export const LB_FACTORY_ABI = [
     }],
   },
 ] as const
+

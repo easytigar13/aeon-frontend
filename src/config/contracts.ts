@@ -19,6 +19,8 @@ export const CONTRACTS = {
   LBFactory:           '0xDa37277dE28547BfCE9431281560B60Cea00B1Af' as `0x${string}`,
   LBRouter:            '0x93B1754B48Fdb8C0519975B01cD5c35957066Ab9' as `0x${string}`,
   LBQuoter:            '0x1dfe97A9555d09F08ae72c96a18702a232221e8C' as `0x${string}`,
+  // Algebra Integral — CL position manager deployed to Avalanche C-Chain
+  AlgebraPositionManager: '0xe35ff3f8F55Af4E79FbFc19250fFf405c95Da910' as `0x${string}`,
 } as const
 
 export const TOKENS = {

@@ -6,16 +6,41 @@ import { useAccount, useBalance, useReadContract, useReadContracts, useWriteCont
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import { POOLS, TOKENS, CONTRACTS, CL_RANGE_PRESETS } from '@/config/contracts'
-import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, LB_ROUTER_ABI, LB_PAIR_ABI } from '@/config/abis'
+import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, LB_ROUTER_ABI, LB_PAIR_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_POOL_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 
 type Tab = 'add' | 'remove'
 type PoolType = 'vAMM' | 'CL' | 'DLMM'
 type Step = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done' | 'approve_lp' | 'approve_lp_wait' | 'remove' | 'remove_wait' | 'remove_done'
 
-const HELPER = CONTRACTS.LiquidityHelper
+const HELPER   = CONTRACTS.LiquidityHelper
 const LB_ROUTER = CONTRACTS.LBRouter
+const CL_PM    = CONTRACTS.AlgebraPositionManager
 const MAX_UINT = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+
+// Algebra Integral tick bounds (per spec)
+const MIN_TICK = -887272
+const MAX_TICK =  887272
+
+// Convert a human-price (token1/token0 in the pool's on-chain token ordering, adjusted for
+// display decimals) to the nearest valid Algebra tick, rounded to tickSpacing.
+function priceToAlgebraTick(
+  humanPrice: number,
+  dec0Onchain: number,
+  dec1Onchain: number,
+  tickSpacing: number,
+  round: 'floor' | 'ceil',
+): number {
+  if (humanPrice <= 0 || !isFinite(humanPrice)) return round === 'floor' ? MIN_TICK : MAX_TICK
+  // raw price = humanPrice * 10^(dec1-dec0)  (wei of token1 per wei of token0)
+  const rawPrice = humanPrice * Math.pow(10, dec1Onchain - dec0Onchain)
+  if (rawPrice <= 0 || !isFinite(rawPrice)) return round === 'floor' ? MIN_TICK : MAX_TICK
+  const rawTick = Math.log(rawPrice) / Math.log(1.0001)
+  const snapped = round === 'floor'
+    ? Math.floor(rawTick / tickSpacing) * tickSpacing
+    : Math.ceil(rawTick  / tickSpacing) * tickSpacing
+  return Math.max(MIN_TICK, Math.min(MAX_TICK, snapped))
+}
 const LB_PRECISION = BigInt('1000000000000000000') // 1e18 — sum of distributionX/Y arrays
 const LB_ID_SHIFT  = 8388608 // 2^23 — zero-price anchor for bin IDs
 
@@ -145,6 +170,32 @@ export default function LiquidityPage() {
     query: { enabled: !isDlmm },
   })
 
+  // CL-specific reads from Algebra pool
+  const isCl = poolType === 'CL'
+  const { data: clTickSpacingRaw } = useReadContract({
+    address: selectedPool.address, abi: ALGEBRA_POOL_ABI, functionName: 'tickSpacing',
+    query: { enabled: isCl },
+  })
+  const { data: clGlobalStateRaw } = useReadContract({
+    address: selectedPool.address, abi: ALGEBRA_POOL_ABI, functionName: 'globalState',
+    query: { enabled: isCl, refetchInterval: 15000 },
+  })
+  // Allowances to AlgebraPositionManager (for CL approvals)
+  const { data: allow0CLRaw } = useReadContract({
+    address: token0Addr, abi: ERC20_ABI, functionName: 'allowance',
+    args: address ? [address, CL_PM] : undefined,
+    query: { enabled: isCl && !!token0Addr && !!address },
+  })
+  const { data: allow1CLRaw } = useReadContract({
+    address: token1Addr, abi: ERC20_ABI, functionName: 'allowance',
+    args: address ? [address, CL_PM] : undefined,
+    query: { enabled: isCl && !!token1Addr && !!address },
+  })
+  const clTickSpacing = (clTickSpacingRaw as number | undefined) ?? 60
+  const clGlobalState = clGlobalStateRaw as { price: bigint; tick: number } | undefined
+  const allow0CL = (allow0CLRaw as bigint | undefined) ?? 0n
+  const allow1CL = (allow1CLRaw as bigint | undefined) ?? 0n
+
   // DLMM-specific reads from LBPair
   const { data: dlmmActiveIdRaw } = useReadContract({
     address: selectedPool.address, abi: LB_PAIR_ABI, functionName: 'getActiveId',
@@ -241,10 +292,25 @@ export default function LiquidityPage() {
   // Reset amounts when pool changes
   useEffect(() => { setAmount0(''); setAmount1(''); setMinPrice(''); setMaxPrice('') }, [selectedPool.address])
 
-  // DLMM: derive current price from reserves (token1 per token0)
-  const currentPrice = reserve0 > 0n && reserve1 > 0n
-    ? parseFloat(formatUnits(reserve1, token1Dec)) / parseFloat(formatUnits(reserve0, token0Dec))
-    : null
+  // Derive current display price:
+  // • CL pools: from Algebra globalState sqrtPriceX96 (token1/token0 in on-chain order)
+  // • vAMM / DLMM: from reserve ratio
+  const clCurrentPrice = (() => {
+    if (!clGlobalState?.price) return null
+    const sqrtX96 = Number(clGlobalState.price)
+    const rawPrice = (sqrtX96 / 2 ** 96) ** 2   // raw token1-per-token0
+    // Convert to display order: if config is flipped, invert
+    const dec0Onchain = cfgMatchesFlipped ? token1Dec : token0Dec
+    const dec1Onchain = cfgMatchesFlipped ? token0Dec : token1Dec
+    const humanOnchain = rawPrice * Math.pow(10, dec0Onchain - dec1Onchain)
+    return cfgMatchesFlipped ? 1 / humanOnchain : humanOnchain
+  })()
+
+  const currentPrice = isCl
+    ? clCurrentPrice
+    : (reserve0 > 0n && reserve1 > 0n
+        ? parseFloat(formatUnits(reserve1, token1Dec)) / parseFloat(formatUnits(reserve0, token0Dec))
+        : null)
 
   // DLMM: compute bins from price range
   const dlmmBinStep = 'binStep' in selectedPool ? (selectedPool as any).binStep as number : 800
@@ -277,10 +343,14 @@ export default function LiquidityPage() {
 
   const needApprove0 = isDlmm
     ? amount0Wei > 0n && allow0Router < amount0Wei
-    : amount0Wei > 0n && allowance0 < amount0Wei
+    : isCl
+      ? amount0Wei > 0n && allow0CL < amount0Wei
+      : amount0Wei > 0n && allowance0 < amount0Wei
   const needApprove1 = isDlmm
     ? amount1Wei > 0n && allow1Router < amount1Wei
-    : amount1Wei > 0n && allowance1 < amount1Wei
+    : isCl
+      ? amount1Wei > 0n && allow1CL < amount1Wei
+      : amount1Wei > 0n && allowance1 < amount1Wei
 
   const helperReady = HELPER !== '0x0000000000000000000000000000000000000000'
 
@@ -407,12 +477,12 @@ export default function LiquidityPage() {
     if (!address || !token0Addr || !token1Addr) return
     setErrMsg('')
     if (step === 'approve0') {
-      const spender = isDlmm ? LB_ROUTER : HELPER
+      const spender = isDlmm ? LB_ROUTER : isCl ? CL_PM : HELPER
       writeContract({ address: token0Addr, abi: ERC20_ABI, functionName: 'approve', args: [spender, MAX_UINT] })
       setStep('approve0_wait')
     }
     if (step === 'approve1') {
-      const spender = isDlmm ? LB_ROUTER : HELPER
+      const spender = isDlmm ? LB_ROUTER : isCl ? CL_PM : HELPER
       writeContract({ address: token1Addr, abi: ERC20_ABI, functionName: 'approve', args: [spender, MAX_UINT] })
       setStep('approve1_wait')
     }
@@ -424,11 +494,53 @@ export default function LiquidityPage() {
           setStep('idle')
           return
         }
+        writeContract({ address: LB_ROUTER, abi: LB_ROUTER_ABI, functionName: 'addLiquidity', args: [params] })
+        setStep('addliq_wait')
+        return
+      }
+      if (isCl) {
+        if (!actualToken0Addr || !actualToken1Addr || !address) {
+          setErrMsg('Missing token addresses.')
+          setStep('idle')
+          return
+        }
+        const lo = parseFloat(minPrice)
+        const hi = parseFloat(maxPrice)
+        if (!lo || !hi || lo <= 0 || hi <= lo) {
+          setErrMsg('Enter a valid price range (min < max).')
+          setStep('idle')
+          return
+        }
+        // Decimals in on-chain order (pool's token0/token1 ordering)
+        const dec0Onchain = cfgMatchesFlipped ? token1Dec : token0Dec
+        const dec1Onchain = cfgMatchesFlipped ? token0Dec : token1Dec
+        // User prices are in config display order; if flipped vs on-chain, swap & invert
+        const onchainMinPrice = cfgMatchesFlipped ? 1 / hi : lo
+        const onchainMaxPrice = cfgMatchesFlipped ? 1 / lo : hi
+        const tickLower = priceToAlgebraTick(onchainMinPrice, dec0Onchain, dec1Onchain, clTickSpacing, 'floor')
+        const tickUpper = priceToAlgebraTick(onchainMaxPrice, dec0Onchain, dec1Onchain, clTickSpacing, 'ceil')
+        if (tickLower >= tickUpper) {
+          setErrMsg('Price range too narrow — ticks collapsed to the same value.')
+          setStep('idle')
+          return
+        }
+        const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
         writeContract({
-          address: LB_ROUTER,
-          abi: LB_ROUTER_ABI,
-          functionName: 'addLiquidity',
-          args: [params],
+          address: CL_PM,
+          abi: ALGEBRA_POSITION_MANAGER_ABI,
+          functionName: 'mint',
+          args: [{
+            token0:         actualToken0Addr,
+            token1:         actualToken1Addr,
+            tickLower,
+            tickUpper,
+            amount0Desired: actualAmount0Wei,
+            amount1Desired: actualAmount1Wei,
+            amount0Min:     0n,
+            amount1Min:     0n,
+            recipient:      address,
+            deadline,
+          }],
         })
         setStep('addliq_wait')
         return
