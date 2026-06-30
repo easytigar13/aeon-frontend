@@ -15,6 +15,10 @@ export const CONTRACTS = {
   AeonGaugeFactory:    '0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6' as `0x${string}`,
   LiquidityHelper:     '0xFe307aA9b7514949Ee1a0F8a64E951d9277B62CA' as `0x${string}`,
   PairRegistry:        '0xcfcb643d8f51d640e0b81257340c1ca344238f48' as `0x${string}`,
+  // Trader Joe LB v2.2 — deployed 2026-06-30 to Avalanche C-Chain
+  LBFactory:           '0xDa37277dE28547BfCE9431281560B60Cea00B1Af' as `0x${string}`,
+  LBRouter:            '0x93B1754B48Fdb8C0519975B01cD5c35957066Ab9' as `0x${string}`,
+  LBQuoter:            '0x1dfe97A9555d09F08ae72c96a18702a232221e8C' as `0x${string}`,
 } as const
 
 export const TOKENS = {
@@ -57,34 +61,36 @@ export const POOLS = [
   { name: 'ARENA/USDC', token0: 'ARENA', token1: 'USDC', type: 'CL',   fee: '0.3%',  address: '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77' as `0x${string}` },
   { name: 'COQ/USDC',   token0: 'COQ',   token1: 'USDC', type: 'CL',   fee: '0.3%',  address: '0x19aE273606588fb17D99572321eAD9b0B060DF00' as `0x${string}` },
   { name: 'USDC/WUSDT', token0: 'WUSDT', token1: 'USDC', type: 'CL',   fee: '0.01%', address: '0xB1a5295A8133097E389221df70Ee1dd021B088F0' as `0x${string}` },
-  // DLMM — token0/token1 verified on-chain
-  { name: 'AEON/WAVAX', token0: 'WAVAX', token1: 'AEON', type: 'DLMM', fee: '1%',    binStep: 800, address: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489' as `0x${string}` },
-  { name: 'AEON/USDC',  token0: 'USDC',  token1: 'AEON', type: 'DLMM', fee: '1%',    binStep: 800, address: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
-  { name: 'AEON/WBTCE', token0: 'WBTCE', token1: 'AEON', type: 'DLMM', fee: '1%',    binStep: 800, address: '0xecB2EbB887cbbC810BA519906594185d8f1fc704' as `0x${string}` },
-  { name: 'AEON/WETHE', token0: 'WETHE', token1: 'AEON', type: 'DLMM', fee: '1%',    binStep: 800, address: '0x954068b2289E2EdFA878f17C27b4ab1B015b77a7' as `0x${string}` },
-  { name: 'AEON/GUNZ',  token0: 'GUNZ',  token1: 'AEON', type: 'DLMM', fee: '1%',    binStep: 800, address: '0x45C0D4fffbe60fBC454F8dB0Eb2643aa139cb706' as `0x${string}` },
-  { name: 'AEON/ARENA', token0: 'ARENA', token1: 'AEON', type: 'DLMM', fee: '1%',    binStep: 800, address: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7' as `0x${string}` },
-  { name: 'AEON/COQ',   token0: 'COQ',   token1: 'AEON', type: 'DLMM', fee: '1%',    binStep: 800, address: '0x1d891FC5954D777ABbb95fadAC8D7dE880b9F49a' as `0x${string}` },
-  { name: 'WAVAX/USDC', token0: 'WAVAX', token1: 'USDC', type: 'DLMM', fee: '0.05%', binStep: 10,  address: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b' as `0x${string}` },
-  { name: 'WAVAX/WETHE',token0: 'WETHE', token1: 'WAVAX',type: 'DLMM', fee: '0.3%',  binStep: 10,  address: '0x4fAA1a9B62Be8465f33fB3c3ac767F6bc4e510DB' as `0x${string}` },
-  { name: 'WAVAX/WBTCE',token0: 'WBTCE', token1: 'WAVAX',type: 'DLMM', fee: '0.3%',  binStep: 10,  address: '0xE82347882508179DDED4e74BD4645fad0895e0E7' as `0x${string}` },
-  { name: 'WAVAX/GUNZ', token0: 'GUNZ',  token1: 'WAVAX',type: 'DLMM', fee: '1%',    binStep: 800, address: '0x1E173e4d5811F27E72300a214DeeF4eFCB3B6be8' as `0x${string}` },
-  { name: 'WAVAX/ARENA',token0: 'WAVAX', token1: 'ARENA',type: 'DLMM', fee: '1%',    binStep: 800, address: '0x27e4d2467584b7A370856BCedb1b7F460EF2462C' as `0x${string}` },
-  { name: 'WAVAX/COQ',  token0: 'COQ',   token1: 'WAVAX',type: 'DLMM', fee: '1%',    binStep: 800, address: '0xddbcC56993a6D44b24Bd9AF0A27000419B0d9B4F' as `0x${string}` },
-  { name: 'WBTCE/USDC', token0: 'WBTCE', token1: 'USDC', type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0xd9AE01537e4099ECAD113B52856a86148A0E6548' as `0x${string}` },
-  { name: 'WETHE/USDC', token0: 'WETHE', token1: 'USDC', type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0xB39e555F18DEfc9D97fbFd08Fb4F88d784a44944' as `0x${string}` },
-  { name: 'GUNZ/USDC',  token0: 'GUNZ',  token1: 'USDC', type: 'DLMM', fee: '0.3%',  binStep: 800, address: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd' as `0x${string}` },
-  { name: 'ARENA/USDC', token0: 'ARENA', token1: 'USDC', type: 'DLMM', fee: '0.3%',  binStep: 800, address: '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77' as `0x${string}` },
-  { name: 'COQ/USDC',   token0: 'COQ',   token1: 'USDC', type: 'DLMM', fee: '0.3%',  binStep: 800, address: '0x19aE273606588fb17D99572321eAD9b0B060DF00' as `0x${string}` },
-  { name: 'USDC/WUSDT', token0: 'WUSDT', token1: 'USDC', type: 'DLMM', fee: '0.01%', binStep: 1,   address: '0xB1a5295A8133097E389221df70Ee1dd021B088F0' as `0x${string}` },
-  { name: 'WBTCB/WBTCE',token0: 'WBTCB', token1: 'WBTCE',type: 'DLMM', fee: '0.05%', binStep: 5,   address: '0xeDdBA3C2A4491D77e8d4b69502f7c862C538DC76' as `0x${string}` },
-  // New pools — deployed 2026-06-29, token0/token1 verified on-chain
+  // DLMM — real Trader Joe LB v2.2 pairs deployed 2026-06-30
+  // tokenX is the "priced" asset, tokenY is the quote (LB ordering)
+  // binStep is actual LB binStep (basis points per bin)
+  { name: 'AEON/WAVAX', token0: 'AEON',  token1: 'WAVAX', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xbA292A7bB1F27A9F37aF0d29a633A574249a0Ceb' as `0x${string}` },
+  { name: 'AEON/USDC',  token0: 'AEON',  token1: 'USDC',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xdCc749323Ebc82fa73BC40d76598D8cEbb42ff28' as `0x${string}` },
+  { name: 'AEON/WBTCE', token0: 'AEON',  token1: 'WBTCE', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x39b6f6AE9345938CCAe6B7627e6e8DCc97272C49' as `0x${string}` },
+  { name: 'AEON/WETHE', token0: 'AEON',  token1: 'WETHE', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xc304E547991502a13a93f95431bF81d68738F9b2' as `0x${string}` },
+  { name: 'AEON/GUNZ',  token0: 'AEON',  token1: 'GUNZ',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xD3CFAAe7CfA5B909Ef4572B6f50aBb2a8affC7a1' as `0x${string}` },
+  { name: 'AEON/ARENA', token0: 'AEON',  token1: 'ARENA', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x9f992b3C9F1108956DAF7Fef26740A99647a52cb' as `0x${string}` },
+  { name: 'AEON/COQ',   token0: 'AEON',  token1: 'COQ',   type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x75d2Cb746c484451a913bF1D7Afb25528aB095c6' as `0x${string}` },
+  { name: 'AEON/WBTCB', token0: 'AEON',  token1: 'WBTCB', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x8426379EdB14b7be2395AdB3eFc6662A70e7dBC0' as `0x${string}` },
+  { name: 'AEON/SPX6900',token0: 'AEON', token1: 'SPX',   type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x55099A2307FE072cdbE5050d725133BfB3f86b93' as `0x${string}` },
+  { name: 'WAVAX/USDC', token0: 'WAVAX', token1: 'USDC',  type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0xdf9C7DAA6278c4026865dFf438261c92dfE82dF4' as `0x${string}` },
+  { name: 'WAVAX/WETHE',token0: 'WAVAX', token1: 'WETHE', type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0x8074bfC5758A93cAC70b8ED9Be242c152D6Da3f5' as `0x${string}` },
+  { name: 'WAVAX/WBTCE',token0: 'WAVAX', token1: 'WBTCE', type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0x84a1C69D376CD4861DBD6201b0145DaD1D9A85F1' as `0x${string}` },
+  { name: 'WAVAX/GUNZ', token0: 'WAVAX', token1: 'GUNZ',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x35970292c5bd867C717E3185554738609BDED102' as `0x${string}` },
+  { name: 'WAVAX/ARENA',token0: 'WAVAX', token1: 'ARENA', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x4B4dC6A027189FfC1D9bF976D146bcB5697EeC37' as `0x${string}` },
+  { name: 'WAVAX/COQ',  token0: 'WAVAX', token1: 'COQ',   type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x3D5FAeaCFEC59d031DDd3Ae9b6DB25Bdade7eb7E' as `0x${string}` },
+  { name: 'WAVAX/WBTCB',token0: 'WAVAX', token1: 'WBTCB', type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0x4FC4895D801a7Cae8403686b5AC2E5D17d70279c' as `0x${string}` },
+  { name: 'WBTCE/USDC', token0: 'WBTCE', token1: 'USDC',  type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0x3BdAa6d818dA6B55D1496E918b24CF43623f298A' as `0x${string}` },
+  { name: 'WETHE/USDC', token0: 'WETHE', token1: 'USDC',  type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0xd384f78f376C4927b91946E9D9Ef009eaCfA0dce' as `0x${string}` },
+  { name: 'GUNZ/USDC',  token0: 'GUNZ',  token1: 'USDC',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xAd6F3ee4A6D05f3EB5BD958467DA9f5665FB0C01' as `0x${string}` },
+  { name: 'ARENA/USDC', token0: 'ARENA', token1: 'USDC',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x3859f8487231d955F7f1498f186FB3086a674AE4' as `0x${string}` },
+  { name: 'COQ/USDC',   token0: 'COQ',   token1: 'USDC',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xbCbAb0aB380C1c222D63b12E1f7bF17e7B881fCC' as `0x${string}` },
+  { name: 'USDC/WUSDT', token0: 'WUSDT', token1: 'USDC',  type: 'DLMM', fee: '0.05%', binStep: 5,   address: '0x54DF1C2B3487f7738Dbc448Dd7838497d93Bc4dd' as `0x${string}` },
+  { name: 'WBTCB/WBTCE',token0: 'WBTCB', token1: 'WBTCE', type: 'DLMM', fee: '0.05%', binStep: 5,   address: '0x62E1208D1FF4333Af4621Fd93101696DC23bB685' as `0x${string}` },
+  // CL pools from previous deploy (2026-06-29)
   { name: 'AEON/WBTCB',  token0: 'WBTCB', token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0x04de9ee7b6355ec643db415b2212734390fcb2f8' as `0x${string}` },
-  { name: 'AEON/WBTCB',  token0: 'WBTCB', token1: 'AEON', type: 'DLMM', fee: '1%',    binStep: 800, address: '0x0d94e9bd42cbddeef6804b9813da82a42617cc01' as `0x${string}` },
   { name: 'WAVAX/WBTCB', token0: 'WBTCB', token1: 'WAVAX',type: 'CL',   fee: '0.3%',  address: '0xeb55b531c1881751d6c83ce343ee3870a3ed6cb3' as `0x${string}` },
-  { name: 'WAVAX/WBTCB', token0: 'WBTCB', token1: 'WAVAX',type: 'DLMM', fee: '1%',    binStep: 800, address: '0x10235223cba1939eb5dee67a08cf1c065bc17a6e' as `0x${string}` },
   { name: 'AEON/SPX6900', token0: 'SPX',  token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e' as `0x${string}` },
-  { name: 'AEON/SPX6900', token0: 'SPX',  token1: 'AEON', type: 'DLMM', fee: '1%',    binStep: 800, address: '0xeac2c4b5b9a1169c7e46a44ed6a5e4836ba3bb95' as `0x${string}` },
 ]
 
 export const CL_RANGE_PRESETS = [

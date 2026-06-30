@@ -529,3 +529,144 @@ export const VOTER_ABI = [
     outputs: [{ name: '', type: 'address' }],
   },
 ] as const
+
+// Trader Joe LB v2.2 ABIs
+export const LB_PAIR_ABI = [
+  { name: 'getActiveId',  type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: 'activeId', type: 'uint24' }] },
+  { name: 'getBinStep',   type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: 'binStep', type: 'uint16' }] },
+  { name: 'getTokenX',    type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: 'tokenX', type: 'address' }] },
+  { name: 'getTokenY',    type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: 'tokenY', type: 'address' }] },
+  { name: 'getReserves',  type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: 'reserveX', type: 'uint128' }, { name: 'reserveY', type: 'uint128' }] },
+  { name: 'getBin', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'uint24' }],
+    outputs: [{ name: 'binReserveX', type: 'uint128' }, { name: 'binReserveY', type: 'uint128' }] },
+  { name: 'totalSupply', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'id', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'balanceOf', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }, { name: 'id', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'approveForAll', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'spender', type: 'address' }, { name: 'approved', type: 'bool' }],
+    outputs: [] },
+  { name: 'isApprovedForAll', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }, { name: 'spender', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }] },
+] as const
+
+export const LB_ROUTER_ABI = [
+  { name: 'addLiquidity', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{
+      name: 'liquidityParameters', type: 'tuple', components: [
+        { name: 'tokenX',         type: 'address' },
+        { name: 'tokenY',         type: 'address' },
+        { name: 'binStep',        type: 'uint256' },
+        { name: 'amountX',        type: 'uint256' },
+        { name: 'amountY',        type: 'uint256' },
+        { name: 'amountXMin',     type: 'uint256' },
+        { name: 'amountYMin',     type: 'uint256' },
+        { name: 'activeIdDesired',type: 'uint256' },
+        { name: 'idSlippage',     type: 'uint256' },
+        { name: 'deltaIds',       type: 'int256[]' },
+        { name: 'distributionX', type: 'uint256[]' },
+        { name: 'distributionY', type: 'uint256[]' },
+        { name: 'to',             type: 'address' },
+        { name: 'refundTo',       type: 'address' },
+        { name: 'deadline',       type: 'uint256' },
+      ]
+    }],
+    outputs: [
+      { name: 'amountXAdded',   type: 'uint256' },
+      { name: 'amountYAdded',   type: 'uint256' },
+      { name: 'amountXLeft',    type: 'uint256' },
+      { name: 'amountYLeft',    type: 'uint256' },
+      { name: 'depositIds',     type: 'uint256[]' },
+      { name: 'liquidityMinted',type: 'uint256[]' },
+    ],
+  },
+  { name: 'addLiquidityNATIVE', type: 'function', stateMutability: 'payable',
+    inputs: [{
+      name: 'liquidityParameters', type: 'tuple', components: [
+        { name: 'tokenX',         type: 'address' },
+        { name: 'tokenY',         type: 'address' },
+        { name: 'binStep',        type: 'uint256' },
+        { name: 'amountX',        type: 'uint256' },
+        { name: 'amountY',        type: 'uint256' },
+        { name: 'amountXMin',     type: 'uint256' },
+        { name: 'amountYMin',     type: 'uint256' },
+        { name: 'activeIdDesired',type: 'uint256' },
+        { name: 'idSlippage',     type: 'uint256' },
+        { name: 'deltaIds',       type: 'int256[]' },
+        { name: 'distributionX', type: 'uint256[]' },
+        { name: 'distributionY', type: 'uint256[]' },
+        { name: 'to',             type: 'address' },
+        { name: 'refundTo',       type: 'address' },
+        { name: 'deadline',       type: 'uint256' },
+      ]
+    }],
+    outputs: [
+      { name: 'amountXAdded',   type: 'uint256' },
+      { name: 'amountYAdded',   type: 'uint256' },
+      { name: 'amountXLeft',    type: 'uint256' },
+      { name: 'amountYLeft',    type: 'uint256' },
+      { name: 'depositIds',     type: 'uint256[]' },
+      { name: 'liquidityMinted',type: 'uint256[]' },
+    ],
+  },
+  { name: 'removeLiquidity', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'tokenX',    type: 'address' },
+      { name: 'tokenY',    type: 'address' },
+      { name: 'binStep',   type: 'uint16' },
+      { name: 'amountXMin',type: 'uint256' },
+      { name: 'amountYMin',type: 'uint256' },
+      { name: 'ids',       type: 'uint256[]' },
+      { name: 'amounts',   type: 'uint256[]' },
+      { name: 'to',        type: 'address' },
+      { name: 'deadline',  type: 'uint256' },
+    ],
+    outputs: [{ name: 'amountX', type: 'uint256' }, { name: 'amountY', type: 'uint256' }],
+  },
+  { name: 'removeLiquidityNATIVE', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'token',     type: 'address' },
+      { name: 'binStep',   type: 'uint16' },
+      { name: 'amountTokenMin', type: 'uint256' },
+      { name: 'amountNATIVEMin',type: 'uint256' },
+      { name: 'ids',       type: 'uint256[]' },
+      { name: 'amounts',   type: 'uint256[]' },
+      { name: 'to',        type: 'address' },
+      { name: 'deadline',  type: 'uint256' },
+    ],
+    outputs: [{ name: 'amountToken', type: 'uint256' }, { name: 'amountNATIVE', type: 'uint256' }],
+  },
+] as const
+
+export const LB_FACTORY_ABI = [
+  { name: 'getLBPairInformation', type: 'function', stateMutability: 'view',
+    inputs: [
+      { name: 'tokenX',  type: 'address' },
+      { name: 'tokenY',  type: 'address' },
+      { name: 'binStep', type: 'uint256' },
+    ],
+    outputs: [{
+      name: 'lbPairInformation', type: 'tuple', components: [
+        { name: 'binStep',           type: 'uint16' },
+        { name: 'LBPair',            type: 'address' },
+        { name: 'createdByOwner',    type: 'bool' },
+        { name: 'ignoredForRouting', type: 'bool' },
+      ]
+    }],
+  },
+  { name: 'getAllLBPairs', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'tokenX', type: 'address' }, { name: 'tokenY', type: 'address' }],
+    outputs: [{
+      name: 'lbPairsAvailable', type: 'tuple[]', components: [
+        { name: 'binStep',           type: 'uint16' },
+        { name: 'LBPair',            type: 'address' },
+        { name: 'createdByOwner',    type: 'bool' },
+        { name: 'ignoredForRouting', type: 'bool' },
+      ]
+    }],
+  },
+] as const
