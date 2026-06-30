@@ -9,6 +9,7 @@ import { TOKENS, CONTRACTS } from '@/config/contracts'
 import { AEON_ROUTER_ABI, ERC20_ABI } from '@/config/abis'
 import { useRouting } from '@/hooks/useRouting'
 import { usePrices } from '@/hooks/usePrices'
+import { TokenIcon } from '@/components/TokenIcon'
 
 type TokenKey = keyof typeof TOKENS
 
@@ -279,10 +280,10 @@ export default function SwapPage() {
           <div className="flex items-center gap-3">
             <input type="number" value={amountIn} onChange={e => setAmountIn(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-2xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
             <div className="flex flex-col items-end gap-0.5 shrink-0">
-              <button onClick={() => setShowTokenInModal(true)} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all">
-                <TokenIcon symbol={TOKENS[tokenIn].symbol} />
-                <span className="font-display font-semibold text-sm">{TOKENS[tokenIn].symbol}</span>
-                <ChevronDown size={14} className="text-text-muted" />
+              <button onClick={() => setShowTokenInModal(true)} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all">
+                <TokenIcon symbol={tokenIn} size={28} />
+                <span className="font-display font-semibold text-base">{TOKENS[tokenIn].symbol}</span>
+                <ChevronDown size={15} className="text-text-muted" />
               </button>
               {TOKENS[tokenIn].address !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' && (
                 <button
@@ -325,10 +326,10 @@ export default function SwapPage() {
               {amountOutFormatted || <span className="text-text-muted">0.0</span>}
             </div>
             <div className="flex flex-col items-end gap-0.5 shrink-0">
-              <button onClick={() => setShowTokenOutModal(true)} className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all">
-                <TokenIcon symbol={TOKENS[tokenOut].symbol} />
-                <span className="font-display font-semibold text-sm">{TOKENS[tokenOut].symbol}</span>
-                <ChevronDown size={14} className="text-text-muted" />
+              <button onClick={() => setShowTokenOutModal(true)} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all">
+                <TokenIcon symbol={tokenOut} size={28} />
+                <span className="font-display font-semibold text-base">{TOKENS[tokenOut].symbol}</span>
+                <ChevronDown size={15} className="text-text-muted" />
               </button>
               {TOKENS[tokenOut].address !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' && (
                 <button
@@ -435,22 +436,6 @@ export default function SwapPage() {
   )
 }
 
-function TokenIcon({ symbol }: { symbol: string }) {
-  const colors: Record<string, string> = {
-    AEON: 'bg-aeon-400/20 text-aeon-400', AVAX: 'bg-red-500/20 text-red-400',
-    WAVAX: 'bg-red-500/20 text-red-400', USDC: 'bg-blue-500/20 text-blue-400',
-    WUSDT: 'bg-green-500/20 text-green-400', SPX6900: 'bg-purple-500/20 text-purple-400',
-    GUNZ: 'bg-cyan-500/20 text-cyan-400', ARENA: 'bg-pink-500/20 text-pink-400',
-    COQ: 'bg-yellow-500/20 text-yellow-400',
-    'WBTC.b': 'bg-orange-500/20 text-orange-400', 'WBTC.e': 'bg-orange-500/20 text-orange-400',
-    'WETH.e': 'bg-indigo-500/20 text-indigo-400',
-  }
-  return (
-    <div className={clsx('w-6 h-6 rounded-full flex items-center justify-center text-2xs font-bold font-mono shrink-0', colors[symbol] || 'bg-bg-raised text-text-muted')}>
-      {symbol.startsWith('WBTC') ? '₿' : symbol[0]}
-    </div>
-  )
-}
 
 function TokenSelectModal({ onSelect, onClose, exclude, walletAddress }: {
   onSelect: (key: TokenKey) => void; onClose: () => void; exclude: TokenKey; walletAddress?: `0x${string}`
@@ -477,7 +462,7 @@ function TokenRow({ token, walletAddress, onSelect }: { token: typeof TOKEN_LIST
   const bal = useTokenBalance(token.key, walletAddress)
   return (
     <button onClick={() => onSelect(token.key)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-bg-raised transition-colors text-left">
-      <TokenIcon symbol={token.symbol} />
+      <TokenIcon symbol={token.key} size={36} />
       <div>
         <div className="font-semibold text-sm text-text-primary">{token.symbol}</div>
         <div className="text-xs text-text-muted">{token.name}</div>
