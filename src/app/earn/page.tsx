@@ -633,11 +633,12 @@ function useEarnStats(wallet?: `0x${string}`) {
 
 // ─── Portfolio Tab ────────────────────────────────────────────────────────────
 
-function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr }: {
+function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
   wallet?: `0x${string}`
   prices: PriceMap
   lpByAddr: Record<string, bigint>
   stakedByAddr: Record<string, bigint>
+  tvlByAddr: Record<string, number | null>
 }) {
   const { data: avaxBal } = useBalance({ address: wallet, query: { enabled: !!wallet, refetchInterval: 15000 } })
 
@@ -672,10 +673,27 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr }: {
     })
     .filter(Boolean) as { pool: typeof UNIQUE_POOLS[number]; lpUnstaked: bigint; lpStaked: bigint }[]
 
+  const { data: lpTotalSupplies } = useReadContracts({
+    contracts: lpPositions.map(({ pool }) => ({
+      address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'totalSupply' as const,
+    })),
+    query: { enabled: lpPositions.length > 0, refetchInterval: 30000 },
+  })
+
+  const lpValues = lpPositions.map(({ pool, lpUnstaked, lpStaked }, i) => {
+    const ts = lpTotalSupplies?.[i]?.status === 'success' ? lpTotalSupplies[i].result as bigint : 0n
+    const tvl = tvlByAddr[pool.address] ?? null
+    const share = ts > 0n ? Number(lpUnstaked + lpStaked) / Number(ts) : 0
+    const usd = tvl && share > 0 ? share * tvl : null
+    return { pool, lpUnstaked, lpStaked, usd }
+  })
+
+  const totalLpUsd = lpValues.reduce((sum, p) => sum + (p.usd ?? 0), 0)
+
   const totalTokenUsd = tokens.reduce((sum, t) => {
     if (t.balance && t.balance > 0.000001 && t.price) return sum + t.balance * t.price
     return sum
-  }, 0)
+  }, 0) + totalLpUsd
 
   const hasTokens = tokens.some(t => t.balance && t.balance > 0.000001)
 
@@ -685,11 +703,13 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr }: {
       <div className="card p-6 bg-gradient-to-r from-aeon-400/5 to-transparent">
         <div className="flex items-center gap-3 mb-1">
           <BarChart3 size={18} className="text-aeon-400" />
-          <span className="text-sm text-text-muted">Total Wallet Value (tokens)</span>
+          <span className="text-sm text-text-muted">Total Wallet Value</span>
         </div>
         <div className="text-4xl font-display font-bold text-text-primary mb-1">{wallet ? fmtUsd(totalTokenUsd || null) : '$—'}</div>
         {lpPositions.length > 0 && (
-          <div className="text-xs text-text-muted">+ {lpPositions.length} LP position{lpPositions.length !== 1 ? 's' : ''} (scroll down)</div>
+          <div className="text-xs text-text-muted">
+            includes {fmtUsd(totalLpUsd || null)} across {lpPositions.length} LP position{lpPositions.length !== 1 ? 's' : ''} (scroll down)
+          </div>
         )}
       </div>
 
@@ -837,6 +857,7 @@ export default function EarnPage() {
           prices={prices}
           lpByAddr={stats.lpByAddr}
           stakedByAddr={stats.stakedByAddr}
+          tvlByAddr={tvlByAddr}
         />
       ) : (
         <>

@@ -6,6 +6,7 @@ import { clsx } from 'clsx'
 
 const NAV_LINKS = [
   { href: '/swap',       label: 'Swap'      },
+  { href: '/tokens',     label: 'Tokens'    },
   { href: '/liquidity',  label: 'Liquidity' },
   { href: '/earn',       label: 'Portfolio' },
   { href: '/vote',       label: 'Vote'      },
