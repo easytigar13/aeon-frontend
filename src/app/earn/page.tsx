@@ -690,10 +690,12 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
 
   const totalLpUsd = lpValues.reduce((sum, p) => sum + (p.usd ?? 0), 0)
 
-  const totalTokenUsd = tokens.reduce((sum, t) => {
+  const tokenOnlyUsd = tokens.reduce((sum, t) => {
     if (t.balance && t.balance > 0.000001 && t.price) return sum + t.balance * t.price
     return sum
-  }, 0) + totalLpUsd
+  }, 0)
+
+  const totalTokenUsd = tokenOnlyUsd + totalLpUsd
 
   const hasTokens = tokens.some(t => t.balance && t.balance > 0.000001)
 
@@ -701,14 +703,23 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
     <div className="space-y-8">
       {/* Summary */}
       <div className="card p-6 bg-gradient-to-r from-aeon-400/5 to-transparent">
-        <div className="flex items-center gap-3 mb-1">
+        <div className="flex items-center gap-3 mb-3">
           <BarChart3 size={18} className="text-aeon-400" />
           <span className="text-sm text-text-muted">Total Wallet Value</span>
         </div>
-        <div className="text-4xl font-display font-bold text-text-primary mb-1">{wallet ? fmtUsd(totalTokenUsd || null) : '$—'}</div>
-        {lpPositions.length > 0 && (
-          <div className="text-xs text-text-muted">
-            includes {fmtUsd(totalLpUsd || null)} across {lpPositions.length} LP position{lpPositions.length !== 1 ? 's' : ''} (scroll down)
+        <div className="text-4xl font-display font-bold text-text-primary mb-4">{wallet ? fmtUsd(totalTokenUsd || null) : '$—'}</div>
+        {wallet && (
+          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-bg-border">
+            <div>
+              <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">Token Balances</div>
+              <div className="text-lg font-display font-semibold text-text-primary">{fmtUsd(tokenOnlyUsd || null)}</div>
+            </div>
+            <div>
+              <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">
+                LP Positions{lpPositions.length > 0 ? ` · ${lpPositions.length}` : ''}
+              </div>
+              <div className="text-lg font-display font-semibold text-aeon-400">{totalLpUsd > 0 ? fmtUsd(totalLpUsd) : '$—'}</div>
+            </div>
           </div>
         )}
       </div>
