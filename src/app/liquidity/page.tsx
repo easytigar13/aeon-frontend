@@ -6,7 +6,7 @@ import { useAccount, useBalance, useReadContract, useReadContracts, useWriteCont
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import { POOLS, TOKENS, CONTRACTS, CL_RANGE_PRESETS } from '@/config/contracts'
-import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI } from '@/config/abis'
+import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, LB_ROUTER_ABI, LB_PAIR_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 
 type Tab = 'add' | 'remove'
@@ -14,7 +14,10 @@ type PoolType = 'vAMM' | 'CL' | 'DLMM'
 type Step = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done' | 'approve_lp' | 'approve_lp_wait' | 'remove' | 'remove_wait' | 'remove_done'
 
 const HELPER = CONTRACTS.LiquidityHelper
+const LB_ROUTER = CONTRACTS.LBRouter
 const MAX_UINT = BigInt('0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff')
+const LB_PRECISION = BigInt('1000000000000000000') // 1e18 — sum of distributionX/Y arrays
+const LB_ID_SHIFT  = 8388608 // 2^23 — zero-price anchor for bin IDs
 
 function useTokenBal(tokenAddr: `0x${string}` | undefined, wallet: `0x${string}` | undefined) {
   const isNative = tokenAddr === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
@@ -121,45 +124,91 @@ export default function LiquidityPage() {
   const allowance0 = useAllowance(token0Addr, address)
   const allowance1 = useAllowance(token1Addr, address)
 
-  // Read pool reserves + actual on-chain token addresses
+  // Read pool reserves + actual on-chain token addresses (vAMM / CL path)
+  const isDlmm = poolType === 'DLMM'
   const { data: reserves } = useReadContract({
     address: selectedPool.address,
     abi: PAIR_ABI,
     functionName: 'getReserves',
-    query: { refetchInterval: 15000 },
+    query: { enabled: !isDlmm, refetchInterval: 15000 },
   })
   const { data: poolToken0Addr } = useReadContract({
     address: selectedPool.address,
     abi: PAIR_ABI,
     functionName: 'token0',
+    query: { enabled: !isDlmm },
   })
   const { data: poolToken1Addr } = useReadContract({
     address: selectedPool.address,
     abi: PAIR_ABI,
     functionName: 'token1',
+    query: { enabled: !isDlmm },
   })
 
-  // Detect if configured token addresses match what the pool actually holds on-chain
+  // DLMM-specific reads from LBPair
+  const { data: dlmmActiveIdRaw } = useReadContract({
+    address: selectedPool.address, abi: LB_PAIR_ABI, functionName: 'getActiveId',
+    query: { enabled: isDlmm, refetchInterval: 10000 },
+  })
+  const { data: dlmmTokenXRaw } = useReadContract({
+    address: selectedPool.address, abi: LB_PAIR_ABI, functionName: 'getTokenX',
+    query: { enabled: isDlmm },
+  })
+  const { data: dlmmTokenYRaw } = useReadContract({
+    address: selectedPool.address, abi: LB_PAIR_ABI, functionName: 'getTokenY',
+    query: { enabled: isDlmm },
+  })
+  const { data: dlmmReservesRaw } = useReadContract({
+    address: selectedPool.address, abi: LB_PAIR_ABI, functionName: 'getReserves',
+    query: { enabled: isDlmm, refetchInterval: 15000 },
+  })
+  // Allowances to LBRouter (for DLMM approvals)
+  const { data: allow0RouterRaw } = useReadContract({
+    address: token0Addr, abi: ERC20_ABI, functionName: 'allowance',
+    args: address ? [address, LB_ROUTER] : undefined,
+    query: { enabled: isDlmm && !!token0Addr && !!address },
+  })
+  const { data: allow1RouterRaw } = useReadContract({
+    address: token1Addr, abi: ERC20_ABI, functionName: 'allowance',
+    args: address ? [address, LB_ROUTER] : undefined,
+    query: { enabled: isDlmm && !!token1Addr && !!address },
+  })
+
+  const dlmmActiveId  = dlmmActiveIdRaw  as number    | undefined
+  const dlmmTokenX    = dlmmTokenXRaw    as string    | undefined
+  const dlmmTokenY    = dlmmTokenYRaw    as string    | undefined
+  const dlmmReserves  = dlmmReservesRaw  as [bigint, bigint] | undefined
+  const allow0Router  = (allow0RouterRaw as bigint | undefined) ?? 0n
+  const allow1Router  = (allow1RouterRaw as bigint | undefined) ?? 0n
+
+  // Detect if configured token addresses match what the pool actually holds on-chain (vAMM/CL)
   const poolT0 = poolToken0Addr?.toLowerCase() ?? ''
   const poolT1 = poolToken1Addr?.toLowerCase() ?? ''
   const cfgA0  = token0Addr?.toLowerCase() ?? ''
   const cfgA1  = token1Addr?.toLowerCase() ?? ''
 
-  const poolAddrsLoaded  = !!poolToken0Addr && !!poolToken1Addr && !!token0Addr && !!token1Addr
+  const poolAddrsLoaded   = !!poolToken0Addr && !!poolToken1Addr && !!token0Addr && !!token1Addr
   const cfgMatchesDirect  = poolT0 === cfgA0 && poolT1 === cfgA1
   const cfgMatchesFlipped = poolT0 === cfgA1  && poolT1 === cfgA0
-  const tokenMismatch     = poolAddrsLoaded && !cfgMatchesDirect && !cfgMatchesFlipped
+  const tokenMismatch     = !isDlmm && poolAddrsLoaded && !cfgMatchesDirect && !cfgMatchesFlipped
 
-  // Always use pool's actual on-chain addresses for the addLiquidity call
+  // Always use pool's actual on-chain addresses for the vAMM/CL addLiquidity call
   const actualToken0Addr  = (poolToken0Addr ?? token0Addr) as `0x${string}` | undefined
   const actualToken1Addr  = (poolToken1Addr ?? token1Addr) as `0x${string}` | undefined
-  // (actualAmountXWei are computed below after amount0Wei/amount1Wei are declared)
 
   // Determine which reserve maps to token0/token1 in our display order
-  const isToken0First = !poolToken0Addr || !token0Addr ||
-    poolToken0Addr.toLowerCase() === token0Addr.toLowerCase()
-  const reserve0 = reserves ? (isToken0First ? reserves[0] : reserves[1]) : 0n
-  const reserve1 = reserves ? (isToken0First ? reserves[1] : reserves[0]) : 0n
+  // For DLMM: tokenX = LBPair.getTokenX(), may differ from config token0
+  const dlmmT0isX   = isDlmm && !!dlmmTokenX && !!token0Addr &&
+    dlmmTokenX.toLowerCase() === token0Addr.toLowerCase()
+  const isToken0First = isDlmm
+    ? dlmmT0isX   // token0 display = tokenX in LB
+    : (!poolToken0Addr || !token0Addr || poolToken0Addr.toLowerCase() === token0Addr.toLowerCase())
+  const reserve0 = isDlmm
+    ? (dlmmReserves ? (dlmmT0isX ? dlmmReserves[0] : dlmmReserves[1]) : 0n)
+    : (reserves ? (isToken0First ? reserves[0] : reserves[1]) : 0n)
+  const reserve1 = isDlmm
+    ? (dlmmReserves ? (dlmmT0isX ? dlmmReserves[1] : dlmmReserves[0]) : 0n)
+    : (reserves ? (isToken0First ? reserves[1] : reserves[0]) : 0n)
   const hasLiquidity = reserve0 > 0n && reserve1 > 0n
 
   // Auto-calculate paired amount from reserves ratio
@@ -226,10 +275,115 @@ export default function LiquidityPage() {
   const actualAmount0Wei  = cfgMatchesFlipped ? amount1Wei : amount0Wei
   const actualAmount1Wei  = cfgMatchesFlipped ? amount0Wei : amount1Wei
 
-  const needApprove0 = amount0Wei > 0n && allowance0 < amount0Wei
-  const needApprove1 = amount1Wei > 0n && allowance1 < amount1Wei
+  const needApprove0 = isDlmm
+    ? amount0Wei > 0n && allow0Router < amount0Wei
+    : amount0Wei > 0n && allowance0 < amount0Wei
+  const needApprove1 = isDlmm
+    ? amount1Wei > 0n && allow1Router < amount1Wei
+    : amount1Wei > 0n && allowance1 < amount1Wei
 
   const helperReady = HELPER !== '0x0000000000000000000000000000000000000000'
+
+  // ── DLMM bin-array builder ────────────────────────────────────────────────
+  function computeDlmmParams() {
+    if (!address || !dlmmTokenX || !dlmmTokenY) return null
+
+    const binStep    = 'binStep' in selectedPool ? (selectedPool as any).binStep as number : 25
+    const bsFrac     = binStep / 10000
+
+    // Which LB token corresponds to our display "token0"?
+    const t0isX = token0Addr?.toLowerCase() === dlmmTokenX.toLowerCase()
+    const amountXWei = t0isX ? amount0Wei : amount1Wei
+    const amountYWei = t0isX ? amount1Wei : amount0Wei
+    const decX = t0isX ? token0Dec : token1Dec
+    const decY = t0isX ? token1Dec : token0Dec
+
+    // Active bin: use on-chain value if pool has reserves, else derive from amounts ratio
+    let activeId: number
+    if (dlmmActiveId !== undefined && (dlmmReserves?.[0] ?? 0n) > 0n) {
+      activeId = dlmmActiveId
+    } else {
+      // New pool: infer price from amounts (Y-wei per X-wei)
+      if (amountXWei === 0n || amountYWei === 0n) return null
+      const rawRatio = Number(amountYWei) / Number(amountXWei)
+      activeId = Math.round(Math.log(rawRatio) / Math.log(1 + bsFrac)) + LB_ID_SHIFT
+    }
+    if (activeId < 1 || activeId > 16777214) return null  // uint24 range
+
+    // Bin range: derive from minPrice/maxPrice (both in "Y per X" human terms)
+    let minDelta = -10, maxDelta = 10
+    const lo = parseFloat(minPrice), hi = parseFloat(maxPrice)
+    if (lo > 0 && hi > lo) {
+      // Convert human price → raw (Y-wei per X-wei)
+      const adj = Math.pow(10, decY - decX)
+      const rawLo = lo * adj, rawHi = hi * adj
+      minDelta = Math.max(-200, Math.floor(Math.log(rawLo) / Math.log(1 + bsFrac)) + LB_ID_SHIFT - activeId)
+      maxDelta = Math.min(200, Math.ceil(Math.log(rawHi) / Math.log(1 + bsFrac)) + LB_ID_SHIFT - activeId)
+    }
+    if (maxDelta < minDelta) return null
+
+    const numBins = maxDelta - minDelta + 1
+    const deltaIds = Array.from({ length: numBins }, (_, k) => BigInt(minDelta + k))
+
+    // Separate bins for X (right of active, delta > 0) and Y (left of active, delta < 0)
+    // Active bin (delta = 0) gets both tokens
+    const hasActive = minDelta <= 0 && maxDelta >= 0
+    const yIdxs: number[] = [], xIdxs: number[] = []
+    for (let k = 0; k < numBins; k++) {
+      const d = minDelta + k
+      if (d < 0 || (d === 0 && hasActive)) yIdxs.push(k)
+      if (d > 0 || (d === 0 && hasActive)) xIdxs.push(k)
+    }
+
+    function toPrecision(ws: number[]): bigint[] {
+      if (!ws.length) return []
+      const sum = ws.reduce((a, b) => a + b, 0)
+      const bigs = ws.map(w => BigInt(Math.floor(w / sum * Number(LB_PRECISION))))
+      const got  = bigs.reduce((a, b) => a + b, 0n)
+      bigs[bigs.length - 1] += LB_PRECISION - got  // exact rounding correction
+      return bigs
+    }
+    function shapeWeight(distFromActive: number): number {
+      if (dlmmShape === 'uniform') return 1
+      if (dlmmShape === 'curved')  return Math.exp(-4 * distFromActive ** 2)
+      return 0.1 + distFromActive ** 2  // bidask: more at edges
+    }
+
+    const distX = new Array(numBins).fill(0n) as bigint[]
+    const distY = new Array(numBins).fill(0n) as bigint[]
+
+    if (yIdxs.length > 0) {
+      const ws = yIdxs.map((_, i) => shapeWeight((yIdxs.length - 1 - i) / Math.max(1, yIdxs.length - 1)))
+      toPrecision(ws).forEach((v, i) => { distY[yIdxs[i]] = v })
+    }
+    if (xIdxs.length > 0) {
+      const ws = xIdxs.map((_, i) => shapeWeight(i / Math.max(1, xIdxs.length - 1)))
+      toPrecision(ws).forEach((v, i) => { distX[xIdxs[i]] = v })
+    }
+
+    // If the active price is outside the user's range, zero out the irrelevant token
+    const finalAmountX = xIdxs.length === 0 ? 0n : amountXWei
+    const finalAmountY = yIdxs.length === 0 ? 0n : amountYWei
+
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
+    return {
+      tokenX:         dlmmTokenX as `0x${string}`,
+      tokenY:         dlmmTokenY as `0x${string}`,
+      binStep:        BigInt(binStep),
+      amountX:        finalAmountX,
+      amountY:        finalAmountY,
+      amountXMin:     finalAmountX * 99n / 100n,  // 1% slippage
+      amountYMin:     finalAmountY * 99n / 100n,
+      activeIdDesired: BigInt(activeId),
+      idSlippage:     5n,
+      deltaIds,
+      distributionX:  distX,
+      distributionY:  distY,
+      to:             address as `0x${string}`,
+      refundTo:       address as `0x${string}`,
+      deadline,
+    }
+  }
 
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
 
@@ -253,14 +407,32 @@ export default function LiquidityPage() {
     if (!address || !token0Addr || !token1Addr) return
     setErrMsg('')
     if (step === 'approve0') {
-      writeContract({ address: token0Addr, abi: ERC20_ABI, functionName: 'approve', args: [HELPER, MAX_UINT] })
+      const spender = isDlmm ? LB_ROUTER : HELPER
+      writeContract({ address: token0Addr, abi: ERC20_ABI, functionName: 'approve', args: [spender, MAX_UINT] })
       setStep('approve0_wait')
     }
     if (step === 'approve1') {
-      writeContract({ address: token1Addr, abi: ERC20_ABI, functionName: 'approve', args: [HELPER, MAX_UINT] })
+      const spender = isDlmm ? LB_ROUTER : HELPER
+      writeContract({ address: token1Addr, abi: ERC20_ABI, functionName: 'approve', args: [spender, MAX_UINT] })
       setStep('approve1_wait')
     }
     if (step === 'addliq') {
+      if (isDlmm) {
+        const params = computeDlmmParams()
+        if (!params) {
+          setErrMsg('Could not compute bin parameters. Enter amounts and a valid price range.')
+          setStep('idle')
+          return
+        }
+        writeContract({
+          address: LB_ROUTER,
+          abi: LB_ROUTER_ABI,
+          functionName: 'addLiquidity',
+          args: [params],
+        })
+        setStep('addliq_wait')
+        return
+      }
       if (tokenMismatch || !actualToken0Addr || !actualToken1Addr) {
         setErrMsg('Token address mismatch — pool on-chain tokens differ from config. Cannot add safely.')
         setStep('idle')
@@ -297,7 +469,8 @@ export default function LiquidityPage() {
 
   function startAddLiquidity() {
     if (!isConnected) { openConnectModal?.(); return }
-    if (!amount0 || !amount1) return  // BOTH amounts required
+    if (!amount0 || !amount1) return
+    if (!isDlmm && !helperReady) return
     setStep('idle')
     setErrMsg('')
     if (needApprove0) { setStep('approve0'); return }
@@ -309,7 +482,7 @@ export default function LiquidityPage() {
 
   function stepLabel() {
     if (!isConnected) return 'Connect Wallet'
-    if (!helperReady) return 'Helper Not Deployed Yet'
+    if (!isDlmm && !helperReady) return 'Helper Not Deployed Yet'
     if (!amount0 && !amount1) return 'Enter amounts'
     if (!amount1) return `Enter ${selectedPool.token1} amount`
     if (!amount0) return `Enter ${selectedPool.token0} amount`
@@ -681,7 +854,7 @@ export default function LiquidityPage() {
             <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">{errMsg}</div>
           )}
 
-          {!helperReady && (
+          {!isDlmm && !helperReady && (
             <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
               LiquidityHelper contract deploying — paste the address in contracts.ts to enable.
             </div>
@@ -713,7 +886,7 @@ export default function LiquidityPage() {
 
           <button
             onClick={startAddLiquidity}
-            disabled={isConnected && (isProcessing || (!amount0 || !amount1) || !helperReady || tokenMismatch)}
+            disabled={isConnected && (isProcessing || (!amount0 || !amount1) || (!isDlmm && (!helperReady || tokenMismatch)))}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}
