@@ -53,6 +53,7 @@ export default function LiquidityPage() {
   const [minPrice,       setMinPrice]       = useState('')
   const [maxPrice,       setMaxPrice]       = useState('')
   const [clPreset,       setClPreset]       = useState<string>('full')
+  const [dlmmShape,      setDlmmShape]      = useState<'uniform' | 'curved' | 'bidask'>('uniform')
   const [removeAmount,   setRemoveAmount]   = useState(50)
   const [showPoolPicker, setShowPoolPicker] = useState(false)
   const [step,           setStep]           = useState<Step>('idle')
@@ -479,98 +480,161 @@ export default function LiquidityPage() {
             </div>
           )}
 
-          {poolType === 'DLMM' && (
-            <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-xs font-semibold text-emerald-300">DLMM Pool — Price Range</span>
-                </div>
-                <span className="text-xs text-text-muted font-mono">
-                  {selectedPool.fee} · {dlmmBinStep} bps/bin
-                </span>
-              </div>
+          {poolType === 'DLMM' && (() => {
+            const totalBins = computedBins ?? 20
+            // Generate bar heights for visualisation based on shape
+            function shapeBars(n: number): number[] {
+              const arr: number[] = []
+              for (let i = 0; i < n; i++) {
+                const t = n <= 1 ? 0.5 : i / (n - 1)
+                if (dlmmShape === 'uniform') arr.push(0.75)
+                else if (dlmmShape === 'curved') arr.push(0.2 + 0.8 * Math.exp(-8 * (t - 0.5) ** 2))
+                else arr.push(0.2 + 0.8 * (1 - Math.exp(-6 * Math.min(t, 1 - t) ** 0.5)))
+              }
+              return arr
+            }
+            const BARS = 32
+            const bars = shapeBars(BARS)
+            const midBin = Math.floor(BARS / 2)
 
-              {currentPrice && (
-                <div className="flex items-center justify-between text-xs bg-bg-raised rounded-lg px-3 py-2">
-                  <span className="text-text-muted">Current price</span>
-                  <span className="font-mono text-emerald-300 font-bold">
-                    1 {selectedPool.token0} = {currentPrice < 0.001 ? currentPrice.toExponential(3) : currentPrice.toFixed(6)} {selectedPool.token1}
-                  </span>
-                </div>
-              )}
-
-              {/* Quick preset buttons */}
-              <div className="grid grid-cols-4 gap-1.5">
-                {[
-                  { label: '±5%',  lo: 5,  hi: 5  },
-                  { label: '±10%', lo: 10, hi: 10 },
-                  { label: '±25%', lo: 25, hi: 25 },
-                  { label: '±50%', lo: 50, hi: 50 },
-                ].map(p => (
-                  <button
-                    key={p.label}
-                    onClick={() => prefillFromCurrentPrice(p.lo, p.hi)}
-                    disabled={!currentPrice}
-                    className="py-1.5 rounded-lg text-xs font-mono border bg-bg-raised text-text-muted border-bg-border hover:border-emerald-500/40 hover:text-emerald-300 transition-all disabled:opacity-40"
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Min / Max price inputs */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-bg-raised rounded-xl p-3">
-                  <div className="text-2xs text-text-muted mb-1.5">
-                    Min Price <span className="opacity-60">({selectedPool.token1}/{selectedPool.token0})</span>
+            return (
+              <div className="border border-emerald-500/20 rounded-xl overflow-hidden">
+                {/* Header */}
+                <div className="px-4 pt-4 pb-3 flex items-center justify-between border-b border-bg-border">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                    <span className="text-xs font-semibold text-emerald-300">DLMM — Bin Liquidity</span>
                   </div>
-                  <input
-                    type="number"
-                    value={minPrice}
-                    onChange={e => setMinPrice(e.target.value)}
-                    placeholder={currentPrice ? (currentPrice * 0.8).toFixed(6) : '0.0'}
-                    className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
-                  />
+                  <span className="text-xs text-text-muted font-mono">{selectedPool.fee} · {dlmmBinStep} bps/bin</span>
                 </div>
-                <div className="bg-bg-raised rounded-xl p-3">
-                  <div className="text-2xs text-text-muted mb-1.5">
-                    Max Price <span className="opacity-60">({selectedPool.token1}/{selectedPool.token0})</span>
-                  </div>
-                  <input
-                    type="number"
-                    value={maxPrice}
-                    onChange={e => setMaxPrice(e.target.value)}
-                    placeholder={currentPrice ? (currentPrice * 1.2).toFixed(6) : '0.0'}
-                    className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
-                  />
-                </div>
-              </div>
 
-              {/* Validation */}
-              {minPrice && maxPrice && parseFloat(maxPrice) <= parseFloat(minPrice) && (
-                <div className="text-2xs text-red-400 font-mono">Max price must be greater than min price</div>
-              )}
-
-              {/* Computed summary */}
-              <div className="grid grid-cols-3 gap-2">
-                <div className="bg-bg-raised rounded-lg p-2 text-center">
-                  <div className="text-2xs text-text-muted">Bin Step</div>
-                  <div className="text-xs font-mono text-emerald-300 font-bold">{dlmmBinStep} bps</div>
-                </div>
-                <div className="bg-bg-raised rounded-lg p-2 text-center">
-                  <div className="text-2xs text-text-muted">Bins</div>
-                  <div className="text-xs font-mono text-emerald-300 font-bold">
-                    {computedBins ?? '—'}
+                {/* Shape selector */}
+                <div className="px-4 pt-3 pb-2">
+                  <div className="text-xs text-text-muted mb-2">Shape</div>
+                  <div className="flex gap-2">
+                    {([
+                      { key: 'uniform', label: 'Uniform',  icon: '▬▬▬' },
+                      { key: 'curved',  label: 'Curved',   icon: '▁▄█▄▁' },
+                      { key: 'bidask',  label: 'Bid-Ask',  icon: '█▁▁▁█' },
+                    ] as const).map(s => (
+                      <button
+                        key={s.key}
+                        onClick={() => setDlmmShape(s.key)}
+                        className={clsx(
+                          'flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all',
+                          dlmmShape === s.key
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : 'bg-bg-raised text-text-muted border-bg-border hover:border-emerald-500/30'
+                        )}
+                      >
+                        <div className="text-2xs font-mono opacity-70 mb-0.5">{s.icon}</div>
+                        {s.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div className="bg-bg-raised rounded-lg p-2 text-center">
-                  <div className="text-2xs text-text-muted">Distribution</div>
-                  <div className="text-xs font-mono text-emerald-300 font-bold">Uniform</div>
+
+                {/* Bin chart */}
+                <div className="px-4 pb-3">
+                  <div className="relative h-28 flex items-end gap-px bg-bg-raised rounded-xl px-2 pt-2 pb-1 overflow-hidden">
+                    {bars.map((h, i) => (
+                      <div
+                        key={i}
+                        className={clsx(
+                          'flex-1 rounded-sm transition-all duration-300',
+                          i < midBin ? 'bg-blue-500/70' : i === midBin ? 'bg-emerald-400' : 'bg-red-500/70'
+                        )}
+                        style={{ height: `${h * 100}%` }}
+                      />
+                    ))}
+                    {/* Current price line */}
+                    <div className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-none"
+                      style={{ left: `${(midBin / BARS) * 100}%` }}>
+                      <div className="w-px h-full bg-emerald-400/60" />
+                    </div>
+                  </div>
+                  <div className="flex justify-between text-2xs text-text-muted font-mono mt-1 px-1">
+                    <span>{minPrice || (currentPrice ? (currentPrice * 0.8).toFixed(4) : '—')}</span>
+                    <span className="text-emerald-400">Current</span>
+                    <span>{maxPrice || (currentPrice ? (currentPrice * 1.2).toFixed(4) : '—')}</span>
+                  </div>
+                </div>
+
+                {/* Price range inputs */}
+                <div className="px-4 pb-3 space-y-2">
+                  <div className="grid grid-cols-3 gap-2 items-end">
+                    <div className="bg-bg-raised rounded-xl p-3">
+                      <div className="text-2xs text-text-muted mb-1">Min Price</div>
+                      <input
+                        type="number"
+                        value={minPrice}
+                        onChange={e => setMinPrice(e.target.value)}
+                        placeholder={currentPrice ? (currentPrice * 0.8).toFixed(4) : '0.0'}
+                        className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
+                      />
+                      <div className="text-2xs text-text-muted mt-0.5">{selectedPool.token1}/{selectedPool.token0}</div>
+                    </div>
+                    <div className="bg-bg-raised rounded-xl p-3">
+                      <div className="text-2xs text-text-muted mb-1">Max Price</div>
+                      <input
+                        type="number"
+                        value={maxPrice}
+                        onChange={e => setMaxPrice(e.target.value)}
+                        placeholder={currentPrice ? (currentPrice * 1.2).toFixed(4) : '0.0'}
+                        className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
+                      />
+                      <div className="text-2xs text-text-muted mt-0.5">{selectedPool.token1}/{selectedPool.token0}</div>
+                    </div>
+                    <div className="bg-bg-raised rounded-xl p-3 text-center">
+                      <div className="text-2xs text-text-muted mb-1">Total Bins</div>
+                      <div className="text-sm font-mono text-emerald-300 font-bold">{computedBins ?? '—'}</div>
+                    </div>
+                  </div>
+
+                  {/* Quick presets */}
+                  <div className="flex gap-1.5">
+                    {[{ label: '±5%', lo: 5, hi: 5 }, { label: '±10%', lo: 10, hi: 10 }, { label: '±25%', lo: 25, hi: 25 }, { label: '±50%', lo: 50, hi: 50 }].map(p => (
+                      <button key={p.label} onClick={() => prefillFromCurrentPrice(p.lo, p.hi)} disabled={!currentPrice}
+                        className="flex-1 py-1 rounded-lg text-xs font-mono border bg-bg-base text-text-muted border-bg-border hover:border-emerald-500/40 hover:text-emerald-300 transition-all disabled:opacity-40">
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {minPrice && maxPrice && parseFloat(maxPrice) <= parseFloat(minPrice) && (
+                    <div className="text-2xs text-red-400 font-mono">Max price must be greater than min price</div>
+                  )}
+                </div>
+
+                {/* Pool stats */}
+                <div className="border-t border-bg-border px-4 py-3 space-y-2">
+                  {currentPrice && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-text-muted">Current Price</span>
+                      <span className="font-mono text-text-primary">
+                        1 {selectedPool.token0} = {currentPrice < 0.001 ? currentPrice.toExponential(3) : currentPrice.toFixed(6)} {selectedPool.token1}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-xs">
+                    <span className="text-text-muted">Fee Split</span>
+                    <span className="font-mono text-text-primary">0% LP / 100% Voter</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-text-muted">Bin Step</span>
+                    <span className="font-mono text-text-primary">{dlmmBinStep} bps</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-text-muted">Pool Address</span>
+                    <a href={`https://snowtrace.io/address/${selectedPool.address}`} target="_blank" rel="noopener noreferrer"
+                      className="font-mono text-aeon-400 hover:underline">
+                      {selectedPool.address.slice(0, 6)}..{selectedPool.address.slice(-4)} ↗
+                    </a>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )
+          })()}
 
           {/* Progress steps */}
           {showProgress && (
