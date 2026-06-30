@@ -50,7 +50,8 @@ export default function LiquidityPage() {
   const [selectedPool,   setSelectedPool]   = useState(POOLS[0])
   const [amount0,        setAmount0]        = useState('')
   const [amount1,        setAmount1]        = useState('')
-  const [numBins,        setNumBins]        = useState(200)
+  const [minPrice,       setMinPrice]       = useState('')
+  const [maxPrice,       setMaxPrice]       = useState('')
   const [clPreset,       setClPreset]       = useState<string>('full')
   const [removeAmount,   setRemoveAmount]   = useState(50)
   const [showPoolPicker, setShowPoolPicker] = useState(false)
@@ -142,7 +143,28 @@ export default function LiquidityPage() {
   }
 
   // Reset amounts when pool changes
-  useEffect(() => { setAmount0(''); setAmount1('') }, [selectedPool.address])
+  useEffect(() => { setAmount0(''); setAmount1(''); setMinPrice(''); setMaxPrice('') }, [selectedPool.address])
+
+  // DLMM: derive current price from reserves (token1 per token0)
+  const currentPrice = reserve0 > 0n && reserve1 > 0n
+    ? parseFloat(formatUnits(reserve1, token1Dec)) / parseFloat(formatUnits(reserve0, token0Dec))
+    : null
+
+  // DLMM: compute bins from price range
+  const dlmmBinStep = 'binStep' in selectedPool ? (selectedPool as any).binStep as number : 800
+  const binStepFrac = dlmmBinStep / 10000
+  const computedBins = (() => {
+    const lo = parseFloat(minPrice)
+    const hi = parseFloat(maxPrice)
+    if (!lo || !hi || lo <= 0 || hi <= lo) return null
+    return Math.max(1, Math.ceil(Math.log(hi / lo) / Math.log(1 + binStepFrac)))
+  })()
+
+  function prefillFromCurrentPrice(pctLow: number, pctHigh: number) {
+    if (!currentPrice) return
+    setMinPrice((currentPrice * (1 - pctLow / 100)).toFixed(6))
+    setMaxPrice((currentPrice * (1 + pctHigh / 100)).toFixed(6))
+  }
 
   function safeParseUnits(val: string, dec: number): bigint {
     if (!val || parseFloat(val) <= 0) return 0n
@@ -407,53 +429,90 @@ export default function LiquidityPage() {
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-xs font-semibold text-emerald-300">DLMM Pool — Bin Distribution</span>
+                  <span className="text-xs font-semibold text-emerald-300">DLMM Pool — Price Range</span>
                 </div>
                 <span className="text-xs text-text-muted font-mono">
-                  {selectedPool.fee} · {'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps/bin` : '800 bps/bin'}
+                  {selectedPool.fee} · {dlmmBinStep} bps/bin
                 </span>
               </div>
-              <div>
-                <div className="flex justify-between mb-1.5">
-                  <span className="text-xs text-text-muted">Number of Bins</span>
-                  <span className="text-xs font-mono text-emerald-300 font-bold">{numBins} bins</span>
+
+              {currentPrice && (
+                <div className="flex items-center justify-between text-xs bg-bg-raised rounded-lg px-3 py-2">
+                  <span className="text-text-muted">Current price</span>
+                  <span className="font-mono text-emerald-300 font-bold">
+                    1 {selectedPool.token0} = {currentPrice < 0.001 ? currentPrice.toExponential(3) : currentPrice.toFixed(6)} {selectedPool.token1}
+                  </span>
                 </div>
-                <input
-                  type="range"
-                  min={1}
-                  max={69}
-                  value={numBins}
-                  onChange={e => setNumBins(parseInt(e.target.value))}
-                  className="w-full accent-emerald-400 mb-2"
-                />
-                <div className="flex gap-1.5">
-                  {[1, 5, 10, 20, 50, 69].map(n => (
-                    <button
-                      key={n}
-                      onClick={() => setNumBins(n)}
-                      className={clsx(
-                        'flex-1 py-1.5 rounded-lg text-xs font-mono transition-all border',
-                        numBins === n
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                          : 'bg-bg-raised text-text-muted border-bg-border hover:border-bg-hover'
-                      )}
-                    >
-                      {n}
-                    </button>
-                  ))}
+              )}
+
+              {/* Quick preset buttons */}
+              <div className="grid grid-cols-4 gap-1.5">
+                {[
+                  { label: '±5%',  lo: 5,  hi: 5  },
+                  { label: '±10%', lo: 10, hi: 10 },
+                  { label: '±25%', lo: 25, hi: 25 },
+                  { label: '±50%', lo: 50, hi: 50 },
+                ].map(p => (
+                  <button
+                    key={p.label}
+                    onClick={() => prefillFromCurrentPrice(p.lo, p.hi)}
+                    disabled={!currentPrice}
+                    className="py-1.5 rounded-lg text-xs font-mono border bg-bg-raised text-text-muted border-bg-border hover:border-emerald-500/40 hover:text-emerald-300 transition-all disabled:opacity-40"
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Min / Max price inputs */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-bg-raised rounded-xl p-3">
+                  <div className="text-2xs text-text-muted mb-1.5">
+                    Min Price <span className="opacity-60">({selectedPool.token1}/{selectedPool.token0})</span>
+                  </div>
+                  <input
+                    type="number"
+                    value={minPrice}
+                    onChange={e => setMinPrice(e.target.value)}
+                    placeholder={currentPrice ? (currentPrice * 0.8).toFixed(6) : '0.0'}
+                    className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
+                  />
+                </div>
+                <div className="bg-bg-raised rounded-xl p-3">
+                  <div className="text-2xs text-text-muted mb-1.5">
+                    Max Price <span className="opacity-60">({selectedPool.token1}/{selectedPool.token0})</span>
+                  </div>
+                  <input
+                    type="number"
+                    value={maxPrice}
+                    onChange={e => setMaxPrice(e.target.value)}
+                    placeholder={currentPrice ? (currentPrice * 1.2).toFixed(6) : '0.0'}
+                    className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
+                  />
                 </div>
               </div>
+
+              {/* Validation */}
+              {minPrice && maxPrice && parseFloat(maxPrice) <= parseFloat(minPrice) && (
+                <div className="text-2xs text-red-400 font-mono">Max price must be greater than min price</div>
+              )}
+
+              {/* Computed summary */}
               <div className="grid grid-cols-3 gap-2">
-                {[
-                  { label: 'Bin Step', value: 'binStep' in selectedPool ? `${(selectedPool as any).binStep} bps` : '800 bps' },
-                  { label: 'Active Bins', value: `${numBins}` },
-                  { label: 'Distribution', value: 'Uniform' },
-                ].map(s => (
-                  <div key={s.label} className="bg-bg-raised rounded-lg p-2 text-center">
-                    <div className="text-2xs text-text-muted">{s.label}</div>
-                    <div className="text-xs font-mono text-emerald-300 font-bold">{s.value}</div>
+                <div className="bg-bg-raised rounded-lg p-2 text-center">
+                  <div className="text-2xs text-text-muted">Bin Step</div>
+                  <div className="text-xs font-mono text-emerald-300 font-bold">{dlmmBinStep} bps</div>
+                </div>
+                <div className="bg-bg-raised rounded-lg p-2 text-center">
+                  <div className="text-2xs text-text-muted">Bins</div>
+                  <div className="text-xs font-mono text-emerald-300 font-bold">
+                    {computedBins ?? '—'}
                   </div>
-                ))}
+                </div>
+                <div className="bg-bg-raised rounded-lg p-2 text-center">
+                  <div className="text-2xs text-text-muted">Distribution</div>
+                  <div className="text-xs font-mono text-emerald-300 font-bold">Uniform</div>
+                </div>
               </div>
             </div>
           )}
