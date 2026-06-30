@@ -515,6 +515,13 @@ export const VOTER_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
+    name: 'lastVoted',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
     name: 'internalBribes',
     type: 'function',
     stateMutability: 'view',

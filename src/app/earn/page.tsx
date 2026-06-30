@@ -273,7 +273,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   prices: PriceMap
 }) {
   const [expanded,   setExpanded]   = useState(false)
-  const [poolTab,    setPoolTab]    = useState<'earn' | 'liquidity'>('earn')
+  // poolTab removed — only Earn tab shown
   const [stakeAmt,   setStakeAmt]   = useState('')
   const [unstakeAmt, setUnstakeAmt] = useState('')
   const [step,       setStep]       = useState<Step>('idle')
@@ -282,7 +282,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   const poolPrice = usePoolPrice(pool)
 
   const { data: gaugeAddr } = useReadContract({
-    address: CONTRACTS.AeonGaugeFactory, abi: GAUGE_FACTORY_ABI, functionName: 'gaugeForPool',
+    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'gauges',
     args: [pool.address], query: { enabled: expanded },
   })
   const gauge = gaugeAddr && gaugeAddr !== '0x0000000000000000000000000000000000000000' ? gaugeAddr : undefined
@@ -478,17 +478,10 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
 
       {expanded && (
         <div className="border-t border-bg-border bg-bg-raised">
-          {/* Sub-tabs */}
           <div className="flex gap-1 px-4 pt-3">
-            {(['earn', 'liquidity'] as const).map(t => (
-              <button key={t} onClick={() => setPoolTab(t)}
-                className={clsx(
-                  'flex items-center gap-1.5 px-4 py-1.5 rounded-t-lg text-xs font-medium border border-b-0 transition-all',
-                  poolTab === t ? 'bg-bg-base border-bg-border text-text-primary' : 'bg-transparent border-transparent text-text-muted hover:text-text-secondary'
-                )}>
-                {t === 'earn' ? <><Coins size={11} /> Earn</> : <><Droplets size={11} /> Liquidity</>}
-              </button>
-            ))}
+            <button className="flex items-center gap-1.5 px-4 py-1.5 rounded-t-lg text-xs font-medium border border-b-0 transition-all bg-bg-base border-bg-border text-text-primary">
+              <Coins size={11} /> Earn
+            </button>
           </div>
 
           <div className="px-4 pb-4 pt-0 bg-bg-base">
@@ -502,16 +495,11 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
               {poolPrice.priceLabel && <span className="text-text-muted hidden sm:inline">{poolPrice.priceLabel}</span>}
             </div>
 
-            {poolTab === 'liquidity' ? (
-              !wallet
-                ? <div className="p-4 text-center text-sm text-text-muted">Connect wallet to manage liquidity</div>
-                : <LiquidityPanel pool={pool} wallet={wallet} prices={prices} tvlUsd={tvlUsd} onDone={refetchLP} />
-            ) : (
-              !wallet
-                ? <div className="p-4 text-center text-sm text-text-muted">Connect wallet to stake and earn</div>
-                : !gauge
-                  ? <div className="p-4 text-center text-xs text-yellow-400">Gauge not yet deployed for this pool</div>
-                  : (
+            {!wallet
+              ? <div className="p-4 text-center text-sm text-text-muted">Connect wallet to stake and earn</div>
+              : !gauge
+                ? <div className="p-4 text-center text-xs text-yellow-400">Gauge not yet deployed for this pool</div>
+                : (
                     <div className="grid md:grid-cols-2 gap-6">
                       <div>
                         <h4 className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Stake LP — Earn AEON Emissions</h4>
@@ -612,7 +600,7 @@ function useEarnStats(wallet?: `0x${string}`) {
     query: { enabled: !!wallet, refetchInterval: 30000 },
   })
   const { data: gaugeAddrs } = useReadContracts({
-    contracts: UNIQUE_POOLS.map(p => ({ address: CONTRACTS.AeonGaugeFactory as `0x${string}`, abi: GAUGE_FACTORY_ABI, functionName: 'gaugeForPool' as const, args: [p.address as `0x${string}`] })),
+    contracts: UNIQUE_POOLS.map(p => ({ address: CONTRACTS.AeonVoter as `0x${string}`, abi: VOTER_ABI, functionName: 'gauges' as const, args: [p.address as `0x${string}`] })),
     query: { refetchInterval: 60000 },
   })
   const gaugeByIndex: (`0x${string}` | null)[] = (gaugeAddrs ?? []).map(r =>

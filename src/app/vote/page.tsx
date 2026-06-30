@@ -80,6 +80,29 @@ export default function VotePage() {
     query: { enabled: !!tokenId },
   })
 
+  const { data: lastVotedTs } = useReadContract({
+    address: CONTRACTS.AeonVoter,
+    abi: VOTER_ABI,
+    functionName: 'lastVoted',
+    args: tokenId ? [tokenId] : undefined,
+    query: { enabled: !!tokenId },
+  })
+
+  // Reset is only allowed after the epoch following the vote (epoch = 7 days, aligned to UNIX/604800 boundary)
+  const WEEK = 604800n
+  const resetAllowedAt = lastVotedTs ? ((lastVotedTs / WEEK) * WEEK + WEEK) : undefined
+  const nowSec = BigInt(Math.floor(Date.now() / 1000))
+  const canReset = resetAllowedAt !== undefined ? nowSec >= resetAllowedAt : true
+
+  function resetCountdown() {
+    if (!resetAllowedAt) return ''
+    const remaining = Number(resetAllowedAt - nowSec)
+    if (remaining <= 0) return ''
+    const h = Math.floor(remaining / 3600)
+    const m = Math.floor((remaining % 3600) / 60)
+    return h > 24 ? `${Math.floor(h / 24)}d ${h % 24}h` : `${h}h ${m}m`
+  }
+
   const { writeContract, data: txHash, isPending } = useWriteContract()
   const { isLoading: isConfirming, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash })
 
@@ -209,9 +232,14 @@ export default function VotePage() {
                       </span>
                     </div>
                     {hasVoted && (
-                      <button onClick={handleReset} disabled={isResetting} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 mt-1 flex items-center justify-center gap-1.5">
-                        {isResetting ? 'Resetting…' : 'Reset Vote'}
-                      </button>
+                      <div className="space-y-1 mt-1">
+                        <button onClick={handleReset} disabled={isResetting || !canReset} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+                          {isResetting ? 'Resetting…' : canReset ? 'Reset Vote' : `Reset unlocks in ${resetCountdown()}`}
+                        </button>
+                        {!canReset && (
+                          <p className="text-2xs text-text-muted text-center">Reset is only available after the epoch you voted in ends</p>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
