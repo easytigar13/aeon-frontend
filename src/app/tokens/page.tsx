@@ -1,10 +1,12 @@
 'use client'
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Search, ArrowUpRight, Copy, Check } from 'lucide-react'
+import { Search, ArrowUpRight, Copy, Check, TrendingUp, TrendingDown } from 'lucide-react'
 import { TOKENS, POOLS } from '@/config/contracts'
 import { usePrices } from '@/hooks/usePrices'
+import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
 import { TokenIcon, ChainBadge } from '@/components/TokenIcon'
+import { Sparkline } from '@/components/Sparkline'
 
 function fmtPrice(p: number | null): string {
   if (p === null) return '—'
@@ -13,18 +15,24 @@ function fmtPrice(p: number | null): string {
   return '$' + p.toExponential(2)
 }
 
+function fmtChange(c: number | null): string {
+  if (c === null) return ''
+  const sign = c >= 0 ? '+' : ''
+  return `${sign}${c.toFixed(2)}%`
+}
+
 function shortAddr(addr: string): string {
   return `${addr.slice(0, 6)}...${addr.slice(-4)}`
 }
 
 export default function TokensPage() {
   const prices = usePrices()
+  const dexInfo = useDexTokenInfo()
   const [query, setQuery] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
 
   const entries = useMemo(() => Object.entries(TOKENS), [])
 
-  // Count how many AEON DEX pools (vAMM + CL + DLMM) each token trades in
   const poolCountBySymbol = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const p of POOLS) {
@@ -86,15 +94,22 @@ export default function TokensPage() {
           {filtered.map(([key, t]) => {
             const price = prices[key] ?? null
             const pools = poolCountBySymbol[key] ?? 0
+            const info = dexInfo[key]
+            const change = info?.priceChange24h ?? null
+            const positive = change === null || change >= 0
+            const sparkline = info?.sparkline ?? []
+            const hasChart = sparkline.length >= 2
+
             return (
               <div
                 key={key}
-                className="card group p-4 bg-bg-surface border border-bg-border rounded-xl2 hover:border-aeon-400/40 hover:bg-aeon-glow transition-all duration-150"
+                className="group flex flex-col bg-bg-surface border border-bg-border rounded-xl2 hover:border-aeon-400/40 hover:bg-aeon-glow transition-all duration-150 overflow-hidden"
               >
-                <div className="flex items-start justify-between mb-3">
+                {/* Main info row */}
+                <div className="flex items-start justify-between p-4 pb-3">
                   <div className="flex items-center gap-3">
                     <div className="relative">
-                      <TokenIcon symbol={key} size={40} />
+                      <TokenIcon symbol={key} size={40} imageUrl={info?.imageUrl} />
                       <div className="absolute -bottom-1 -right-1">
                         <ChainBadge size={16} />
                       </div>
@@ -104,15 +119,30 @@ export default function TokensPage() {
                       <div className="text-xs text-text-muted">{t.name}</div>
                     </div>
                   </div>
+
+                  {/* Price + 24h change */}
                   <div className="text-right">
                     <div className="font-mono text-sm font-medium text-text-primary">{fmtPrice(price)}</div>
-                    {pools > 0 && (
+                    {change !== null ? (
+                      <div className={`flex items-center justify-end gap-0.5 text-2xs font-mono mt-0.5 ${positive ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {positive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                        {fmtChange(change)}
+                      </div>
+                    ) : pools > 0 ? (
                       <div className="text-2xs text-emerald-400 font-mono mt-0.5">{pools} pool{pools !== 1 ? 's' : ''}</div>
-                    )}
+                    ) : null}
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-3 border-t border-bg-border">
+                {/* Sparkline chart */}
+                {hasChart && (
+                  <div className="px-4 pb-2">
+                    <Sparkline prices={sparkline} positive={positive} width={280} height={44} />
+                  </div>
+                )}
+
+                {/* Footer: address + actions */}
+                <div className="flex items-center justify-between px-4 py-3 border-t border-bg-border mt-auto">
                   <button
                     onClick={() => copyAddr(t.address)}
                     className="flex items-center gap-1.5 text-2xs font-mono text-text-muted hover:text-text-secondary transition-colors"
@@ -123,7 +153,8 @@ export default function TokensPage() {
                   <div className="flex items-center gap-2">
                     <a
                       href={`https://snowtrace.io/address/${t.address}`}
-                      target="_blank" rel="noopener noreferrer"
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="text-2xs text-text-muted hover:text-aeon-400 transition-colors flex items-center gap-0.5"
                     >
                       Explorer <ArrowUpRight size={10} />
