@@ -131,14 +131,6 @@ export default function SwapPage() {
         parseFloat(formatUnits(parsedAmountIn, TOKENS[tokenIn].decimals))
       : 0
 
-  // Market-price deviation: compare route rate vs oracle prices
-  // If the pool is mis-priced vs market, users would lose money even at 0% AMM impact.
-  const marketDeviation = (() => {
-    if (isWrapUnwrap || !priceIn || !priceOut || spotRate <= 0) return 0
-    const marketRate = priceIn / priceOut          // expected tokenOut per tokenIn
-    return ((marketRate - spotRate) / marketRate) * 100  // % below fair value
-  })()
-  const badPrice = marketDeviation > 5   // pool price more than 5% worse than market
 
   function setPercent(pct: number) {
     if (!isConnected || balanceIn.raw === 0n) return
@@ -218,7 +210,7 @@ export default function SwapPage() {
     return `Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
   }
 
-  const disabled = isConnected && (!hasAmount || overBal || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy || badPrice)
+  // disabled is computed after badPrice (declared below with priceIn/priceOut)
 
   function fmtUsd(n: number | null): string {
     if (!n || n <= 0) return ''
@@ -231,6 +223,17 @@ export default function SwapPage() {
   const priceOut = prices[tokenOut] ?? null
   const valueIn  = amountIn && parseFloat(amountIn) > 0 && priceIn  ? parseFloat(amountIn)          * priceIn  : null
   const valueOut = amountOutFormatted && priceOut                    ? parseFloat(amountOutFormatted) * priceOut : null
+
+  // Market-price deviation: compare route rate vs oracle prices
+  // If the pool is mis-priced vs market, users would lose money even at 0% AMM impact.
+  const marketDeviation = (() => {
+    if (isWrapUnwrap || !priceIn || !priceOut || spotRate <= 0) return 0
+    const marketRate = priceIn / priceOut          // expected tokenOut per tokenIn
+    return ((marketRate - spotRate) / marketRate) * 100  // % below fair value
+  })()
+  const badPrice = marketDeviation > 5   // pool price more than 5% worse than market
+
+  const disabled = isConnected && (!hasAmount || overBal || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy || badPrice)
 
   // Route label for display
   const routeLabel = isWrapUnwrap

@@ -578,7 +578,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
                       </div>
                     </div>
                   )
-            )}
+            }
 
             <div className="mt-4 pt-3 border-t border-bg-border flex items-center justify-between">
               <span className="text-2xs text-text-muted font-mono">{pool.address.slice(0,10)}…{pool.address.slice(-8)}</span>
