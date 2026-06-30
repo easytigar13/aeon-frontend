@@ -7,6 +7,7 @@ import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import { POOLS, TOKENS, CONTRACTS, CL_RANGE_PRESETS } from '@/config/contracts'
 import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI } from '@/config/abis'
+import { usePrices } from '@/hooks/usePrices'
 
 type Tab = 'add' | 'remove'
 type PoolType = 'vAMM' | 'CL' | 'DLMM'
@@ -69,6 +70,7 @@ export default function LiquidityPage() {
   const token0Dec  = token0Key ? TOKENS[token0Key].decimals : 18
   const token1Dec  = token1Key ? TOKENS[token1Key].decimals : 18
 
+  const prices = usePrices()
   const bal0 = useTokenBal(token0Addr, address)
   const bal1 = useTokenBal(token1Addr, address)
 
@@ -481,31 +483,73 @@ export default function LiquidityPage() {
           )}
 
           {poolType === 'DLMM' && (() => {
-            const totalBins = computedBins ?? 20
-            // Generate bar heights for visualisation based on shape
+            // Real TVL from reserves × prices
+            const p0 = prices[token0Key ?? ''] ?? null
+            const p1 = prices[token1Key ?? ''] ?? null
+            const r0Num = parseFloat(formatUnits(reserve0, token0Dec))
+            const r1Num = parseFloat(formatUnits(reserve1, token1Dec))
+            const poolTVL = p0 && p1 ? r0Num * p0 + r1Num * p1 : null
+            const poolTVLFmt = poolTVL ? poolTVL >= 1000 ? `$${(poolTVL/1000).toFixed(1)}K` : `$${poolTVL.toFixed(0)}` : null
+
+            // Your TVL from LP share
+            const yourShare = totalSupply > 0n ? Number(lpBal) / Number(totalSupply) : 0
+            const yourTVL = poolTVL ? poolTVL * yourShare : null
+            const yourTVLFmt = yourTVL ? yourTVL >= 1 ? `$${yourTVL.toFixed(2)}` : `$${yourTVL.toFixed(4)}` : null
+            const your0 = r0Num * yourShare
+            const your1 = r1Num * yourShare
+
+            // Bin chart bars — shape determines height, position in range determines color
+            const BARS = 40
             function shapeBars(n: number): number[] {
-              const arr: number[] = []
-              for (let i = 0; i < n; i++) {
+              return Array.from({ length: n }, (_, i) => {
                 const t = n <= 1 ? 0.5 : i / (n - 1)
-                if (dlmmShape === 'uniform') arr.push(0.75)
-                else if (dlmmShape === 'curved') arr.push(0.2 + 0.8 * Math.exp(-8 * (t - 0.5) ** 2))
-                else arr.push(0.2 + 0.8 * (1 - Math.exp(-6 * Math.min(t, 1 - t) ** 0.5)))
-              }
-              return arr
+                if (dlmmShape === 'uniform') return 0.65 + Math.random() * 0.05
+                if (dlmmShape === 'curved')  return 0.1 + 0.9 * Math.exp(-7 * (t - 0.5) ** 2)
+                return 0.1 + 0.9 * Math.pow(Math.abs(t - 0.5) * 2, 0.6)
+              })
             }
-            const BARS = 32
+            // Determine where current price falls in the min/max range
+            const lo = parseFloat(minPrice) || (currentPrice ? currentPrice * 0.8 : 0)
+            const hi = parseFloat(maxPrice) || (currentPrice ? currentPrice * 1.2 : 0)
+            const pricePct = currentPrice && hi > lo ? Math.max(0, Math.min(1, (currentPrice - lo) / (hi - lo))) : 0.5
+            const activeBin = Math.round(pricePct * (BARS - 1))
             const bars = shapeBars(BARS)
-            const midBin = Math.floor(BARS / 2)
 
             return (
               <div className="border border-emerald-500/20 rounded-xl overflow-hidden">
-                {/* Header */}
-                <div className="px-4 pt-4 pb-3 flex items-center justify-between border-b border-bg-border">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                    <span className="text-xs font-semibold text-emerald-300">DLMM — Bin Liquidity</span>
+                {/* Header with TVL */}
+                <div className="px-4 pt-4 pb-3 border-b border-bg-border">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                      <span className="text-sm font-semibold text-text-primary">
+                        {selectedPool.token0} / {selectedPool.token1}
+                      </span>
+                    </div>
+                    <span className="text-xs text-text-muted font-mono">{selectedPool.fee} · {dlmmBinStep} bps/bin</span>
                   </div>
-                  <span className="text-xs text-text-muted font-mono">{selectedPool.fee} · {dlmmBinStep} bps/bin</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-2xs text-text-muted uppercase tracking-wider mb-0.5">Pool TVL</div>
+                      <div className="text-lg font-bold font-mono text-text-primary">{poolTVLFmt ?? '—'}</div>
+                      {poolTVL && (
+                        <div className="mt-1 text-2xs text-text-muted">
+                          {r0Num.toFixed(4)} {selectedPool.token0} + {r1Num.toFixed(4)} {selectedPool.token1}
+                        </div>
+                      )}
+                    </div>
+                    {isConnected && lpBal > 0n && (
+                      <div>
+                        <div className="text-2xs text-text-muted uppercase tracking-wider mb-0.5">Your TVL</div>
+                        <div className="text-lg font-bold font-mono text-emerald-400">{yourTVLFmt ?? '—'}</div>
+                        {yourTVL && (
+                          <div className="mt-1 text-2xs text-text-muted">
+                            {your0.toFixed(4)} {selectedPool.token0} + {your1.toFixed(4)} {selectedPool.token1}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Shape selector */}
@@ -513,21 +557,16 @@ export default function LiquidityPage() {
                   <div className="text-xs text-text-muted mb-2">Shape</div>
                   <div className="flex gap-2">
                     {([
-                      { key: 'uniform', label: 'Uniform',  icon: '▬▬▬' },
-                      { key: 'curved',  label: 'Curved',   icon: '▁▄█▄▁' },
-                      { key: 'bidask',  label: 'Bid-Ask',  icon: '█▁▁▁█' },
+                      { key: 'uniform', label: 'Uniform' },
+                      { key: 'curved',  label: 'Curved'  },
+                      { key: 'bidask',  label: 'Bid-Ask' },
                     ] as const).map(s => (
-                      <button
-                        key={s.key}
-                        onClick={() => setDlmmShape(s.key)}
-                        className={clsx(
-                          'flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all',
+                      <button key={s.key} onClick={() => setDlmmShape(s.key)}
+                        className={clsx('flex-1 py-1.5 rounded-lg text-xs font-medium border transition-all',
                           dlmmShape === s.key
                             ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                             : 'bg-bg-raised text-text-muted border-bg-border hover:border-emerald-500/30'
-                        )}
-                      >
-                        <div className="text-2xs font-mono opacity-70 mb-0.5">{s.icon}</div>
+                        )}>
                         {s.label}
                       </button>
                     ))}
@@ -538,60 +577,51 @@ export default function LiquidityPage() {
                 <div className="px-4 pb-3">
                   <div className="relative h-28 flex items-end gap-px bg-bg-raised rounded-xl px-2 pt-2 pb-1 overflow-hidden">
                     {bars.map((h, i) => (
-                      <div
-                        key={i}
-                        className={clsx(
-                          'flex-1 rounded-sm transition-all duration-300',
-                          i < midBin ? 'bg-blue-500/70' : i === midBin ? 'bg-emerald-400' : 'bg-red-500/70'
+                      <div key={i}
+                        className={clsx('flex-1 rounded-sm transition-all duration-500',
+                          i < activeBin  ? 'bg-blue-500/75'
+                          : i === activeBin ? 'bg-emerald-400'
+                          : 'bg-red-500/75'
                         )}
                         style={{ height: `${h * 100}%` }}
                       />
                     ))}
-                    {/* Current price line */}
-                    <div className="absolute top-0 bottom-0 flex flex-col items-center pointer-events-none"
-                      style={{ left: `${(midBin / BARS) * 100}%` }}>
-                      <div className="w-px h-full bg-emerald-400/60" />
+                    {/* Price marker line */}
+                    <div className="absolute top-0 bottom-0 pointer-events-none"
+                      style={{ left: `calc(${pricePct * 100}% )` }}>
+                      <div className="w-px h-full bg-emerald-400/80" />
+                      <div className="absolute -top-0 left-1 text-2xs text-emerald-400 font-mono whitespace-nowrap bg-bg-raised px-1 rounded">
+                        {currentPrice ? (currentPrice < 0.001 ? currentPrice.toExponential(2) : currentPrice.toFixed(4)) : ''}
+                      </div>
                     </div>
                   </div>
                   <div className="flex justify-between text-2xs text-text-muted font-mono mt-1 px-1">
-                    <span>{minPrice || (currentPrice ? (currentPrice * 0.8).toFixed(4) : '—')}</span>
-                    <span className="text-emerald-400">Current</span>
-                    <span>{maxPrice || (currentPrice ? (currentPrice * 1.2).toFixed(4) : '—')}</span>
+                    <span className="text-blue-400">{lo > 0 ? (lo < 0.001 ? lo.toExponential(2) : lo.toFixed(4)) : '—'}</span>
+                    <span className="text-text-muted">{selectedPool.token1} per {selectedPool.token0}</span>
+                    <span className="text-red-400">{hi > 0 ? (hi < 0.001 ? hi.toExponential(2) : hi.toFixed(4)) : '—'}</span>
                   </div>
                 </div>
 
                 {/* Price range inputs */}
                 <div className="px-4 pb-3 space-y-2">
-                  <div className="grid grid-cols-3 gap-2 items-end">
+                  <div className="grid grid-cols-3 gap-2">
                     <div className="bg-bg-raised rounded-xl p-3">
                       <div className="text-2xs text-text-muted mb-1">Min Price</div>
-                      <input
-                        type="number"
-                        value={minPrice}
-                        onChange={e => setMinPrice(e.target.value)}
+                      <input type="number" value={minPrice} onChange={e => setMinPrice(e.target.value)}
                         placeholder={currentPrice ? (currentPrice * 0.8).toFixed(4) : '0.0'}
-                        className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
-                      />
-                      <div className="text-2xs text-text-muted mt-0.5">{selectedPool.token1}/{selectedPool.token0}</div>
+                        className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none" />
                     </div>
                     <div className="bg-bg-raised rounded-xl p-3">
                       <div className="text-2xs text-text-muted mb-1">Max Price</div>
-                      <input
-                        type="number"
-                        value={maxPrice}
-                        onChange={e => setMaxPrice(e.target.value)}
+                      <input type="number" value={maxPrice} onChange={e => setMaxPrice(e.target.value)}
                         placeholder={currentPrice ? (currentPrice * 1.2).toFixed(4) : '0.0'}
-                        className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
-                      />
-                      <div className="text-2xs text-text-muted mt-0.5">{selectedPool.token1}/{selectedPool.token0}</div>
+                        className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none" />
                     </div>
                     <div className="bg-bg-raised rounded-xl p-3 text-center">
                       <div className="text-2xs text-text-muted mb-1">Total Bins</div>
                       <div className="text-sm font-mono text-emerald-300 font-bold">{computedBins ?? '—'}</div>
                     </div>
                   </div>
-
-                  {/* Quick presets */}
                   <div className="flex gap-1.5">
                     {[{ label: '±5%', lo: 5, hi: 5 }, { label: '±10%', lo: 10, hi: 10 }, { label: '±25%', lo: 25, hi: 25 }, { label: '±50%', lo: 50, hi: 50 }].map(p => (
                       <button key={p.label} onClick={() => prefillFromCurrentPrice(p.lo, p.hi)} disabled={!currentPrice}
@@ -600,22 +630,13 @@ export default function LiquidityPage() {
                       </button>
                     ))}
                   </div>
-
                   {minPrice && maxPrice && parseFloat(maxPrice) <= parseFloat(minPrice) && (
                     <div className="text-2xs text-red-400 font-mono">Max price must be greater than min price</div>
                   )}
                 </div>
 
-                {/* Pool stats */}
-                <div className="border-t border-bg-border px-4 py-3 space-y-2">
-                  {currentPrice && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-text-muted">Current Price</span>
-                      <span className="font-mono text-text-primary">
-                        1 {selectedPool.token0} = {currentPrice < 0.001 ? currentPrice.toExponential(3) : currentPrice.toFixed(6)} {selectedPool.token1}
-                      </span>
-                    </div>
-                  )}
+                {/* Pool stats footer */}
+                <div className="border-t border-bg-border px-4 py-3 space-y-1.5">
                   <div className="flex justify-between text-xs">
                     <span className="text-text-muted">Fee Split</span>
                     <span className="font-mono text-text-primary">0% LP / 100% Voter</span>
