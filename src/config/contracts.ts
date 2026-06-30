@@ -5,7 +5,7 @@ export const CONTRACTS = {
   AeonRouter:       '0xD847Ea61394ADa3bb23B373349b58C90f9126A9F' as `0x${string}`,
   AeonToken:        '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`,
   AeonVotingEscrow: '0xdeC58B16B24536bc5009Ad4AfDd0C48fF69F919A' as `0x${string}`,
-  AeonVoter:        '0x05b04A4344520Bb08201Bd9460ec9d37aD5f7918' as `0x${string}`,
+  AeonVoter:        '0x6483c848dc97be0a5b35f928d380a4280f553883' as `0x${string}`,
   TheFurnace:       '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`,
   EmissionsEngine:  '0x4d188106175De919a971B0cB6F8A0e3E885a3410' as `0x${string}`,
   FeeDistributor:   '0x8e33182d3271e2902Ed36aCA77A79e28c8F22d4e' as `0x${string}`,
