@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { Plus, Minus, ChevronDown, Loader2, CheckCircle2 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useAccount, useBalance, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useAccount, useBalance, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import { POOLS, TOKENS, CONTRACTS, CL_RANGE_PRESETS } from '@/config/contracts'
@@ -100,6 +100,20 @@ export default function LiquidityPage() {
     query: { refetchInterval: 15000 },
   })
   const totalSupply = (totalSupplyRaw as bigint | undefined) ?? 0n
+
+  // Scan all pools of current type for LP balances (for "Your Positions" list)
+  const { data: allLpBalances } = useReadContracts({
+    contracts: filteredPools.map(p => ({
+      address: p.address,
+      abi: ERC20_ABI,
+      functionName: 'balanceOf' as const,
+      args: [address ?? '0x0000000000000000000000000000000000000000'] as [`0x${string}`],
+    })),
+    query: { enabled: !!address, refetchInterval: 15000 },
+  })
+  const poolsWithBalance = filteredPools
+    .map((p, i) => ({ pool: p, bal: (allLpBalances?.[i]?.result as bigint | undefined) ?? 0n }))
+    .filter(x => x.bal > 0n)
 
   const allowance0 = useAllowance(token0Addr, address)
   const allowance1 = useAllowance(token1Addr, address)
@@ -623,6 +637,40 @@ export default function LiquidityPage() {
         </div>
       ) : (
         <div className="space-y-4">
+
+          {/* Your Positions — all pools of this type where user has LP */}
+          {isConnected && poolsWithBalance.length > 0 && (
+            <div className="card p-4">
+              <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Your Positions</div>
+              <div className="space-y-2">
+                {poolsWithBalance.map(({ pool, bal }) => (
+                  <button
+                    key={pool.address}
+                    onClick={() => { setSelectedPool(pool); setStep('idle'); setErrMsg('') }}
+                    className={clsx(
+                      'w-full flex items-center justify-between p-3 rounded-xl border transition-all text-left',
+                      selectedPool.address === pool.address
+                        ? 'bg-aeon-400/10 border-aeon-400/40 text-text-primary'
+                        : 'bg-bg-raised border-bg-border hover:border-bg-hover text-text-muted'
+                    )}
+                  >
+                    <div>
+                      <span className="text-sm font-medium text-text-primary">{pool.token0}/{pool.token1}</span>
+                      <span className="ml-2 text-xs text-text-muted">{pool.type} · {pool.fee}</span>
+                    </div>
+                    <span className="text-xs font-mono text-aeon-400">{parseFloat(formatUnits(bal, 18)).toFixed(8)} LP</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {isConnected && poolsWithBalance.length === 0 && allLpBalances && (
+            <div className="p-4 rounded-xl bg-bg-raised border border-bg-border text-sm text-text-muted text-center">
+              No {poolType} LP positions found in your wallet.
+            </div>
+          )}
+
           <div className="card p-6">
             <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-4">Remove Amount</div>
             <div className="text-center mb-4">
