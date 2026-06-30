@@ -231,7 +231,7 @@ export default function SwapPage() {
     const marketRate = priceIn / priceOut          // expected tokenOut per tokenIn
     return ((marketRate - spotRate) / marketRate) * 100  // % below fair value
   })()
-  const badPrice = marketDeviation > 5   // pool price more than 5% worse than market
+  const badPrice = marketDeviation > 25   // pool price more than 25% worse than market
 
   const disabled = isConnected && (!hasAmount || overBal || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy || badPrice)
 
