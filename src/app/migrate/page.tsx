@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { ArrowRight, ExternalLink, Flame, Loader2, CheckCircle2 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
+import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance, usePublicClient } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import Link from 'next/link'
@@ -89,21 +89,53 @@ export default function MigratePage() {
   // ── Legacy staked LP (real gauges from the old GaugeFactory, orphaned from ─
   //    the current Voter but still fully functional — deposit()/withdraw()
   //    both still work, LP tokens are genuinely sitting in these contracts) ──
-  const { data: legacyStakedRaw, refetch: refetchLegacyStaked } = useReadContracts({
-    contracts: LEGACY_GAUGES.map(g => ({ address: g.gauge, abi: GAUGE_ABI, functionName: 'balanceOf' as const, args: address ? [address] : undefined })),
-    query: { enabled: !!address },
-  })
-  const { data: legacyEarnedRaw } = useReadContracts({
-    contracts: LEGACY_GAUGES.map(g => ({ address: g.gauge, abi: GAUGE_ABI, functionName: 'earned' as const, args: address ? [address] : undefined })),
-    query: { enabled: !!address },
-  })
-  const legacyStaked = LEGACY_GAUGES
-    .map((g, i) => ({
-      ...g,
-      staked: (legacyStakedRaw?.[i]?.result as bigint | undefined) ?? 0n,
-      earned: (legacyEarnedRaw?.[i]?.result as bigint | undefined) ?? 0n,
-    }))
-    .filter(g => g.staked > 0n || g.earned > 0n)
+  //    Fetched manually (not via useReadContracts) so a flaky RPC response on
+  //    a 44-entry multicall surfaces as a visible error instead of silently
+  //    rendering as "nothing staked" — that was the actual bug here.
+  const publicClient = usePublicClient()
+  const [legacyStakedAll, setLegacyStakedAll] = useState<{ gauge: `0x${string}`; pool: `0x${string}`; staked: bigint; earned: bigint }[] | null>(null)
+  const [legacyFetchError, setLegacyFetchError] = useState<string | null>(null)
+  const [legacyFetchNonce, setLegacyFetchNonce] = useState(0)
+
+  useEffect(() => {
+    if (!address || !publicClient) return
+    let cancelled = false
+    setLegacyFetchError(null)
+    setLegacyStakedAll(null)
+
+    async function fetchChunked() {
+      const CHUNK = 8
+      const results: { gauge: `0x${string}`; pool: `0x${string}`; staked: bigint; earned: bigint }[] = []
+      try {
+        for (let i = 0; i < LEGACY_GAUGES.length; i += CHUNK) {
+          const chunk = LEGACY_GAUGES.slice(i, i + CHUNK)
+          const [stakedRes, earnedRes] = await Promise.all([
+            publicClient!.multicall({
+              contracts: chunk.map(g => ({ address: g.gauge, abi: GAUGE_ABI, functionName: 'balanceOf' as const, args: [address!] })),
+              allowFailure: true,
+            }),
+            publicClient!.multicall({
+              contracts: chunk.map(g => ({ address: g.gauge, abi: GAUGE_ABI, functionName: 'earned' as const, args: [address!] })),
+              allowFailure: true,
+            }),
+          ])
+          chunk.forEach((g, j) => {
+            const staked = (stakedRes[j]?.status === 'success' ? stakedRes[j].result as bigint : 0n)
+            const earned = (earnedRes[j]?.status === 'success' ? earnedRes[j].result as bigint : 0n)
+            results.push({ ...g, staked, earned })
+          })
+        }
+        if (!cancelled) setLegacyStakedAll(results)
+      } catch (e: any) {
+        if (!cancelled) setLegacyFetchError(e?.shortMessage || e?.message || 'Failed to load legacy positions')
+      }
+    }
+    fetchChunked()
+    return () => { cancelled = true }
+  }, [address, publicClient, legacyFetchNonce])
+
+  const legacyStaked = (legacyStakedAll ?? []).filter(g => g.staked > 0n || g.earned > 0n)
+  const refetchLegacyStaked = () => setLegacyFetchNonce(n => n + 1)
 
   const [unstakeStep, setUnstakeStep] = useState<Record<string, 'idle' | 'pending' | 'done'>>({})
   const { writeContract: writeUnstake, data: unstakeHash } = useWriteContract()
@@ -246,6 +278,18 @@ export default function MigratePage() {
       )}
 
       {/* ── Legacy staked LP (real, orphaned gauges) ────────────────────── */}
+      {isConnected && legacyFetchError && (
+        <div className="bg-red-500/10 border border-red-500/20 rounded-2xl p-5 space-y-2">
+          <h2 className="text-sm font-semibold text-red-400">Couldn&apos;t check legacy staked LP</h2>
+          <p className="text-xs text-text-muted font-mono">{legacyFetchError}</p>
+          <button onClick={refetchLegacyStaked} className="text-xs text-aeon-400 hover:underline">Retry</button>
+        </div>
+      )}
+      {isConnected && !legacyFetchError && legacyStakedAll === null && (
+        <div className="bg-bg-card border border-bg-border rounded-2xl p-5 text-xs text-text-muted flex items-center gap-2">
+          <Loader2 size={14} className="animate-spin" /> Checking legacy gauges for staked LP…
+        </div>
+      )}
       {isConnected && legacyStaked.length > 0 && (
         <div className="bg-bg-card border border-bg-border rounded-2xl p-5 space-y-4">
           <h2 className="text-sm font-semibold text-text-primary">Legacy staked LP found</h2>
