@@ -32,6 +32,15 @@ export const CONTRACTS = {
   AlgebraPositionManager: '0xe35ff3f8F55Af4E79FbFc19250fFf405c95Da910' as `0x${string}`,
 } as const
 
+// Orphaned v1 governance contracts — read-only, kept only so users can see
+// legacy state (old burns, old votes) that isn't recognized by the v2 stack.
+// Burned tokens are permanently gone regardless (sent to 0xdead) — this is
+// just for visibility, not recovery.
+export const LEGACY_V1 = {
+  TheFurnace: '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`,
+  AeonVoter:  '0x05b04a4344520bb08201bd9460ec9d37ad5f7918' as `0x${string}`,
+} as const
+
 export const TOKENS = {
   AEON:  { address: '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
   AVAX:  { address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `0x${string}`, symbol: 'AVAX',  decimals: 18, name: 'Avalanche (Native)' },

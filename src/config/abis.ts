@@ -30,6 +30,71 @@ export const ALGEBRA_POSITION_MANAGER_ABI = [
   },
 ] as const
 
+// Algebra Integral NonfungiblePositionManager — enumerate a wallet's CL positions
+export const ALGEBRA_PM_ENUMERABLE_ABI = [
+  {
+    name: 'balanceOf',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'owner', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'tokenOfOwnerByIndex',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'owner', type: 'address' },
+      { name: 'index', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'positions',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [
+      { name: 'nonce',                  type: 'uint96'  },
+      { name: 'operator',               type: 'address' },
+      { name: 'token0',                 type: 'address' },
+      { name: 'token1',                 type: 'address' },
+      { name: 'tickLower',              type: 'int24'   },
+      { name: 'tickUpper',              type: 'int24'   },
+      { name: 'liquidity',              type: 'uint128' },
+      { name: 'feeGrowthInside0LastX128', type: 'uint256' },
+      { name: 'feeGrowthInside1LastX128', type: 'uint256' },
+      { name: 'tokensOwed0',            type: 'uint128' },
+      { name: 'tokensOwed1',            type: 'uint128' },
+    ],
+  },
+] as const
+
+// AeonSwap — 1:1 AEON v1 -> v2 migration
+export const AEON_SWAP_ABI = [
+  {
+    name: 'migrate',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{ name: 'amount', type: 'uint256' }],
+    outputs: [],
+  },
+  {
+    name: 'remainingCapacity',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'totalMigrated',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
 // Algebra Integral pool — tick spacing and global state (sqrtPrice, current tick)
 export const ALGEBRA_POOL_ABI = [
   {

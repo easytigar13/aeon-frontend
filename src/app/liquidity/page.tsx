@@ -290,7 +290,7 @@ export default function LiquidityPage() {
   }
 
   // Reset amounts when pool changes
-  useEffect(() => { setAmount0(''); setAmount1(''); setMinPrice(''); setMaxPrice('') }, [selectedPool.address])
+  useEffect(() => { setAmount0(''); setAmount1(''); setMinPrice(''); setMaxPrice(''); setClPreset('full') }, [selectedPool.address])
 
   // Derive current display price:
   // • CL pools: from Algebra globalState sqrtPriceX96 (token1/token0 in on-chain order)
@@ -504,21 +504,30 @@ export default function LiquidityPage() {
           setStep('idle')
           return
         }
-        const lo = parseFloat(minPrice)
-        const hi = parseFloat(maxPrice)
-        if (!lo || !hi || lo <= 0 || hi <= lo) {
-          setErrMsg('Enter a valid price range (min < max).')
-          setStep('idle')
-          return
-        }
         // Decimals in on-chain order (pool's token0/token1 ordering)
         const dec0Onchain = cfgMatchesFlipped ? token1Dec : token0Dec
         const dec1Onchain = cfgMatchesFlipped ? token0Dec : token1Dec
-        // User prices are in config display order; if flipped vs on-chain, swap & invert
-        const onchainMinPrice = cfgMatchesFlipped ? 1 / hi : lo
-        const onchainMaxPrice = cfgMatchesFlipped ? 1 / lo : hi
-        const tickLower = priceToAlgebraTick(onchainMinPrice, dec0Onchain, dec1Onchain, clTickSpacing, 'floor')
-        const tickUpper = priceToAlgebraTick(onchainMaxPrice, dec0Onchain, dec1Onchain, clTickSpacing, 'ceil')
+
+        let tickLower: number
+        let tickUpper: number
+        const useFullRange = clPreset === 'full' && !minPrice && !maxPrice
+        if (useFullRange) {
+          tickLower = Math.ceil(MIN_TICK / clTickSpacing) * clTickSpacing
+          tickUpper = Math.floor(MAX_TICK / clTickSpacing) * clTickSpacing
+        } else {
+          const lo = parseFloat(minPrice)
+          const hi = parseFloat(maxPrice)
+          if (!lo || !hi || lo <= 0 || hi <= lo) {
+            setErrMsg('Enter a valid price range (min < max).')
+            setStep('idle')
+            return
+          }
+          // User prices are in config display order; if flipped vs on-chain, swap & invert
+          const onchainMinPrice = cfgMatchesFlipped ? 1 / hi : lo
+          const onchainMaxPrice = cfgMatchesFlipped ? 1 / lo : hi
+          tickLower = priceToAlgebraTick(onchainMinPrice, dec0Onchain, dec1Onchain, clTickSpacing, 'floor')
+          tickUpper = priceToAlgebraTick(onchainMaxPrice, dec0Onchain, dec1Onchain, clTickSpacing, 'ceil')
+        }
         if (tickLower >= tickUpper) {
           setErrMsg('Price range too narrow — ticks collapsed to the same value.')
           setStep('idle')
@@ -724,11 +733,29 @@ export default function LiquidityPage() {
                 </div>
                 <span className="text-xs text-text-muted font-mono">{selectedPool.fee} fee</span>
               </div>
+
+              <div className="flex items-center justify-between bg-bg-raised rounded-lg px-3 py-2">
+                <span className="text-2xs text-text-muted uppercase tracking-wider">Current Price</span>
+                <span className="text-sm font-mono text-violet-300 font-bold">
+                  {currentPrice
+                    ? `${currentPrice < 0.001 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} ${selectedPool.token1} per ${selectedPool.token0}`
+                    : '—'}
+                </span>
+              </div>
+
               <div className="grid grid-cols-4 gap-1.5">
                 {CL_RANGE_PRESETS.map(p => (
                   <button
                     key={p.key}
-                    onClick={() => setClPreset(p.key)}
+                    onClick={() => {
+                      setClPreset(p.key)
+                      if (p.key === 'full') {
+                        setMinPrice('')
+                        setMaxPrice('')
+                      } else {
+                        prefillFromCurrentPrice(-p.pctLow, p.pctHigh)
+                      }
+                    }}
                     className={clsx(
                       'py-2 rounded-lg text-xs font-medium transition-all border',
                       clPreset === p.key
@@ -741,28 +768,34 @@ export default function LiquidityPage() {
                   </button>
                 ))}
               </div>
-              {clPreset !== 'full' && (
-                <div className="flex gap-2">
-                  {(() => {
-                    const preset = CL_RANGE_PRESETS.find(p => p.key === clPreset)!
-                    return (
-                      <>
-                        <div className="flex-1 bg-bg-raised rounded-lg p-2 text-center">
-                          <div className="text-2xs text-text-muted">Min Price</div>
-                          <div className="text-xs font-mono text-violet-300 font-bold">{preset.pctLow > 0 ? '+' : ''}{preset.pctLow}%</div>
-                        </div>
-                        <div className="flex-1 bg-bg-raised rounded-lg p-2 text-center">
-                          <div className="text-2xs text-text-muted">Max Price</div>
-                          <div className="text-xs font-mono text-violet-300 font-bold">+{preset.pctHigh}%</div>
-                        </div>
-                        <div className="flex-1 bg-bg-raised rounded-lg p-2 text-center">
-                          <div className="text-2xs text-text-muted">Liquidity</div>
-                          <div className="text-xs font-mono text-violet-300 font-bold">Concentrated</div>
-                        </div>
-                      </>
-                    )
-                  })()}
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="bg-bg-raised rounded-xl p-3">
+                  <div className="text-2xs text-text-muted mb-1">Min Price</div>
+                  <input
+                    type="number"
+                    value={minPrice}
+                    onChange={e => { setMinPrice(e.target.value); setClPreset('custom') }}
+                    placeholder={clPreset === 'full' ? '0' : currentPrice ? (currentPrice * 0.95).toFixed(6) : '0.0'}
+                    className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
+                  />
                 </div>
+                <div className="bg-bg-raised rounded-xl p-3">
+                  <div className="text-2xs text-text-muted mb-1">Max Price</div>
+                  <input
+                    type="number"
+                    value={maxPrice}
+                    onChange={e => { setMaxPrice(e.target.value); setClPreset('custom') }}
+                    placeholder={clPreset === 'full' ? '∞' : currentPrice ? (currentPrice * 1.05).toFixed(6) : '0.0'}
+                    className="w-full bg-transparent text-sm font-mono text-text-primary placeholder-text-muted focus:outline-none"
+                  />
+                </div>
+              </div>
+              {clPreset === 'full' && (
+                <div className="text-2xs text-text-muted text-center">Range locked to 0 → ∞ (full range). Type in Min/Max above to set a custom range instead.</div>
+              )}
+              {clPreset !== 'full' && minPrice && maxPrice && parseFloat(maxPrice) <= parseFloat(minPrice) && (
+                <div className="text-2xs text-red-400 font-mono">Max price must be greater than min price</div>
               )}
             </div>
           )}
