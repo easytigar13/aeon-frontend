@@ -41,6 +41,59 @@ export const LEGACY_V1 = {
   AeonVoter:  '0x05b04a4344520bb08201bd9460ec9d37ad5f7918' as `0x${string}`,
 } as const
 
+// Real AeonGauge contracts deployed by the old (v1) AeonGaugeFactory
+// (0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6). These were never registered
+// on any Voter's gauges mapping — orphaned, but fully functional: LP tokens
+// staked into them via deposit() are real ERC20 transfers and are still
+// sitting there right now. withdraw()/getReward() both still work.
+// pool: the underlying trading pool this gauge tracks (for labeling only).
+export const LEGACY_GAUGES = [
+  { gauge: '0xd1E04ab9CE0A6854914Cd9c929B401bdf0700bE3' as `0x${string}`, pool: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489' as `0x${string}` },
+  { gauge: '0x69072b04Cf3eEE09b474D9ab9F80aA17506EE434' as `0x${string}`, pool: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6' as `0x${string}` },
+  { gauge: '0x955bEEee93D334437c1FE284c40Ab28eaCbE1cA2' as `0x${string}`, pool: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
+  { gauge: '0x50bCefB28502C8628bc2564A0bFEb6d5D33eFa25' as `0x${string}`, pool: '0x29c818b0929F9D247157f7b17a49B89664C9efcE' as `0x${string}` },
+  { gauge: '0x6ee853608078A207A30836Eec6310974D4506c14' as `0x${string}`, pool: '0x6658A37c6F1544129CfBA898F827c64680db00b6' as `0x${string}` },
+  { gauge: '0x8323e657009aBbf1567A15294766203150908B10' as `0x${string}`, pool: '0xEF43D5718ec0e22e105e21b9292bE33a7daC5061' as `0x${string}` },
+  { gauge: '0xAbc3Da2cC75387cAf867B07bC272Df19D3cff02c' as `0x${string}`, pool: '0xabce7E6160dF0B1e7A300FfA55Ac26843a59710B' as `0x${string}` },
+  { gauge: '0xB55daDbFB20912466f2961cF466f331fE98706f1' as `0x${string}`, pool: '0x98F41ef967fC9105d83E5a1B44512C25ae15E53E' as `0x${string}` },
+  { gauge: '0x0b499B8c6BA886090aDD7c21F8e1810BDdd8277d' as `0x${string}`, pool: '0x1C95905E0C7D290A46E1d970BeCD315BE10b3421' as `0x${string}` },
+  { gauge: '0xd4F8574d3bC25fE20195Ce58a47D61D79Ba7504b' as `0x${string}`, pool: '0x69174eFdFAE19af3BfbC45e2dbdccfC1A44FdE9b' as `0x${string}` },
+  { gauge: '0x35bd4B5D17192649098aeC846C790178A84a982B' as `0x${string}`, pool: '0xEcb2EBb887cbBC810Ba519906594185D8F1fc704' as `0x${string}` },
+  { gauge: '0xdF769bF01ee70e2F86adC0417e0717d32C4586Be' as `0x${string}`, pool: '0x954068b2289e2Edfa878F17c27b4Ab1B015B77a7' as `0x${string}` },
+  { gauge: '0x2F8cBa007598CBb15FFAbe7A826A9Cc8576eD6bE' as `0x${string}`, pool: '0x966FDDeBc8311bB5A22C625129257213d54A6938' as `0x${string}` },
+  { gauge: '0x90D97BC8991E6d32a5CF3C6e5684644194699A70' as `0x${string}`, pool: '0x45c0d4FfFBE60FBc454f8Db0Eb2643aA139cB706' as `0x${string}` },
+  { gauge: '0x9ccB02D4d9994993f1D7b95298A93230e042B7e5' as `0x${string}`, pool: '0x978968E5F40f1B183959cA8852718E22a6f3fCE7' as `0x${string}` },
+  { gauge: '0x312541E5eF7017f9Ad27C10ea695eDc9529bA3D4' as `0x${string}`, pool: '0x1d891fC5954D777abbb95FaDac8D7de880B9F49a' as `0x${string}` },
+  { gauge: '0x932f5AC813465D6573b4649528DA593f213Aea81' as `0x${string}`, pool: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086' as `0x${string}` },
+  { gauge: '0x021033c66B9De3D11a3D7C5807C4B4A4fE05958b' as `0x${string}`, pool: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b' as `0x${string}` },
+  { gauge: '0x12C2C9dc225cDCadd17B8bA9a3cFfB0183fA05dB' as `0x${string}`, pool: '0x4fAA1a9B62Be8465f33fB3c3ac767F6bc4e510DB' as `0x${string}` },
+  { gauge: '0xBb5e8a475fCF427aA5aB2627ace5AC58943D8bB6' as `0x${string}`, pool: '0xE82347882508179DDED4e74BD4645fad0895e0E7' as `0x${string}` },
+  { gauge: '0xfbCF062cF9C6683Da16dE58f6646965B7520647F' as `0x${string}`, pool: '0x29dFab19335Bcc8E05811d5F9d047372A391DB9C' as `0x${string}` },
+  { gauge: '0x7eBA4a5cF347Cc14436c4FbE7635018a4E8c5E05' as `0x${string}`, pool: '0x1EdEE242F3F1Af2B9B330557816459988a75378b' as `0x${string}` },
+  { gauge: '0x20da4403CF7294B78F1b60f9E23174BdcFe693cE' as `0x${string}`, pool: '0x2b97cEC6A8B1D90732E2c5Fe17433E647cDe62Cc' as `0x${string}` },
+  { gauge: '0x887fAA05836C92FBD0081Ae7F249a893FDbC33aD' as `0x${string}`, pool: '0x836AeEd458857e5FD4134c7DaF7B36ee20B73dbC' as `0x${string}` },
+  { gauge: '0x3f3e49dA26a8534c58b0D63d71511bC0EAD5A16d' as `0x${string}`, pool: '0x1e173e4d5811f27E72300A214DEeF4EFcB3B6be8' as `0x${string}` },
+  { gauge: '0xF6D8Bbf7299253a67a729Ad245Dcad32a6125Bdd' as `0x${string}`, pool: '0x27e4D2467584B7a370856BceDb1B7f460ef2462c' as `0x${string}` },
+  { gauge: '0xc79A7CE8Eb6ddc52E651D5877d4659A88732De6f' as `0x${string}`, pool: '0xDdBcc56993A6d44b24bD9Af0a27000419b0d9b4f' as `0x${string}` },
+  { gauge: '0x0Ce5229Db7ef9DA94Da95359E0fDf828bf16142c' as `0x${string}`, pool: '0xAa35B2eA1DEb790585f9fd11d1878dc0606091a3' as `0x${string}` },
+  { gauge: '0xA95d34E3f0a3a768fDf5199e9505496B11E855D0' as `0x${string}`, pool: '0xC84D3fb669b3b0369978E253dC2F1B7329F6D7eF' as `0x${string}` },
+  { gauge: '0x204Ed15c9Eb0Cc4a1BF80FbeFc8D43c01327E070' as `0x${string}`, pool: '0xD9ae01537e4099eCad113B52856A86148A0E6548' as `0x${string}` },
+  { gauge: '0x433627F321A4596E50c4B0Edb29568438fea2Be9' as `0x${string}`, pool: '0x306B89922bccea64545e701795Ffbf20FB5a0f70' as `0x${string}` },
+  { gauge: '0xEB97d2414269e9952544cb1DdCc7EB488a8746D2' as `0x${string}`, pool: '0xb39e555f18DEfC9d97FBfd08fB4f88D784A44944' as `0x${string}` },
+  { gauge: '0xb24B32A0A16adEf2E857C0a30cc1D3608880869d' as `0x${string}`, pool: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd' as `0x${string}` },
+  { gauge: '0x016DA438386b7e114A9A086B5F67049c08cbfD1a' as `0x${string}`, pool: '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77' as `0x${string}` },
+  { gauge: '0xbB9c311313d61A687B4744f42cD8C31b0C0f9128' as `0x${string}`, pool: '0x19aE273606588fb17D99572321eAD9b0B060DF00' as `0x${string}` },
+  { gauge: '0xD5704702dbf6C92F8b1a4B8D8F7Db1aE3415503f' as `0x${string}`, pool: '0xFb0b8D088691057Fe08040F4364494C23b60C66c' as `0x${string}` },
+  { gauge: '0x5f85Ec0bc2943C2402d1EEa76982796F958ecAcD' as `0x${string}`, pool: '0xB1a5295A8133097E389221df70Ee1dd021B088F0' as `0x${string}` },
+  { gauge: '0x78c11CF0a088e26b0013b5c780b22E90A21171fB' as `0x${string}`, pool: '0xeDDBA3c2A4491D77E8D4b69502f7C862c538DC76' as `0x${string}` },
+  { gauge: '0x48871611388C136Eeb5C777d58470eE837cCb43A' as `0x${string}`, pool: '0x04de9ee7b6355ec643db415b2212734390fcb2f8' as `0x${string}` },
+  { gauge: '0x8f66195845A9fff978e85F024C3220507D9e6094' as `0x${string}`, pool: '0xeb55b531c1881751d6c83ce343ee3870a3ed6cb3' as `0x${string}` },
+  { gauge: '0x0b20720D1A0C27E31ADf368E5B8Eba1aFf541107' as `0x${string}`, pool: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e' as `0x${string}` },
+  { gauge: '0xae513E42584c4Bce4c3a9D0d14b8E819FE7462BA' as `0x${string}`, pool: '0x0D94e9bD42cBDdEeF6804B9813Da82A42617cC01' as `0x${string}` },
+  { gauge: '0x898115c029fCaE28b1B0963A8936F0e000aF05c3' as `0x${string}`, pool: '0x10235223CBa1939Eb5DeE67a08CF1c065BC17A6e' as `0x${string}` },
+  { gauge: '0xADcc48e44Da5B50E550A44D4c0965AbD68eB9123' as `0x${string}`, pool: '0xeaC2c4B5b9a1169C7e46a44ED6A5E4836bA3bB95' as `0x${string}` },
+] as const
+
 export const TOKENS = {
   AEON:  { address: '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
   AVAX:  { address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `0x${string}`, symbol: 'AVAX',  decimals: 18, name: 'Avalanche (Native)' },

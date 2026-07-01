@@ -6,8 +6,14 @@ import { useAccount, useReadContract, useReadContracts, useWriteContract, useWai
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import Link from 'next/link'
-import { CONTRACTS, TOKENS, POOLS, LEGACY_V1 } from '@/config/contracts'
-import { ERC20_ABI, AEON_SWAP_ABI, FURNACE_ABI, ALGEBRA_PM_ENUMERABLE_ABI } from '@/config/abis'
+import { CONTRACTS, TOKENS, POOLS, LEGACY_V1, LEGACY_GAUGES } from '@/config/contracts'
+import { ERC20_ABI, AEON_SWAP_ABI, FURNACE_ABI, ALGEBRA_PM_ENUMERABLE_ABI, GAUGE_ABI } from '@/config/abis'
+
+function poolLabel(poolAddr: string): string {
+  const known = POOLS.find(p => p.address.toLowerCase() === poolAddr.toLowerCase())
+  if (known) return `${known.name} (${known.type})`
+  return `Unlisted pool ${poolAddr.slice(0, 6)}…${poolAddr.slice(-4)}`
+}
 
 const AEON_V1 = TOKENS.AEON.address
 const AEON_V2 = CONTRACTS.AeonTokenV2
@@ -79,6 +85,49 @@ export default function MigratePage() {
     args: hasLegacyBurn ? [legacyTokenId as bigint] : undefined, query: { enabled: hasLegacyBurn },
   })
   const legacyBurnedFmt = legacyBurned ? parseFloat(formatUnits(legacyBurned as bigint, 18)) : 0
+
+  // ── Legacy staked LP (real gauges from the old GaugeFactory, orphaned from ─
+  //    the current Voter but still fully functional — deposit()/withdraw()
+  //    both still work, LP tokens are genuinely sitting in these contracts) ──
+  const { data: legacyStakedRaw, refetch: refetchLegacyStaked } = useReadContracts({
+    contracts: LEGACY_GAUGES.map(g => ({ address: g.gauge, abi: GAUGE_ABI, functionName: 'balanceOf' as const, args: address ? [address] : undefined })),
+    query: { enabled: !!address },
+  })
+  const { data: legacyEarnedRaw } = useReadContracts({
+    contracts: LEGACY_GAUGES.map(g => ({ address: g.gauge, abi: GAUGE_ABI, functionName: 'earned' as const, args: address ? [address] : undefined })),
+    query: { enabled: !!address },
+  })
+  const legacyStaked = LEGACY_GAUGES
+    .map((g, i) => ({
+      ...g,
+      staked: (legacyStakedRaw?.[i]?.result as bigint | undefined) ?? 0n,
+      earned: (legacyEarnedRaw?.[i]?.result as bigint | undefined) ?? 0n,
+    }))
+    .filter(g => g.staked > 0n || g.earned > 0n)
+
+  const [unstakeStep, setUnstakeStep] = useState<Record<string, 'idle' | 'pending' | 'done'>>({})
+  const { writeContract: writeUnstake, data: unstakeHash } = useWriteContract()
+  const { isSuccess: unstakeDone } = useWaitForTransactionReceipt({ hash: unstakeHash })
+  const [pendingGauge, setPendingGauge] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (unstakeDone && pendingGauge) {
+      setUnstakeStep(s => ({ ...s, [pendingGauge]: 'done' }))
+      setPendingGauge(null)
+      refetchLegacyStaked()
+    }
+  }, [unstakeDone]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function withdrawAndClaim(gauge: `0x${string}`, amount: bigint) {
+    setUnstakeStep(s => ({ ...s, [gauge]: 'pending' }))
+    setPendingGauge(gauge)
+    writeUnstake({ address: gauge, abi: GAUGE_ABI, functionName: 'withdraw', args: [amount] })
+  }
+  function claimOnly(gauge: `0x${string}`) {
+    setUnstakeStep(s => ({ ...s, [gauge]: 'pending' }))
+    setPendingGauge(gauge)
+    writeUnstake({ address: gauge, abi: GAUGE_ABI, functionName: 'getReward', args: [address!] })
+  }
 
   // ── Existing pool positions ──────────────────────────────────────────────
   const vammPools = POOLS.filter(p => p.type === 'vAMM')
@@ -193,6 +242,60 @@ export default function MigratePage() {
             on a fresh Furnace. To restore equivalent voting power, burn the same amount of v2 AEON (after migrating above)
             on the <Link href="/lock" className="text-aeon-400 hover:underline">Lock page</Link>.
           </p>
+        </div>
+      )}
+
+      {/* ── Legacy staked LP (real, orphaned gauges) ────────────────────── */}
+      {isConnected && legacyStaked.length > 0 && (
+        <div className="bg-bg-card border border-bg-border rounded-2xl p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-text-primary">Legacy staked LP found</h2>
+          <p className="text-xs text-text-muted">
+            These are real gauge contracts from before the v2 deploy — never registered on any current Voter,
+            so they don&apos;t show up on the Earn page, but the LP tokens you staked into them are genuinely
+            still sitting there. Unstake below to get them back into your wallet.
+          </p>
+          <div className="space-y-2">
+            {legacyStaked.map(g => {
+              const state = unstakeStep[g.gauge] ?? 'idle'
+              return (
+                <div key={g.gauge} className="bg-bg-raised rounded-lg p-3 text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="font-medium text-text-primary">{poolLabel(g.pool)}</div>
+                    <span className="text-2xs text-text-muted font-mono">{g.gauge.slice(0, 6)}…{g.gauge.slice(-4)}</span>
+                  </div>
+                  <div className="flex items-center justify-between font-mono text-2xs text-text-muted">
+                    <span>Staked: <span className="text-text-primary">{parseFloat(formatUnits(g.staked, 18)).toFixed(6)} LP</span></span>
+                    {g.earned > 0n && <span>Unclaimed: <span className="text-aeon-400">{parseFloat(formatUnits(g.earned, 18)).toFixed(6)} AEON v1</span></span>}
+                  </div>
+                  {state === 'done' ? (
+                    <div className="flex items-center gap-1.5 text-emerald-400 text-2xs font-medium"><CheckCircle2 size={12} /> Done</div>
+                  ) : (
+                    <div className="flex gap-2">
+                      {g.staked > 0n && (
+                        <button
+                          disabled={state === 'pending'}
+                          onClick={() => withdrawAndClaim(g.gauge, g.staked)}
+                          className="flex-1 py-1.5 rounded-lg bg-aeon-400 text-bg-base font-semibold hover:bg-aeon-300 transition-all disabled:opacity-40 flex items-center justify-center gap-1.5"
+                        >
+                          {state === 'pending' && <Loader2 size={12} className="animate-spin" />}
+                          Unstake all
+                        </button>
+                      )}
+                      {g.earned > 0n && (
+                        <button
+                          disabled={state === 'pending'}
+                          onClick={() => claimOnly(g.gauge)}
+                          className="flex-1 py-1.5 rounded-lg border border-bg-border text-text-secondary font-semibold hover:border-aeon-400/40 transition-all disabled:opacity-40"
+                        >
+                          Claim rewards only
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
