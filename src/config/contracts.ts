@@ -115,6 +115,7 @@ export const TOKENS = {
   GUNZ:  { address: '0x26deBD39D5eD069770406FCa10A0E4f8d2c743eB' as `0x${string}`, symbol: 'GUNZ',   decimals: 18, name: 'GUNZ' },
   ARENA: { address: '0xB8d7710f7d8349A506b75dD184F05777c82dAd0C' as `0x${string}`, symbol: 'ARENA',  decimals: 18, name: 'Arena' },
   COQ:   { address: '0x420FcA0121DC28039145009570975747295f2329' as `0x${string}`, symbol: 'COQ',    decimals: 18, name: 'Coq Inu' },
+  AEONV2:{ address: '0x4173e412b85164Bb592668ce674627752934868B' as `0x${string}`, symbol: 'AEON2',  decimals: 18, name: 'Aeon v2' },
 } as const
 
 export const POOLS = [
@@ -124,6 +125,11 @@ export const POOLS = [
   { name: 'WAVAX/USDC', token0: 'WAVAX', token1: 'USDC', type: 'vAMM', fee: '0.3%',  address: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086' as `0x${string}` },
   // Previously untracked vAMM pool — found via legacy gauge audit (governor held 474 LP staked here)
   { name: 'ARENA/AEON', token0: 'ARENA', token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7' as `0x${string}` },
+  // AEON v2 vAMM pools — deployed 2026-07-02, seeded from deployer wallet, gauges registered on AeonVoterV2
+  { name: 'AEONV2/WAVAX', token0: 'AEONV2', token1: 'WAVAX', type: 'vAMM', fee: '1%', address: '0x3373422ED651b96A4f88C7BC338e7cD04B45273d' as `0x${string}` },
+  { name: 'AEONV2/SPX6900',token0: 'AEONV2', token1: 'SPX', type: 'vAMM', fee: '1%', address: '0x7064d03493454C4CD7d161fD94aA46E32d7fa793' as `0x${string}` },
+  { name: 'AEONV2/USDC',  token0: 'AEONV2', token1: 'USDC', type: 'vAMM', fee: '1%', address: '0x80D4e74dD9245b05B443c8200F73a321AfaE7012' as `0x${string}` },
+  { name: 'AEONV2/GUNZ',  token0: 'GUNZ', token1: 'AEONV2', type: 'vAMM', fee: '1%', address: '0x40454480D2BBdDcCb9074835F4Cfaa1583cb24c7' as `0x${string}` },
   // CL — Algebra Integral pools deployed 2026-07-01, token0/token1 is actual on-chain ordering
   { name: 'AEON/WAVAX',  token0: 'AEON',  token1: 'WAVAX', type: 'CL', fee: '0.25%', address: '0x141ebD42bdFB433d6038f109C9ec3215B50DECA0' as `0x${string}` },
   { name: 'AEON/USDC',   token0: 'AEON',  token1: 'USDC',  type: 'CL', fee: '0.25%', address: '0x4919Fa49f2678AfFDB8E6F6d79B37F00eEdaBB9E' as `0x${string}` },
