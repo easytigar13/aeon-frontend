@@ -23,3 +23,6 @@ Thumbs.db
 *.swo
 .idea/
 .vscode/settings.json
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo

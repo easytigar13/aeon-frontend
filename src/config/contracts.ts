@@ -38,7 +38,6 @@ export const CONTRACTS = {
 // just for visibility, not recovery.
 export const LEGACY_V1 = {
   TheFurnace: '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`,
-  AeonVoter:  '0x05b04a4344520bb08201bd9460ec9d37ad5f7918' as `0x${string}`,
 } as const
 
 // Real AeonGauge contracts deployed by the old (v1) AeonGaugeFactory
@@ -94,24 +93,14 @@ export const LEGACY_GAUGES = [
   { gauge: '0xaDcC48e44dA5B50E550a44d4C0965ABD68eB9123' as `0x${string}`, pool: '0xeAC2C4b5b9a1169c7E46A44ED6a5e4836BA3bb95' as `0x${string}` },
 ] as const
 
-// Static fallback for the "Legacy staked LP" section on /migrate — the live
-// multicall-based fetch proved unreliable for at least one real user despite
-// repeated fixes (chunking, error surfacing), so known positions found via
-// direct on-chain audit (eth_call against each gauge) are hardcoded here as
-// a guaranteed-to-render source. Amounts are a snapshot as of the audit date
-// noted per wallet — if some/all have already been unstaked since, the
-// withdraw() call simply reverts (safe, no funds at risk either way).
-export const KNOWN_LEGACY_POSITIONS: Record<string, { gauge: `0x${string}`; pool: `0x${string}`; amount: bigint; asOf: string }[]> = {
-  '0x6d93ab5743ad9fad6ff3c33e3ae60755b8913a08': [
-    { gauge: '0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3', pool: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489', amount: 4077415133827889083n, asOf: '2026-07-02' }, // AEON/WAVAX vAMM
-    { gauge: '0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434', pool: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6', amount: 8086804645743487n,    asOf: '2026-07-02' }, // AEON/WAVAX legacy CL
-    { gauge: '0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2', pool: '0xFD029a446632618f218189d4a0B572896CD29B58', amount: 45558778797002n,       asOf: '2026-07-02' }, // AEON/USDC vAMM
-    { gauge: '0x021033c66B9de3D11A3D7C5807C4B4a4Fe05958b', pool: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b', amount: 259939609296n,          asOf: '2026-07-02' }, // WAVAX/USDC legacy CL
-    { gauge: '0xfBcf062Cf9C6683dA16de58f6646965b7520647f', pool: '0x29dFab19335Bcc8E05811d5F9d047372A391DB9C', amount: 9643046043652388405n, asOf: '2026-07-02' }, // WAVAX/GUNZ legacy CL
-    { gauge: '0xb24b32a0a16ADeF2E857c0a30cc1d3608880869D', pool: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd', amount: 236672820576268n,       asOf: '2026-07-02' }, // GUNZ/USDC legacy CL
-    { gauge: '0x0B20720D1a0c27E31aDf368e5B8eBa1aFF541107', pool: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e', amount: 34985711369071801825n, asOf: '2026-07-02' }, // AEON/SPX6900 legacy CL
-  ],
-}
+// Static fallback for the "Legacy staked LP" section on /migrate — used when
+// the live multicall-based fetch can't be trusted for a specific wallet.
+// Empty for now: the one wallet previously snapshotted here (0x6D93ab...3a08,
+// 7 positions across AEON/WAVAX, AEON/USDC, WAVAX/USDC, WAVAX/GUNZ, GUNZ/USDC,
+// AEON/SPX6900) confirmed fully unstaked on-chain as of 2026-07-02 — all 7
+// gauge balances verified 0. Add new entries here only for wallets with a
+// live, unconfirmed-by-dynamic-fetch balance.
+export const KNOWN_LEGACY_POSITIONS: Record<string, { gauge: `0x${string}`; pool: `0x${string}`; amount: bigint; asOf: string }[]> = {}
 
 export const TOKENS = {
   AEON:  { address: '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
