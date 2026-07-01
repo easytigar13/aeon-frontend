@@ -115,7 +115,7 @@ export const TOKENS = {
   GUNZ:  { address: '0x26deBD39D5eD069770406FCa10A0E4f8d2c743eB' as `0x${string}`, symbol: 'GUNZ',   decimals: 18, name: 'GUNZ' },
   ARENA: { address: '0xB8d7710f7d8349A506b75dD184F05777c82dAd0C' as `0x${string}`, symbol: 'ARENA',  decimals: 18, name: 'Arena' },
   COQ:   { address: '0x420FcA0121DC28039145009570975747295f2329' as `0x${string}`, symbol: 'COQ',    decimals: 18, name: 'Coq Inu' },
-  AEONV2:{ address: '0x4173e412b85164Bb592668ce674627752934868B' as `0x${string}`, symbol: 'AEON2',  decimals: 18, name: 'Aeon v2' },
+  AEONV2:{ address: '0x4173e412b85164Bb592668ce674627752934868B' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
 } as const
 
 export const POOLS = [

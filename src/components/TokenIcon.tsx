@@ -41,7 +41,8 @@ export function TokenIcon({
 
   const primaryUrl = imageUrl && !primaryFailed ? imageUrl : null
   const twUrl = TRUSTWALLET_LOGOS[symbol] && !fallbackFailed ? TRUSTWALLET_LOGOS[symbol] : null
-  const activeUrl = primaryUrl ?? twUrl
+  const aeonUrl = symbol === 'AEON' && !fallbackFailed ? '/logo.svg' : null
+  const activeUrl = primaryUrl ?? twUrl ?? aeonUrl
 
   const color = AVATAR_COLORS[symbol] ?? '#FFB800'
   const letter = symbol.startsWith('WBTC') ? '₿' : symbol.replace(/^W/, '')[0]
