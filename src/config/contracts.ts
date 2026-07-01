@@ -3,18 +3,27 @@
 
 export const CONTRACTS = {
   AeonRouter:       '0xD847Ea61394ADa3bb23B373349b58C90f9126A9F' as `0x${string}`,
+  // AEON v1 — still the token actually held/traded by all existing AMM pools below.
+  // Kept as TOKENS.AEON. Do not repoint pool trading logic to v2.
   AeonToken:        '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`,
-  AeonVotingEscrow: '0xdeC58B16B24536bc5009Ad4AfDd0C48fF69F919A' as `0x${string}`,
-  AeonVoter:        '0x6483c848dc97be0a5b35f928d380a4280f553883' as `0x${string}`,
-  TheFurnace:       '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`,
-  EmissionsEngine:  '0x4d188106175De919a971B0cB6F8A0e3E885a3410' as `0x${string}`,
-  FeeDistributor:   '0x8e33182d3271e2902Ed36aCA77A79e28c8F22d4e' as `0x${string}`,
-  BuybackEngine:    '0x0337333fdCf79D08f4ac10321796A91f300b5a80' as `0x${string}`,
   AeonFactory:      '0x3ECf287990A2365d48C6681620393aC1cdF3D268' as `0x${string}`,
   AeonOracle:       '0x0b18B0f483f1caAaBB7505bCD8D1C3C43197Add9' as `0x${string}`,
-  AeonGaugeFactory:    '0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6' as `0x${string}`,
   LiquidityHelper:     '0xFe307aA9b7514949Ee1a0F8a64E951d9277B62CA' as `0x${string}`,
   PairRegistry:        '0xcfcb643d8f51d640e0b81257340c1ca344238f48' as `0x${string}`,
+  // AEON v2 stack — deployed 2026-07-02. v1's mint role was permanently
+  // dead-ended (EmissionsEngine had no path to reassign AeonToken.emissionsEngine,
+  // and v1's AeonVoter.createGauge() only ever produced fake, codeless gauge
+  // addresses — see AeonVoterV2.sol / EmissionsEngineV2.sol audit notes).
+  // Governance/emissions now run on v2; existing pools still trade v1 AEON.
+  AeonTokenV2:         '0x4173e412b85164Bb592668ce674627752934868B' as `0x${string}`,
+  AeonSwap:            '0x2A85a6634c2EFaA33e441d3C28B6aaDc72A70376' as `0x${string}`, // 1:1 v1→v2 migration
+  AeonVotingEscrow:    '0xd2252ce511DdC0D44A5Aa333e6b729bE8192C040' as `0x${string}`,
+  TheFurnace:          '0x7863970e4888D1cFC7C3fB5A7E6C9e301cc5085C' as `0x${string}`,
+  AeonVoter:           '0x001Af1382370c42c730BF9eed0beD450B07db89a' as `0x${string}`,
+  BuybackEngine:       '0x8538C90eE4008FB11376714d75C5517CB529E536' as `0x${string}`,
+  FeeDistributor:      '0x5F0DCd63a350b4347A13195B95FB5556b7557122' as `0x${string}`,
+  AeonGaugeFactory:    '0x84fF0cCBc41cfA1Bdd8384A958aF272cC9EA74Bb' as `0x${string}`,
+  EmissionsEngine:     '0xE42c5602f0E38524E94c765639E65aB9a2f10FB3' as `0x${string}`,
   // Trader Joe LB v2.2 — deployed 2026-06-30 to Avalanche C-Chain
   LBFactory:           '0xDa37277dE28547BfCE9431281560B60Cea00B1Af' as `0x${string}`,
   LBRouter:            '0x93B1754B48Fdb8C0519975B01cD5c35957066Ab9' as `0x${string}`,
