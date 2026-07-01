@@ -48,50 +48,50 @@ export const LEGACY_V1 = {
 // sitting there right now. withdraw()/getReward() both still work.
 // pool: the underlying trading pool this gauge tracks (for labeling only).
 export const LEGACY_GAUGES = [
-  { gauge: '0xd1E04ab9CE0A6854914Cd9c929B401bdf0700bE3' as `0x${string}`, pool: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489' as `0x${string}` },
-  { gauge: '0x69072b04Cf3eEE09b474D9ab9F80aA17506EE434' as `0x${string}`, pool: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6' as `0x${string}` },
-  { gauge: '0x955bEEee93D334437c1FE284c40Ab28eaCbE1cA2' as `0x${string}`, pool: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
-  { gauge: '0x50bCefB28502C8628bc2564A0bFEb6d5D33eFa25' as `0x${string}`, pool: '0x29c818b0929F9D247157f7b17a49B89664C9efcE' as `0x${string}` },
-  { gauge: '0x6ee853608078A207A30836Eec6310974D4506c14' as `0x${string}`, pool: '0x6658A37c6F1544129CfBA898F827c64680db00b6' as `0x${string}` },
-  { gauge: '0x8323e657009aBbf1567A15294766203150908B10' as `0x${string}`, pool: '0xEF43D5718ec0e22e105e21b9292bE33a7daC5061' as `0x${string}` },
-  { gauge: '0xAbc3Da2cC75387cAf867B07bC272Df19D3cff02c' as `0x${string}`, pool: '0xabce7E6160dF0B1e7A300FfA55Ac26843a59710B' as `0x${string}` },
-  { gauge: '0xB55daDbFB20912466f2961cF466f331fE98706f1' as `0x${string}`, pool: '0x98F41ef967fC9105d83E5a1B44512C25ae15E53E' as `0x${string}` },
-  { gauge: '0x0b499B8c6BA886090aDD7c21F8e1810BDdd8277d' as `0x${string}`, pool: '0x1C95905E0C7D290A46E1d970BeCD315BE10b3421' as `0x${string}` },
-  { gauge: '0xd4F8574d3bC25fE20195Ce58a47D61D79Ba7504b' as `0x${string}`, pool: '0x69174eFdFAE19af3BfbC45e2dbdccfC1A44FdE9b' as `0x${string}` },
-  { gauge: '0x35bd4B5D17192649098aeC846C790178A84a982B' as `0x${string}`, pool: '0xEcb2EBb887cbBC810Ba519906594185D8F1fc704' as `0x${string}` },
-  { gauge: '0xdF769bF01ee70e2F86adC0417e0717d32C4586Be' as `0x${string}`, pool: '0x954068b2289e2Edfa878F17c27b4Ab1B015B77a7' as `0x${string}` },
-  { gauge: '0x2F8cBa007598CBb15FFAbe7A826A9Cc8576eD6bE' as `0x${string}`, pool: '0x966FDDeBc8311bB5A22C625129257213d54A6938' as `0x${string}` },
-  { gauge: '0x90D97BC8991E6d32a5CF3C6e5684644194699A70' as `0x${string}`, pool: '0x45c0d4FfFBE60FBc454f8Db0Eb2643aA139cB706' as `0x${string}` },
-  { gauge: '0x9ccB02D4d9994993f1D7b95298A93230e042B7e5' as `0x${string}`, pool: '0x978968E5F40f1B183959cA8852718E22a6f3fCE7' as `0x${string}` },
-  { gauge: '0x312541E5eF7017f9Ad27C10ea695eDc9529bA3D4' as `0x${string}`, pool: '0x1d891fC5954D777abbb95FaDac8D7de880B9F49a' as `0x${string}` },
-  { gauge: '0x932f5AC813465D6573b4649528DA593f213Aea81' as `0x${string}`, pool: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086' as `0x${string}` },
-  { gauge: '0x021033c66B9De3D11a3D7C5807C4B4A4fE05958b' as `0x${string}`, pool: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b' as `0x${string}` },
-  { gauge: '0x12C2C9dc225cDCadd17B8bA9a3cFfB0183fA05dB' as `0x${string}`, pool: '0x4fAA1a9B62Be8465f33fB3c3ac767F6bc4e510DB' as `0x${string}` },
-  { gauge: '0xBb5e8a475fCF427aA5aB2627ace5AC58943D8bB6' as `0x${string}`, pool: '0xE82347882508179DDED4e74BD4645fad0895e0E7' as `0x${string}` },
-  { gauge: '0xfbCF062cF9C6683Da16dE58f6646965B7520647F' as `0x${string}`, pool: '0x29dFab19335Bcc8E05811d5F9d047372A391DB9C' as `0x${string}` },
-  { gauge: '0x7eBA4a5cF347Cc14436c4FbE7635018a4E8c5E05' as `0x${string}`, pool: '0x1EdEE242F3F1Af2B9B330557816459988a75378b' as `0x${string}` },
-  { gauge: '0x20da4403CF7294B78F1b60f9E23174BdcFe693cE' as `0x${string}`, pool: '0x2b97cEC6A8B1D90732E2c5Fe17433E647cDe62Cc' as `0x${string}` },
-  { gauge: '0x887fAA05836C92FBD0081Ae7F249a893FDbC33aD' as `0x${string}`, pool: '0x836AeEd458857e5FD4134c7DaF7B36ee20B73dbC' as `0x${string}` },
-  { gauge: '0x3f3e49dA26a8534c58b0D63d71511bC0EAD5A16d' as `0x${string}`, pool: '0x1e173e4d5811f27E72300A214DEeF4EFcB3B6be8' as `0x${string}` },
-  { gauge: '0xF6D8Bbf7299253a67a729Ad245Dcad32a6125Bdd' as `0x${string}`, pool: '0x27e4D2467584B7a370856BceDb1B7f460ef2462c' as `0x${string}` },
-  { gauge: '0xc79A7CE8Eb6ddc52E651D5877d4659A88732De6f' as `0x${string}`, pool: '0xDdBcc56993A6d44b24bD9Af0a27000419b0d9b4f' as `0x${string}` },
-  { gauge: '0x0Ce5229Db7ef9DA94Da95359E0fDf828bf16142c' as `0x${string}`, pool: '0xAa35B2eA1DEb790585f9fd11d1878dc0606091a3' as `0x${string}` },
-  { gauge: '0xA95d34E3f0a3a768fDf5199e9505496B11E855D0' as `0x${string}`, pool: '0xC84D3fb669b3b0369978E253dC2F1B7329F6D7eF' as `0x${string}` },
-  { gauge: '0x204Ed15c9Eb0Cc4a1BF80FbeFc8D43c01327E070' as `0x${string}`, pool: '0xD9ae01537e4099eCad113B52856A86148A0E6548' as `0x${string}` },
-  { gauge: '0x433627F321A4596E50c4B0Edb29568438fea2Be9' as `0x${string}`, pool: '0x306B89922bccea64545e701795Ffbf20FB5a0f70' as `0x${string}` },
-  { gauge: '0xEB97d2414269e9952544cb1DdCc7EB488a8746D2' as `0x${string}`, pool: '0xb39e555f18DEfC9d97FBfd08fB4f88D784A44944' as `0x${string}` },
-  { gauge: '0xb24B32A0A16adEf2E857C0a30cc1D3608880869d' as `0x${string}`, pool: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd' as `0x${string}` },
-  { gauge: '0x016DA438386b7e114A9A086B5F67049c08cbfD1a' as `0x${string}`, pool: '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77' as `0x${string}` },
-  { gauge: '0xbB9c311313d61A687B4744f42cD8C31b0C0f9128' as `0x${string}`, pool: '0x19aE273606588fb17D99572321eAD9b0B060DF00' as `0x${string}` },
-  { gauge: '0xD5704702dbf6C92F8b1a4B8D8F7Db1aE3415503f' as `0x${string}`, pool: '0xFb0b8D088691057Fe08040F4364494C23b60C66c' as `0x${string}` },
-  { gauge: '0x5f85Ec0bc2943C2402d1EEa76982796F958ecAcD' as `0x${string}`, pool: '0xB1a5295A8133097E389221df70Ee1dd021B088F0' as `0x${string}` },
-  { gauge: '0x78c11CF0a088e26b0013b5c780b22E90A21171fB' as `0x${string}`, pool: '0xeDDBA3c2A4491D77E8D4b69502f7C862c538DC76' as `0x${string}` },
-  { gauge: '0x48871611388C136Eeb5C777d58470eE837cCb43A' as `0x${string}`, pool: '0x04de9ee7b6355ec643db415b2212734390fcb2f8' as `0x${string}` },
-  { gauge: '0x8f66195845A9fff978e85F024C3220507D9e6094' as `0x${string}`, pool: '0xeb55b531c1881751d6c83ce343ee3870a3ed6cb3' as `0x${string}` },
-  { gauge: '0x0b20720D1A0C27E31ADf368E5B8Eba1aFf541107' as `0x${string}`, pool: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e' as `0x${string}` },
-  { gauge: '0xae513E42584c4Bce4c3a9D0d14b8E819FE7462BA' as `0x${string}`, pool: '0x0D94e9bD42cBDdEeF6804B9813Da82A42617cC01' as `0x${string}` },
-  { gauge: '0x898115c029fCaE28b1B0963A8936F0e000aF05c3' as `0x${string}`, pool: '0x10235223CBa1939Eb5DeE67a08CF1c065BC17A6e' as `0x${string}` },
-  { gauge: '0xADcc48e44Da5B50E550A44D4c0965AbD68eB9123' as `0x${string}`, pool: '0xeaC2c4B5b9a1169C7e46a44ED6A5E4836bA3bB95' as `0x${string}` },
+  { gauge: '0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3' as `0x${string}`, pool: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489' as `0x${string}` },
+  { gauge: '0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434' as `0x${string}`, pool: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6' as `0x${string}` },
+  { gauge: '0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2' as `0x${string}`, pool: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
+  { gauge: '0x50bCeFB28502C8628Bc2564A0BFEB6D5D33EFA25' as `0x${string}`, pool: '0x29c818b0929F9D247157f7b17a49B89664C9efcE' as `0x${string}` },
+  { gauge: '0x6EE853608078a207A30836Eec6310974D4506c14' as `0x${string}`, pool: '0x6658A37c6F1544129CfBA898F827c64680db00b6' as `0x${string}` },
+  { gauge: '0x8323E657009aBBF1567A15294766203150908b10' as `0x${string}`, pool: '0xEF43D5718ec0e22e105e21b9292bE33a7daC5061' as `0x${string}` },
+  { gauge: '0xAbC3DA2cc75387Caf867B07bC272DF19d3Cff02C' as `0x${string}`, pool: '0xabCE7E6160dF0B1E7a300FfA55AC26843A59710b' as `0x${string}` },
+  { gauge: '0xb55dadbFb20912466F2961cF466f331Fe98706F1' as `0x${string}`, pool: '0x98F41ef967fC9105d83E5a1B44512C25ae15E53E' as `0x${string}` },
+  { gauge: '0x0B499B8c6BA886090ADd7C21f8e1810BDDD8277D' as `0x${string}`, pool: '0x1C95905E0C7D290A46E1d970BeCD315BE10b3421' as `0x${string}` },
+  { gauge: '0xd4F8574d3bC25FE20195Ce58a47d61D79bA7504b' as `0x${string}`, pool: '0x69174eFdFAE19af3BfbC45e2dbdccfC1A44FdE9b' as `0x${string}` },
+  { gauge: '0x35Bd4b5d17192649098aec846c790178A84A982b' as `0x${string}`, pool: '0xecB2EbB887cbbC810BA519906594185d8f1fc704' as `0x${string}` },
+  { gauge: '0xDf769BF01eE70e2f86aDC0417E0717D32c4586be' as `0x${string}`, pool: '0x954068b2289E2EdFA878f17C27b4ab1B015b77a7' as `0x${string}` },
+  { gauge: '0x2f8CBA007598cBb15FfABE7a826a9cC8576ed6be' as `0x${string}`, pool: '0x966fdDEBC8311Bb5a22c625129257213D54a6938' as `0x${string}` },
+  { gauge: '0x90d97Bc8991e6D32a5CF3c6E5684644194699a70' as `0x${string}`, pool: '0x45C0D4fffbe60fBC454F8dB0Eb2643aa139cb706' as `0x${string}` },
+  { gauge: '0x9ccB02D4D9994993f1D7B95298a93230E042B7E5' as `0x${string}`, pool: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7' as `0x${string}` },
+  { gauge: '0x312541E5EF7017f9AD27C10eA695EDC9529ba3D4' as `0x${string}`, pool: '0x1d891FC5954D777ABbb95fadAC8D7dE880b9F49a' as `0x${string}` },
+  { gauge: '0x932f5AC813465D6573b4649528dA593f213aEA81' as `0x${string}`, pool: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086' as `0x${string}` },
+  { gauge: '0x021033c66B9de3D11A3D7C5807C4B4a4Fe05958b' as `0x${string}`, pool: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b' as `0x${string}` },
+  { gauge: '0x12c2c9dC225cdcAdD17B8BA9A3cffb0183fa05DB' as `0x${string}`, pool: '0x4fAA1a9B62Be8465f33fB3c3ac767F6bc4e510DB' as `0x${string}` },
+  { gauge: '0xbB5e8A475fCF427AA5aB2627acE5aC58943d8bb6' as `0x${string}`, pool: '0xE82347882508179DDED4e74BD4645fad0895e0E7' as `0x${string}` },
+  { gauge: '0xfBcf062Cf9C6683dA16de58f6646965b7520647f' as `0x${string}`, pool: '0x29dFab19335Bcc8E05811d5F9d047372A391DB9C' as `0x${string}` },
+  { gauge: '0x7Eba4A5cf347cC14436c4fBe7635018A4e8C5E05' as `0x${string}`, pool: '0x1EdEE242F3F1Af2B9B330557816459988a75378b' as `0x${string}` },
+  { gauge: '0x20da4403Cf7294b78F1b60F9e23174BDcFE693Ce' as `0x${string}`, pool: '0x2b97cEC6A8B1D90732E2c5Fe17433E647cDe62Cc' as `0x${string}` },
+  { gauge: '0x887faA05836c92fbd0081aE7F249a893fdBc33AD' as `0x${string}`, pool: '0x836Aeed458857E5Fd4134c7dAF7B36EE20B73DBc' as `0x${string}` },
+  { gauge: '0x3F3E49dA26A8534c58b0D63d71511bC0EaD5a16d' as `0x${string}`, pool: '0x1E173e4d5811F27E72300a214DeeF4eFCB3B6be8' as `0x${string}` },
+  { gauge: '0xF6D8BBf7299253A67A729AD245DcaD32a6125BDd' as `0x${string}`, pool: '0x27e4d2467584b7A370856BCedb1b7F460EF2462C' as `0x${string}` },
+  { gauge: '0xc79A7CE8eB6DDc52e651D5877D4659A88732de6F' as `0x${string}`, pool: '0xddbcC56993a6D44b24Bd9AF0A27000419B0d9B4F' as `0x${string}` },
+  { gauge: '0x0cE5229dB7ef9DA94DA95359e0fdF828BF16142c' as `0x${string}`, pool: '0xaA35b2EA1deB790585f9fd11d1878Dc0606091a3' as `0x${string}` },
+  { gauge: '0xa95d34E3F0A3a768fDF5199E9505496b11E855d0' as `0x${string}`, pool: '0xC84D3fb669b3b0369978E253dC2F1B7329F6D7eF' as `0x${string}` },
+  { gauge: '0x204Ed15c9eb0cC4a1Bf80FbEfc8d43c01327e070' as `0x${string}`, pool: '0xd9AE01537e4099ECAD113B52856a86148A0E6548' as `0x${string}` },
+  { gauge: '0x433627f321a4596E50c4B0edb29568438FeA2BE9' as `0x${string}`, pool: '0x306B89922bccea64545e701795Ffbf20FB5a0f70' as `0x${string}` },
+  { gauge: '0xEB97d2414269e9952544Cb1ddCC7Eb488a8746D2' as `0x${string}`, pool: '0xB39e555F18DEfc9D97fbFd08Fb4F88d784a44944' as `0x${string}` },
+  { gauge: '0xb24b32a0a16ADeF2E857c0a30cc1d3608880869D' as `0x${string}`, pool: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd' as `0x${string}` },
+  { gauge: '0x016DA438386b7e114a9A086B5F67049c08cBfd1A' as `0x${string}`, pool: '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77' as `0x${string}` },
+  { gauge: '0xbB9c311313d61a687b4744f42cd8C31B0C0F9128' as `0x${string}`, pool: '0x19aE273606588fb17D99572321eAD9b0B060DF00' as `0x${string}` },
+  { gauge: '0xD5704702dBF6C92F8b1a4B8D8F7DB1aE3415503F' as `0x${string}`, pool: '0xFb0b8D088691057fE08040f4364494c23B60c66C' as `0x${string}` },
+  { gauge: '0x5F85ec0BC2943C2402d1eEA76982796F958ecAcD' as `0x${string}`, pool: '0xB1a5295A8133097E389221df70Ee1dd021B088F0' as `0x${string}` },
+  { gauge: '0x78C11Cf0a088e26B0013B5C780B22E90a21171fB' as `0x${string}`, pool: '0xeDdBA3C2A4491D77e8d4b69502f7c862C538DC76' as `0x${string}` },
+  { gauge: '0x48871611388c136eeB5C777d58470ee837ccb43A' as `0x${string}`, pool: '0x04de9EE7b6355ec643DB415b2212734390fcB2F8' as `0x${string}` },
+  { gauge: '0x8F66195845a9fff978E85f024C3220507D9E6094' as `0x${string}`, pool: '0xeB55B531C1881751d6c83Ce343EE3870a3eD6CB3' as `0x${string}` },
+  { gauge: '0x0B20720D1a0c27E31aDf368e5B8eBa1aFF541107' as `0x${string}`, pool: '0x56889e4E8c9C1EAF7A91f436c32a1a9fDfcAcB0E' as `0x${string}` },
+  { gauge: '0xaE513e42584C4bCe4c3a9D0D14B8E819fE7462Ba' as `0x${string}`, pool: '0x0d94e9BD42CbddEEf6804B9813da82a42617CC01' as `0x${string}` },
+  { gauge: '0x898115c029fcAe28B1B0963A8936F0E000Af05c3' as `0x${string}`, pool: '0x10235223cBA1939eb5dEe67A08cF1c065BC17a6E' as `0x${string}` },
+  { gauge: '0xaDcC48e44dA5B50E550a44d4C0965ABD68eB9123' as `0x${string}`, pool: '0xeAC2C4b5b9a1169c7E46A44ED6a5e4836BA3bb95' as `0x${string}` },
 ] as const
 
 // Static fallback for the "Legacy staked LP" section on /migrate — the live
@@ -103,13 +103,13 @@ export const LEGACY_GAUGES = [
 // withdraw() call simply reverts (safe, no funds at risk either way).
 export const KNOWN_LEGACY_POSITIONS: Record<string, { gauge: `0x${string}`; pool: `0x${string}`; amount: bigint; asOf: string }[]> = {
   '0x6d93ab5743ad9fad6ff3c33e3ae60755b8913a08': [
-    { gauge: '0xd1E04ab9CE0A6854914Cd9c929B401bdf0700bE3', pool: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489', amount: 4077415133827889083n, asOf: '2026-07-02' }, // AEON/WAVAX vAMM
-    { gauge: '0x69072b04Cf3eEE09b474D9ab9F80aA17506EE434', pool: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6', amount: 8086804645743487n,    asOf: '2026-07-02' }, // AEON/WAVAX legacy CL
-    { gauge: '0x955bEEee93D334437c1FE284c40Ab28eaCbE1cA2', pool: '0xFD029a446632618f218189d4a0B572896CD29B58', amount: 45558778797002n,       asOf: '2026-07-02' }, // AEON/USDC vAMM
-    { gauge: '0x021033c66B9De3D11a3D7C5807C4B4A4fE05958b', pool: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b', amount: 259939609296n,          asOf: '2026-07-02' }, // WAVAX/USDC legacy CL
-    { gauge: '0xfbCF062cF9C6683Da16dE58f6646965B7520647F', pool: '0x29dFab19335Bcc8E05811d5F9d047372A391DB9C', amount: 9643046043652388405n, asOf: '2026-07-02' }, // WAVAX/GUNZ legacy CL
-    { gauge: '0xb24B32A0A16adEf2E857C0a30cc1D3608880869d', pool: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd', amount: 236672820576268n,       asOf: '2026-07-02' }, // GUNZ/USDC legacy CL
-    { gauge: '0x0b20720D1A0C27E31ADf368E5B8Eba1aFf541107', pool: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e', amount: 34985711369071801825n, asOf: '2026-07-02' }, // AEON/SPX6900 legacy CL
+    { gauge: '0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3', pool: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489', amount: 4077415133827889083n, asOf: '2026-07-02' }, // AEON/WAVAX vAMM
+    { gauge: '0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434', pool: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6', amount: 8086804645743487n,    asOf: '2026-07-02' }, // AEON/WAVAX legacy CL
+    { gauge: '0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2', pool: '0xFD029a446632618f218189d4a0B572896CD29B58', amount: 45558778797002n,       asOf: '2026-07-02' }, // AEON/USDC vAMM
+    { gauge: '0x021033c66B9de3D11A3D7C5807C4B4a4Fe05958b', pool: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b', amount: 259939609296n,          asOf: '2026-07-02' }, // WAVAX/USDC legacy CL
+    { gauge: '0xfBcf062Cf9C6683dA16de58f6646965b7520647f', pool: '0x29dFab19335Bcc8E05811d5F9d047372A391DB9C', amount: 9643046043652388405n, asOf: '2026-07-02' }, // WAVAX/GUNZ legacy CL
+    { gauge: '0xb24b32a0a16ADeF2E857c0a30cc1d3608880869D', pool: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd', amount: 236672820576268n,       asOf: '2026-07-02' }, // GUNZ/USDC legacy CL
+    { gauge: '0x0B20720D1a0c27E31aDf368e5B8eBa1aFF541107', pool: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e', amount: 34985711369071801825n, asOf: '2026-07-02' }, // AEON/SPX6900 legacy CL
   ],
 }
 
@@ -134,7 +134,7 @@ export const POOLS = [
   { name: 'AEON/USDC',  token0: 'USDC',  token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
   { name: 'WAVAX/USDC', token0: 'WAVAX', token1: 'USDC', type: 'vAMM', fee: '0.3%',  address: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086' as `0x${string}` },
   // Previously untracked vAMM pool — found via legacy gauge audit (governor held 474 LP staked here)
-  { name: 'ARENA/AEON', token0: 'ARENA', token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0x978968e5F40f1B183959cA8852718E22a6f3fCE7' as `0x${string}` },
+  { name: 'ARENA/AEON', token0: 'ARENA', token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7' as `0x${string}` },
   // CL — Algebra Integral pools deployed 2026-07-01, token0/token1 is actual on-chain ordering
   { name: 'AEON/WAVAX',  token0: 'AEON',  token1: 'WAVAX', type: 'CL', fee: '0.25%', address: '0x141ebD42bdFB433d6038f109C9ec3215B50DECA0' as `0x${string}` },
   { name: 'AEON/USDC',   token0: 'AEON',  token1: 'USDC',  type: 'CL', fee: '0.25%', address: '0x4919Fa49f2678AfFDB8E6F6d79B37F00eEdaBB9E' as `0x${string}` },
