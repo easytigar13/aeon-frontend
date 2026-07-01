@@ -114,6 +114,8 @@ export const POOLS = [
   { name: 'AEON/WAVAX', token0: 'WAVAX', token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489' as `0x${string}` },
   { name: 'AEON/USDC',  token0: 'USDC',  token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
   { name: 'WAVAX/USDC', token0: 'WAVAX', token1: 'USDC', type: 'vAMM', fee: '0.3%',  address: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086' as `0x${string}` },
+  // Previously untracked vAMM pool — found via legacy gauge audit (governor held 474 LP staked here)
+  { name: 'ARENA/AEON', token0: 'ARENA', token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0x978968e5F40f1B183959cA8852718E22a6f3fCE7' as `0x${string}` },
   // CL — Algebra Integral pools deployed 2026-07-01, token0/token1 is actual on-chain ordering
   { name: 'AEON/WAVAX',  token0: 'AEON',  token1: 'WAVAX', type: 'CL', fee: '0.25%', address: '0x141ebD42bdFB433d6038f109C9ec3215B50DECA0' as `0x${string}` },
   { name: 'AEON/USDC',   token0: 'AEON',  token1: 'USDC',  type: 'CL', fee: '0.25%', address: '0x4919Fa49f2678AfFDB8E6F6d79B37F00eEdaBB9E' as `0x${string}` },
