@@ -5,7 +5,6 @@ import { ConnectButton } from '@rainbow-me/rainbowkit'
 import { clsx } from 'clsx'
 
 const NAV_LINKS = [
-  { href: '/migrate',    label: 'Migrate'   },
   { href: '/swap',       label: 'Swap'      },
   { href: '/tokens',     label: 'Tokens'    },
   { href: '/liquidity',  label: 'Liquidity' },
