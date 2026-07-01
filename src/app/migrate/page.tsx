@@ -6,7 +6,7 @@ import { useAccount, useReadContract, useReadContracts, useWriteContract, useWai
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import Link from 'next/link'
-import { CONTRACTS, TOKENS, POOLS, LEGACY_V1, LEGACY_GAUGES } from '@/config/contracts'
+import { CONTRACTS, TOKENS, POOLS, LEGACY_V1, LEGACY_GAUGES, KNOWN_LEGACY_POSITIONS } from '@/config/contracts'
 import { ERC20_ABI, AEON_SWAP_ABI, FURNACE_ABI, ALGEBRA_PM_ENUMERABLE_ABI, GAUGE_ABI } from '@/config/abis'
 
 function poolLabel(poolAddr: string): string {
@@ -134,7 +134,17 @@ export default function MigratePage() {
     return () => { cancelled = true }
   }, [address, publicClient, legacyFetchNonce])
 
-  const legacyStaked = (legacyStakedAll ?? []).filter(g => g.staked > 0n || g.earned > 0n)
+  const dynamicStaked = (legacyStakedAll ?? []).filter(g => g.staked > 0n || g.earned > 0n)
+
+  // Static fallback (guaranteed to render regardless of RPC/multicall flakiness) —
+  // merged in for any wallet with a known snapshot, skipping gauges the live
+  // fetch already found so we don't double-list the same position.
+  const knownForWallet = address ? (KNOWN_LEGACY_POSITIONS[address.toLowerCase()] ?? []) : []
+  const staticStaked = knownForWallet
+    .filter(k => !dynamicStaked.some(d => d.gauge.toLowerCase() === k.gauge.toLowerCase()))
+    .map(k => ({ gauge: k.gauge, pool: k.pool, staked: k.amount, earned: 0n, asOf: k.asOf }))
+
+  const legacyStaked = [...dynamicStaked, ...staticStaked]
   const refetchLegacyStaked = () => setLegacyFetchNonce(n => n + 1)
 
   const [unstakeStep, setUnstakeStep] = useState<Record<string, 'idle' | 'pending' | 'done'>>({})
@@ -285,7 +295,7 @@ export default function MigratePage() {
           <button onClick={refetchLegacyStaked} className="text-xs text-aeon-400 hover:underline">Retry</button>
         </div>
       )}
-      {isConnected && !legacyFetchError && legacyStakedAll === null && (
+      {isConnected && !legacyFetchError && legacyStakedAll === null && staticStaked.length === 0 && (
         <div className="bg-bg-card border border-bg-border rounded-2xl p-5 text-xs text-text-muted flex items-center gap-2">
           <Loader2 size={14} className="animate-spin" /> Checking legacy gauges for staked LP…
         </div>
@@ -311,6 +321,11 @@ export default function MigratePage() {
                     <span>Staked: <span className="text-text-primary">{parseFloat(formatUnits(g.staked, 18)).toFixed(6)} LP</span></span>
                     {g.earned > 0n && <span>Unclaimed: <span className="text-aeon-400">{parseFloat(formatUnits(g.earned, 18)).toFixed(6)} AEON v1</span></span>}
                   </div>
+                  {'asOf' in g && (
+                    <div className="text-2xs text-yellow-500/70">
+                      From audit snapshot ({(g as any).asOf}) — live check unavailable, unstake still executes a real transaction for the exact amount above.
+                    </div>
+                  )}
                   {state === 'done' ? (
                     <div className="flex items-center gap-1.5 text-emerald-400 text-2xs font-medium"><CheckCircle2 size={12} /> Done</div>
                   ) : (

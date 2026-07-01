@@ -94,6 +94,25 @@ export const LEGACY_GAUGES = [
   { gauge: '0xADcc48e44Da5B50E550A44D4c0965AbD68eB9123' as `0x${string}`, pool: '0xeaC2c4B5b9a1169C7e46a44ED6A5E4836bA3bB95' as `0x${string}` },
 ] as const
 
+// Static fallback for the "Legacy staked LP" section on /migrate — the live
+// multicall-based fetch proved unreliable for at least one real user despite
+// repeated fixes (chunking, error surfacing), so known positions found via
+// direct on-chain audit (eth_call against each gauge) are hardcoded here as
+// a guaranteed-to-render source. Amounts are a snapshot as of the audit date
+// noted per wallet — if some/all have already been unstaked since, the
+// withdraw() call simply reverts (safe, no funds at risk either way).
+export const KNOWN_LEGACY_POSITIONS: Record<string, { gauge: `0x${string}`; pool: `0x${string}`; amount: bigint; asOf: string }[]> = {
+  '0x6d93ab5743ad9fad6ff3c33e3ae60755b8913a08': [
+    { gauge: '0xd1E04ab9CE0A6854914Cd9c929B401bdf0700bE3', pool: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489', amount: 4077415133827889083n, asOf: '2026-07-02' }, // AEON/WAVAX vAMM
+    { gauge: '0x69072b04Cf3eEE09b474D9ab9F80aA17506EE434', pool: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6', amount: 8086804645743487n,    asOf: '2026-07-02' }, // AEON/WAVAX legacy CL
+    { gauge: '0x955bEEee93D334437c1FE284c40Ab28eaCbE1cA2', pool: '0xFD029a446632618f218189d4a0B572896CD29B58', amount: 45558778797002n,       asOf: '2026-07-02' }, // AEON/USDC vAMM
+    { gauge: '0x021033c66B9De3D11a3D7C5807C4B4A4fE05958b', pool: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b', amount: 259939609296n,          asOf: '2026-07-02' }, // WAVAX/USDC legacy CL
+    { gauge: '0xfbCF062cF9C6683Da16dE58f6646965B7520647F', pool: '0x29dFab19335Bcc8E05811d5F9d047372A391DB9C', amount: 9643046043652388405n, asOf: '2026-07-02' }, // WAVAX/GUNZ legacy CL
+    { gauge: '0xb24B32A0A16adEf2E857C0a30cc1D3608880869d', pool: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd', amount: 236672820576268n,       asOf: '2026-07-02' }, // GUNZ/USDC legacy CL
+    { gauge: '0x0b20720D1A0C27E31ADf368E5B8Eba1aFf541107', pool: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e', amount: 34985711369071801825n, asOf: '2026-07-02' }, // AEON/SPX6900 legacy CL
+  ],
+}
+
 export const TOKENS = {
   AEON:  { address: '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
   AVAX:  { address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `0x${string}`, symbol: 'AVAX',  decimals: 18, name: 'Avalanche (Native)' },
