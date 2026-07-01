@@ -148,27 +148,50 @@ export default function MigratePage() {
   const refetchLegacyStaked = () => setLegacyFetchNonce(n => n + 1)
 
   const [unstakeStep, setUnstakeStep] = useState<Record<string, 'idle' | 'pending' | 'done'>>({})
-  const { writeContract: writeUnstake, data: unstakeHash } = useWriteContract()
-  const { isSuccess: unstakeDone } = useWaitForTransactionReceipt({ hash: unstakeHash })
+  const [unstakeErrors, setUnstakeErrors] = useState<Record<string, string>>({})
+  const { writeContractAsync: writeUnstakeAsync, reset: resetUnstakeWrite } = useWriteContract()
+  const [unstakeHash, setUnstakeHash] = useState<`0x${string}` | undefined>(undefined)
+  const { isSuccess: unstakeDone, isError: receiptErrored, error: receiptError } = useWaitForTransactionReceipt({ hash: unstakeHash })
   const [pendingGauge, setPendingGauge] = useState<string | null>(null)
 
   useEffect(() => {
-    if (unstakeDone && pendingGauge) {
+    if (!pendingGauge) return
+    if (unstakeDone) {
       setUnstakeStep(s => ({ ...s, [pendingGauge]: 'done' }))
       setPendingGauge(null)
       refetchLegacyStaked()
+    } else if (receiptErrored) {
+      setUnstakeStep(s => ({ ...s, [pendingGauge]: 'idle' }))
+      setUnstakeErrors(e => ({ ...e, [pendingGauge]: receiptError?.message?.slice(0, 200) ?? 'Transaction failed on-chain' }))
+      setPendingGauge(null)
     }
-  }, [unstakeDone]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [unstakeDone, receiptErrored]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function withdrawAndClaim(gauge: `0x${string}`, amount: bigint) {
+  async function withdrawAndClaim(gauge: `0x${string}`, amount: bigint) {
     setUnstakeStep(s => ({ ...s, [gauge]: 'pending' }))
-    setPendingGauge(gauge)
-    writeUnstake({ address: gauge, abi: GAUGE_ABI, functionName: 'withdraw', args: [amount] })
+    setUnstakeErrors(e => ({ ...e, [gauge]: '' }))
+    resetUnstakeWrite()
+    try {
+      const hash = await writeUnstakeAsync({ address: gauge, abi: GAUGE_ABI, functionName: 'withdraw', args: [amount] })
+      setPendingGauge(gauge)
+      setUnstakeHash(hash)
+    } catch (err: any) {
+      setUnstakeStep(s => ({ ...s, [gauge]: 'idle' }))
+      setUnstakeErrors(e => ({ ...e, [gauge]: err?.shortMessage || err?.message || 'Wallet rejected or failed to send the transaction' }))
+    }
   }
-  function claimOnly(gauge: `0x${string}`) {
+  async function claimOnly(gauge: `0x${string}`) {
     setUnstakeStep(s => ({ ...s, [gauge]: 'pending' }))
-    setPendingGauge(gauge)
-    writeUnstake({ address: gauge, abi: GAUGE_ABI, functionName: 'getReward', args: [address!] })
+    setUnstakeErrors(e => ({ ...e, [gauge]: '' }))
+    resetUnstakeWrite()
+    try {
+      const hash = await writeUnstakeAsync({ address: gauge, abi: GAUGE_ABI, functionName: 'getReward', args: [address!] })
+      setPendingGauge(gauge)
+      setUnstakeHash(hash)
+    } catch (err: any) {
+      setUnstakeStep(s => ({ ...s, [gauge]: 'idle' }))
+      setUnstakeErrors(e => ({ ...e, [gauge]: err?.shortMessage || err?.message || 'Wallet rejected or failed to send the transaction' }))
+    }
   }
 
   // ── Existing pool positions ──────────────────────────────────────────────
@@ -350,6 +373,9 @@ export default function MigratePage() {
                         </button>
                       )}
                     </div>
+                  )}
+                  {unstakeErrors[g.gauge] && (
+                    <div className="text-2xs text-red-400 font-mono break-words">{unstakeErrors[g.gauge]}</div>
                   )}
                 </div>
               )
