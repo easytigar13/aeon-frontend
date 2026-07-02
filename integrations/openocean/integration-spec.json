@@ -1,16 +1,16 @@
 {
   "protocol": {
     "name": "AEON Protocol",
-    "description": "Fee-anchored ve(3,3) DEX on Avalanche. Emissions are capped at 1/10th of protocol fees — no inflation without demand.",
-    "website": "https://app.aeonprotocol.xyz",
-    "docs": "https://app.aeonprotocol.xyz/docs",
-    "twitter": "@AeonProtocolX",
-    "chain": "Avalanche C-Chain",
-    "chainId": 43114
+    "description": "Fee-anchored ve(3,3) DEX on Robinhood Chain. Emissions are capped at 1/10th of protocol fees — no inflation without demand. Zero team allocation at genesis.",
+    "website": "https://aeonprotocol.net",
+    "docs": "https://aeonprotocol.net/docs",
+    "twitter": "@AeonProtocol",
+    "chain": "Robinhood Chain",
+    "chainId": 4663
   },
   "contracts": {
-    "factory": "0x3ECf287990A2365d48C6681620393aC1cdF3D268",
-    "router": "0xD847Ea61394ADa3bb23B373349b58C90f9126A9F",
+    "factory": "0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6",
+    "router": "0x4d188106175De919a971B0cB6F8A0e3E885a3410",
     "token": "0xd4c93eD1843606f92CccA078941f3d52A585982f"
   },
   "poolTypes": [
@@ -29,24 +29,18 @@
     "feeRange": "1 to 100 bps (0.01% to 1%)"
   },
   "pools": [
-    { "pair": "AEON/WAVAX", "type": "vAMM", "fee": "1%",   "address": "0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489" },
-    { "pair": "AEON/USDC",  "type": "vAMM", "fee": "1%",   "address": "0xFD029a446632618f218189d4a0B572896CD29B58" },
-    { "pair": "WAVAX/USDC", "type": "vAMM", "fee": "0.3%", "address": "0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086" }
+    { "pair": "AEON/ETH",  "type": "vAMM", "fee": "1%",   "address": "0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3" },
+    { "pair": "AEON/USDG", "type": "vAMM", "fee": "1%",   "address": "0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434" },
+    { "pair": "ETH/USDG",  "type": "vAMM", "fee": "0.3%", "address": "0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2" }
   ],
   "tokens": [
-    { "symbol": "AEON",    "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f", "decimals": 18 },
-    { "symbol": "WAVAX",   "address": "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7", "decimals": 18 },
-    { "symbol": "USDC",    "address": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", "decimals": 6  },
-    { "symbol": "WETH.e",  "address": "0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB", "decimals": 18 },
-    { "symbol": "WBTC.e",  "address": "0x50b7545627a5162F82A992c33b87aDc75187B218", "decimals": 8  },
-    { "symbol": "GUNZ",    "address": "0x26deBD39D5eD069770406FCa10A0E4f8d2c743eB", "decimals": 18 },
-    { "symbol": "ARENA",   "address": "0xB8d7710f7d8349A506b75dD184F05777c82dAd0C", "decimals": 18 },
-    { "symbol": "COQ",     "address": "0x420FcA0121DC28039145009570975747295f2329", "decimals": 18 },
-    { "symbol": "SPX6900", "address": "0x6F911b6B39Bcc665A463129c94B5380A4387b7eb", "decimals": 18 }
+    { "symbol": "AEON", "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f", "decimals": 18 },
+    { "symbol": "WETH", "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", "decimals": 18 },
+    { "symbol": "USDG", "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168", "decimals": 6  }
   ],
   "submission": {
     "openOceanDexIntegrationPage": "https://docs.openocean.finance/products/dex-aggregator/dexs-integration",
     "contactEmail": "easytigar1@gmail.com",
-    "contactTwitter": "@AeonProtocolX"
+    "contactTwitter": "@AeonProtocol"
   }
 }

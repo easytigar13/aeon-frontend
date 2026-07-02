@@ -10,7 +10,7 @@ interface IPair {
  * AeonPairRegistry
  *
  * Emits standard Uniswap-V2-compatible PairCreated events for every AeonDEX pool.
- * On-chain MEV bots and aggregators that scan for PairCreated on Avalanche
+ * On-chain MEV bots and aggregators that scan for PairCreated on Robinhood Chain
  * will discover all pools automatically once registerPairs() is called.
  *
  * Deploy via Remix → call registerPairs() with all pool addresses.

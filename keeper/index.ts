@@ -22,16 +22,23 @@ import {
   parseUnits,
   formatUnits,
   encodeFunctionData,
+  defineChain,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { avalanche } from 'viem/chains'
 import * as dotenv from 'dotenv'
 
 dotenv.config({ path: new URL('.env', import.meta.url).pathname })
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const RPC      = process.env.RPC_URL ?? 'https://api.avax.network/ext/bc/C/rpc'
+const robinhoodChain = defineChain({
+  id: 4663,
+  name: 'Robinhood Chain',
+  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+  rpcUrls: { default: { http: ['https://rpc.mainnet.chain.robinhood.com'] } },
+})
+
+const RPC      = process.env.RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'
 const PK       = (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`
 const MIN_PROFIT_USD = parseFloat(process.env.MIN_PROFIT_USD ?? '0.05')   // skip tiny arbs
 const INTERVAL_MS    = parseInt(process.env.INTERVAL_MS     ?? '5000')
@@ -58,40 +65,19 @@ interface Pool {
 }
 
 const TOKENS: Record<string, Token> = {
-  AEON:  { address: '0xd4c93eD1843606f92CccA078941f3d52A585982f', symbol: 'AEON',    decimals: 18 },
-  WAVAX: { address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7', symbol: 'WAVAX',   decimals: 18 },
-  USDC:  { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E', symbol: 'USDC',    decimals: 6  },
-  ARENA: { address: '0xB8d7710f7d8349A506b75dD184F05777c82dAd0C', symbol: 'ARENA',   decimals: 18 },
-  COQ:   { address: '0x420FcA0121DC28039145009570975747295f2329', symbol: 'COQ',     decimals: 18 },
-  GUNZ:  { address: '0x26deBD39D5eD069770406FCa10A0E4f8d2c743eB', symbol: 'GUNZ',    decimals: 18 },
-  WETHE: { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB', symbol: 'WETH.e',  decimals: 18 },
-  WBTCE: { address: '0x50b7545627a5162F82A992c33b87aDc75187B218', symbol: 'WBTC.e',  decimals: 8  },
-  WBTCB: { address: '0x152b9d0fdc40c096757f570a51e494bd4b943e50', symbol: 'WBTC.b',  decimals: 8  },
-  SPX:   { address: '0x6F911b6B39Bcc665A463129c94B5380A4387b7eb', symbol: 'SPX6900', decimals: 18 },
+  AEON: { address: '0xd4c93eD1843606f92CccA078941f3d52A585982f', symbol: 'AEON', decimals: 18 },
+  WETH: { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73', symbol: 'WETH', decimals: 18 },
+  USDG: { address: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168', symbol: 'USDG', decimals: 6  },
 }
 
-// Only pools that are confirmed deployed and have unique addresses
+// The 3 genesis vAMM pools on Robinhood Chain. Arb opportunities between
+// pool TYPES (vAMM vs CL) for the same pair don't exist yet — CL pools
+// haven't been deployed. This still runs fine across these 3 pools; it just
+// won't find much until there's more than one pool per pair to compare.
 const POOLS: Pool[] = [
-  // vAMM pools (1% fee)
-  { address: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489', token0: 'AEON',  token1: 'WAVAX', feeBps: 100n },
-  { address: '0xFD029a446632618f218189d4a0B572896CD29B58', token0: 'AEON',  token1: 'USDC',  feeBps: 100n },
-  { address: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086', token0: 'WAVAX', token1: 'USDC',  feeBps: 30n  },
-  { address: '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77', token0: 'ARENA', token1: 'USDC',  feeBps: 30n  },
-  { address: '0x19aE273606588fb17D99572321eAD9b0B060DF00', token0: 'COQ',   token1: 'USDC',  feeBps: 30n  },
-  // CL pools (0.3% fee) — same pairs, different pools → main arb targets
-  { address: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6', token0: 'AEON',  token1: 'WAVAX', feeBps: 30n  },
-  { address: '0x29c818b0929F9D247157f7b17a49B89664C9efcE', token0: 'AEON',  token1: 'USDC',  feeBps: 30n  },
-  { address: '0x1C95905E0C7D290A46E1d970BeCD315BE10b3421', token0: 'AEON',  token1: 'ARENA', feeBps: 30n  },
-  { address: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b', token0: 'WAVAX', token1: 'USDC',  feeBps: 5n   },
-  // DLMM pools (1% fee)
-  { address: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7', token0: 'ARENA', token1: 'AEON',  feeBps: 100n },
-  // New pools — deployed 2026-06-29
-  { address: '0x04de9ee7b6355ec643db415b2212734390fcb2f8', token0: 'AEON',  token1: 'WBTCB', feeBps: 30n  },
-  { address: '0x0d94e9bd42cbddeef6804b9813da82a42617cc01', token0: 'AEON',  token1: 'WBTCB', feeBps: 100n },
-  { address: '0xeb55b531c1881751d6c83ce343ee3870a3ed6cb3', token0: 'WAVAX', token1: 'WBTCB', feeBps: 30n  },
-  { address: '0x10235223cba1939eb5dee67a08cf1c065bc17a6e', token0: 'WAVAX', token1: 'WBTCB', feeBps: 100n },
-  { address: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e', token0: 'AEON',  token1: 'SPX',   feeBps: 30n  },
-  { address: '0xeac2c4b5b9a1169c7e46a44ed6a5e4836ba3bb95', token0: 'AEON',  token1: 'SPX',   feeBps: 100n },
+  { address: '0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3', token0: 'AEON', token1: 'WETH', feeBps: 100n },
+  { address: '0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434', token0: 'AEON', token1: 'USDG', feeBps: 100n },
+  { address: '0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2', token0: 'WETH', token1: 'USDG', feeBps: 30n  },
 ]
 
 // ─── ABIs (minimal) ───────────────────────────────────────────────────────────
@@ -128,8 +114,8 @@ const PAIR_ABI = [
 // ─── Clients ──────────────────────────────────────────────────────────────────
 
 const account = privateKeyToAccount(PK)
-const pub = createPublicClient({ chain: avalanche, transport: http(RPC) })
-const wal = createWalletClient({ account, chain: avalanche, transport: http(RPC) })
+const pub = createPublicClient({ chain: robinhoodChain, transport: http(RPC) })
+const wal = createWalletClient({ account, chain: robinhoodChain, transport: http(RPC) })
 
 // ─── Math ─────────────────────────────────────────────────────────────────────
 

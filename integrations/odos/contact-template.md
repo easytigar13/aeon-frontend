@@ -6,20 +6,20 @@
 
 ## Protocol Overview
 
-**Name:** AEON Protocol  
-**Chain:** Avalanche C-Chain (chainId 43114)  
-**Website:** https://app.aeonprotocol.xyz  
-**Docs:** https://app.aeonprotocol.xyz/docs  
-**Twitter:** @AeonProtocolX  
+**Name:** AEON Protocol
+**Chain:** Robinhood Chain (chainId 4663)
+**Website:** https://aeonprotocol.net
+**Docs:** https://aeonprotocol.net/docs
+**Twitter:** @AeonProtocol
 
-AEON is a ve(3,3) DEX on Avalanche. Emissions are algorithmically capped at 1/10th of protocol fees — the first truly fee-anchored DEX on Avalanche.
+AEON is a ve(3,3) DEX on Robinhood Chain. Emissions are algorithmically capped at 1/10th of protocol fees — a fee-anchored DEX from genesis, with zero team allocation.
 
 ## Contracts
 
 | Contract   | Address |
 |------------|---------|
-| Factory    | `0x3ECf287990A2365d48C6681620393aC1cdF3D268` |
-| Router     | `0xD847Ea61394ADa3bb23B373349b58C90f9126A9F` |
+| Factory    | `0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6` |
+| Router     | `0x4d188106175De919a971B0cB6F8A0e3E885a3410` |
 | AEON Token | `0xd4c93eD1843606f92CccA078941f3d52A585982f` |
 
 ## Pool Interface (UniswapV2-compatible)
@@ -44,10 +44,10 @@ Fee range: 1–100 bps (0.01%–1%)
 
 | Pair       | Fee   | Address |
 |------------|-------|---------|
-| AEON/WAVAX | 1%    | `0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489` |
-| AEON/USDC  | 1%    | `0xFD029a446632618f218189d4a0B572896CD29B58` |
-| WAVAX/USDC | 0.3%  | `0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086` |
+| AEON/ETH   | 1%    | `0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3` |
+| AEON/USDG  | 1%    | `0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434` |
+| ETH/USDG   | 0.3%  | `0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2` |
 
 ## Contact
 - Email: easytigar1@gmail.com
-- Twitter: @AeonProtocolX
+- Twitter: @AeonProtocol

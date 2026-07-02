@@ -2,7 +2,7 @@ package aeonvamm
 
 const (
 	DexTypeAeonVAMM = "aeon-vamm"
-	defaultChainID  = 43114 // Avalanche C-Chain
+	defaultChainID  = 4663 // Robinhood Chain
 )
 
 type Config struct {
@@ -13,6 +13,6 @@ type Config struct {
 
 var defaultConfig = &Config{
 	DexID:          DexTypeAeonVAMM,
-	FactoryAddress: "0x3ECf287990A2365d48C6681620393aC1cdF3D268",
+	FactoryAddress: "0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6",
 	ChainID:        defaultChainID,
 }

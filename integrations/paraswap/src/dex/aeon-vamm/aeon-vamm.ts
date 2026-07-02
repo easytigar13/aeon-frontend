@@ -5,10 +5,10 @@ import { AeonVAMMConfig } from './config';
 import { getDexKeysWithNetwork } from '../../utils';
 
 /**
- * AEON Protocol vAMM — constant product (x*y=k) AMM on Avalanche.
- * Factory: 0x3ECf287990A2365d48C6681620393aC1cdF3D268
- * Chain:   Avalanche C-Chain (43114)
- * Docs:    https://app.aeonprotocol.xyz/docs
+ * AEON Protocol vAMM — constant product (x*y=k) AMM on Robinhood Chain.
+ * Factory: 0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6
+ * Chain:   Robinhood Chain (4663)
+ * Docs:    https://aeonprotocol.net/docs
  */
 export class AeonVAMM extends UniswapV2 {
   public static dexKeysWithNetwork: { key: string; networks: Network[] }[] =
