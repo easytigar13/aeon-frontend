@@ -1,47 +1,64 @@
 import Link from 'next/link'
 import { ArrowRight, Flame, Lock, TrendingUp, Zap, Shield, Crown, AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react'
 import { LiveHomepageStats } from '@/components/LiveHomepageStats'
+import { FlywheelDiagram } from '@/components/FlywheelDiagram'
+import { Reveal } from '@/components/Reveal'
 
 export default function HomePage() {
   return (
-    <div className="relative">
+    <div className="relative overflow-hidden">
       {/* Background glow */}
       <div className="absolute inset-0 bg-aeon-glow pointer-events-none" />
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px]
-                      bg-aeon-400/5 blur-[120px] rounded-full pointer-events-none" />
+                      bg-aeon-400/5 blur-[120px] rounded-full pointer-events-none animate-pulse-slow" />
+      <div className="absolute top-40 -left-40 w-[400px] h-[400px]
+                      bg-violet-500/5 blur-[120px] rounded-full pointer-events-none" />
+      <div className="absolute top-96 -right-40 w-[400px] h-[400px]
+                      bg-emerald-500/5 blur-[120px] rounded-full pointer-events-none" />
 
       {/* Hero */}
       <section className="relative max-w-7xl mx-auto px-4 pt-20 pb-16 text-center">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full
-                        bg-aeon-400/10 border border-aeon-400/20 mb-8">
-          <Zap size={12} className="text-aeon-400" />
+                        bg-aeon-400/10 border border-aeon-400/20 mb-8 animate-fade-in">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-aeon-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-aeon-400" />
+          </span>
           <span className="text-xs font-mono text-aeon-400 font-bold tracking-wider uppercase">
             Live on Robinhood Chain — Genesis Epoch 0
           </span>
         </div>
 
-        <h1 className="font-display font-bold text-5xl md:text-7xl leading-none mb-6">
+        <h1 className="font-display font-bold text-5xl md:text-7xl leading-none mb-6 animate-fade-in" style={{ animationDelay: '80ms', animationFillMode: 'backwards' }}>
           <span className="text-text-primary">The DEX that</span>
           <br />
           <span className="text-gradient-aeon">earns before it prints</span>
         </h1>
 
-        <p className="text-text-secondary text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
+        <p className="text-text-secondary text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed animate-fade-in" style={{ animationDelay: '160ms', animationFillMode: 'backwards' }}>
           AEON is a ve(3,3) DEX on Robinhood Chain where emissions are anchored to real trading fees.
           <br />
           <span className="font-mono text-aeon-400">Weekly Emissions = Last Epoch Fees ÷ 10</span>
         </p>
 
-        <div className="flex flex-wrap justify-center gap-3 mb-16">
-          <Link href="/swap" className="btn-primary flex items-center gap-2">
+        <div className="flex flex-wrap justify-center gap-3 mb-4 animate-fade-in" style={{ animationDelay: '240ms', animationFillMode: 'backwards' }}>
+          <Link href="/swap" className="btn-primary flex items-center gap-2 hover:shadow-[0_0_30px_rgba(255,184,0,0.35)] hover:scale-[1.03] active:scale-[0.97]">
             Start Trading <ArrowRight size={16} />
           </Link>
-          <Link href="/lock" className="btn-secondary flex items-center gap-2">
+          <Link href="/lock" className="btn-secondary flex items-center gap-2 hover:scale-[1.03] active:scale-[0.97]">
             Lock & Earn
           </Link>
-          <Link href="/dashboard" className="btn-ghost flex items-center gap-2">
+          <Link href="/dashboard" className="btn-ghost flex items-center gap-2 hover:scale-[1.03] active:scale-[0.97]">
             View Stats <TrendingUp size={16} />
           </Link>
+        </div>
+
+        <div className="flex flex-wrap justify-center gap-x-5 gap-y-1 mb-16 text-2xs font-mono text-text-muted animate-fade-in" style={{ animationDelay: '300ms', animationFillMode: 'backwards' }}>
+          <span>Zero team allocation</span>
+          <span className="text-bg-border">·</span>
+          <span>80% of fees to voters</span>
+          <span className="text-bg-border">·</span>
+          <span>50,000 AEON burned at genesis</span>
         </div>
 
         {/* Live stats bar */}
@@ -50,7 +67,7 @@ export default function HomePage() {
 
       {/* Why AEON is Different — The Core Pitch */}
       <section className="max-w-7xl mx-auto px-4 py-16">
-        <div className="text-center mb-14">
+        <Reveal className="text-center mb-14">
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 mb-6">
             <AlertTriangle size={12} className="text-red-400" />
             <span className="text-xs font-mono text-red-400 font-bold tracking-wider uppercase">Why most ve(3,3) fail</span>
@@ -62,12 +79,12 @@ export default function HomePage() {
             Mercenary capital arrives, chases the highest APR, dumps the token, and leaves.
             The protocol bleeds to zero. It's happened every single time — until now.
           </p>
-        </div>
+        </Reveal>
 
         {/* The flip */}
         <div className="grid md:grid-cols-2 gap-6 mb-16">
           {/* Before / broken model */}
-          <div className="card p-8 border-red-500/20 bg-red-500/5 relative overflow-hidden">
+          <Reveal className="card p-8 border-red-500/20 bg-red-500/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
             <div className="absolute top-4 right-4 text-xs font-mono text-red-400/40 font-bold uppercase tracking-widest">Every other ve(3,3)</div>
             <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mb-5">
               <AlertTriangle size={20} className="text-red-400" />
@@ -92,10 +109,10 @@ export default function HomePage() {
             <div className="mt-6 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
               <span className="text-xs font-mono text-red-400">Result: −99% in 3 months. Every time.</span>
             </div>
-          </div>
+          </Reveal>
 
           {/* AEON model */}
-          <div className="card p-8 border-aeon-400/20 bg-aeon-400/5 relative overflow-hidden">
+          <Reveal delay={120} className="card p-8 border-aeon-400/20 bg-aeon-400/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
             <div className="absolute top-4 right-4 text-xs font-mono text-aeon-400/40 font-bold uppercase tracking-widest">AEON</div>
             <div className="w-10 h-10 rounded-xl bg-aeon-400/10 flex items-center justify-center mb-5">
               <Crown size={20} className="text-aeon-400" />
@@ -120,11 +137,11 @@ export default function HomePage() {
             <div className="mt-6 p-3 rounded-xl bg-aeon-400/10 border border-aeon-400/20">
               <span className="text-xs font-mono text-aeon-400">Token holders are the bosses. Always.</span>
             </div>
-          </div>
+          </Reveal>
         </div>
 
         {/* The big insight */}
-        <div className="card-raised border-gradient p-10 md:p-14 text-center relative overflow-hidden mb-16">
+        <Reveal className="card-raised border-gradient p-10 md:p-14 text-center relative overflow-hidden mb-16">
           <div className="absolute inset-0 bg-gradient-to-br from-aeon-400/5 via-transparent to-violet-500/5 pointer-events-none" />
           <div className="relative">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-aeon-400/10 border border-aeon-400/20 mb-6">
@@ -141,15 +158,15 @@ export default function HomePage() {
               That's not a rule — it's the architecture.
             </p>
             <div className="flex flex-wrap justify-center gap-3">
-              <Link href="/lock" className="btn-primary flex items-center gap-2">
+              <Link href="/lock" className="btn-primary flex items-center gap-2 hover:scale-[1.03] active:scale-[0.97]">
                 Become a Holder <Crown size={16} />
               </Link>
-              <Link href="/earn" className="btn-secondary flex items-center gap-2">
+              <Link href="/earn" className="btn-secondary flex items-center gap-2 hover:scale-[1.03] active:scale-[0.97]">
                 Provide Liquidity <ChevronRight size={16} />
               </Link>
             </div>
           </div>
-        </div>
+        </Reveal>
 
         {/* The Sticky LP Flywheel teaser */}
         <div className="grid md:grid-cols-3 gap-4 mb-4">
@@ -172,34 +189,38 @@ export default function HomePage() {
               body: 'Once the loop is running, more LP → more fees → more holder yield → higher price → better APR for everyone. Upward only.',
               color: 'emerald',
             },
-          ].map(item => (
-            <div key={item.title} className={`card p-6 border-${item.color === 'aeon' ? 'aeon-400' : item.color === 'violet' ? 'violet-400' : 'emerald-400'}/10`}>
+          ].map((item, i) => (
+            <Reveal key={item.title} delay={i * 100} className={`card p-6 border-${item.color === 'aeon' ? 'aeon-400' : item.color === 'violet' ? 'violet-400' : 'emerald-400'}/10 transition-all duration-300 hover:-translate-y-1 hover:border-opacity-40`}>
               <div className="w-10 h-10 rounded-xl bg-bg-raised flex items-center justify-center mb-4">
                 {item.icon}
               </div>
               <h3 className="font-display font-semibold text-text-primary mb-2">{item.title}</h3>
               <p className="text-text-secondary text-sm leading-relaxed">{item.body}</p>
-            </div>
+            </Reveal>
           ))}
         </div>
 
-        <div className="text-center mt-8">
+        <Reveal className="text-center mt-8">
           <p className="font-display font-bold text-2xl text-text-primary">
             Join the revolution of the new era ve(3,3). <span className="text-gradient-aeon">Be early. Be a holder.</span>
           </p>
-        </div>
+        </Reveal>
       </section>
 
       {/* How it works */}
       <section className="max-w-7xl mx-auto px-4 py-16">
-        <div className="text-center mb-12">
+        <Reveal className="text-center mb-4">
           <h2 className="font-display font-bold text-3xl text-text-primary mb-3">
             The Flywheel
           </h2>
           <p className="text-text-secondary max-w-xl mx-auto">
             Every component reinforces every other. Real yield creates real value.
           </p>
-        </div>
+        </Reveal>
+
+        <Reveal delay={100} className="mb-8">
+          <FlywheelDiagram />
+        </Reveal>
 
         <div className="grid md:grid-cols-3 gap-6">
           {[
@@ -221,8 +242,8 @@ export default function HomePage() {
               body: '20% of fees route to the buyback engine — half swapped to AEON and burned forever, half redistributed in liquid AEON to Furnace burners.',
               accent: 'emerald',
             },
-          ].map(item => (
-            <div key={item.title} className="card p-6 hover:border-bg-hover transition-colors">
+          ].map((item, i) => (
+            <Reveal key={item.title} delay={i * 100} className="card p-6 transition-all duration-300 hover:border-bg-hover hover:-translate-y-1">
               <div className="w-10 h-10 rounded-xl bg-bg-raised flex items-center justify-center mb-4">
                 {item.icon}
               </div>
@@ -230,14 +251,33 @@ export default function HomePage() {
                 {item.title}
               </h3>
               <p className="text-text-secondary text-sm leading-relaxed">{item.body}</p>
-            </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
+      {/* The 80/20 statement */}
+      <section className="max-w-7xl mx-auto px-4 py-8">
+        <Reveal className="text-center py-10">
+          <p className="text-xs font-mono text-text-muted uppercase tracking-widest mb-4">Every single fee, every single swap</p>
+          <div className="flex items-center justify-center gap-6 md:gap-12 flex-wrap">
+            <div>
+              <div className="font-display font-bold text-6xl md:text-8xl text-gradient-aeon leading-none">80%</div>
+              <div className="text-sm text-text-secondary mt-2">straight to voters</div>
+            </div>
+            <div className="text-3xl text-text-muted font-display">+</div>
+            <div>
+              <div className="font-display font-bold text-6xl md:text-8xl text-gradient-violet leading-none">20%</div>
+              <div className="text-sm text-text-secondary mt-2">burned & redistributed</div>
+            </div>
+          </div>
+          <p className="text-text-muted text-sm mt-6 max-w-lg mx-auto">Forever, by contract — not by promise.</p>
+        </Reveal>
+      </section>
+
       {/* The Furnace */}
       <section className="max-w-7xl mx-auto px-4 py-16">
-        <div className="card-raised border-gradient p-8 md:p-12 text-center relative overflow-hidden">
+        <Reveal className="card-raised border-gradient p-8 md:p-12 text-center relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-aeon-400/5 via-transparent to-violet-500/5 pointer-events-none" />
           <div className="relative">
             <div className="inline-flex items-center gap-2 mb-6">
@@ -260,49 +300,49 @@ export default function HomePage() {
                 { label: 'Rewards', value: 'Emission bonus + buyback share' },
                 { label: 'Transferable', value: 'No — Soulbound' },
               ].map(item => (
-                <div key={item.label} className="card px-4 py-3 text-center min-w-[140px]">
+                <div key={item.label} className="card px-4 py-3 text-center min-w-[140px] transition-all duration-300 hover:border-aeon-400/30 hover:-translate-y-0.5">
                   <div className="text-sm font-bold text-text-primary mb-0.5">{item.value}</div>
                   <div className="text-2xs text-text-muted uppercase tracking-wider">{item.label}</div>
                 </div>
               ))}
             </div>
-            <Link href="/lock" className="btn-primary inline-flex items-center gap-2">
+            <Link href="/lock" className="btn-primary inline-flex items-center gap-2 hover:shadow-[0_0_30px_rgba(255,184,0,0.35)] hover:scale-[1.03] active:scale-[0.97]">
               Enter The Furnace <Flame size={16} />
             </Link>
           </div>
-        </div>
+        </Reveal>
       </section>
 
       {/* Pools */}
       <section className="max-w-7xl mx-auto px-4 py-16">
-        <div className="text-center mb-12">
+        <Reveal className="text-center mb-12">
           <h2 className="font-display font-bold text-3xl text-text-primary mb-3">
             3 Pools at Genesis
           </h2>
           <p className="text-text-secondary">vAMM to start — concentrated liquidity pools land next</p>
-        </div>
+        </Reveal>
 
         <div className="grid md:grid-cols-3 gap-6">
           {[
             { name: 'AEON / ETH',  desc: 'Seeded at genesis with 20,000 AEON paired against ETH.', fee: '1%' },
             { name: 'AEON / USDG', desc: 'Seeded at genesis with 20,000 AEON paired against USDG.', fee: '1%' },
             { name: 'ETH / USDG',  desc: 'The base trading pair between the chain\'s native asset and USDG.', fee: '0.3%' },
-          ].map(item => (
-            <div key={item.name} className="card p-6">
+          ].map((item, i) => (
+            <Reveal key={item.name} delay={i * 100} className="card p-6 transition-all duration-300 hover:-translate-y-1 hover:border-bg-hover">
               <div className="flex items-center justify-between mb-4">
                 <span className="pool-type-vamm">vAMM</span>
                 <span className="text-xs text-text-muted font-mono">{item.fee} fee</span>
               </div>
               <h3 className="font-display font-semibold text-text-primary mb-2">{item.name}</h3>
               <p className="text-text-secondary text-sm leading-relaxed">{item.desc}</p>
-            </div>
+            </Reveal>
           ))}
         </div>
       </section>
 
       {/* Genesis Epoch */}
       <section className="max-w-7xl mx-auto px-4 py-8">
-        <div className="card p-8 border-aeon-400/20 bg-gradient-to-r from-aeon-400/5 to-transparent">
+        <Reveal className="card p-8 border-aeon-400/20 bg-gradient-to-r from-aeon-400/5 to-transparent">
           <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
             <div className="w-14 h-14 rounded-2xl bg-aeon-400/15 flex items-center justify-center shrink-0">
               <TrendingUp size={24} className="text-aeon-400" />
@@ -333,12 +373,12 @@ export default function HomePage() {
               </div>
             </div>
           </div>
-        </div>
+        </Reveal>
       </section>
 
       {/* Security */}
       <section className="max-w-7xl mx-auto px-4 py-16 pb-24">
-        <div className="card p-8 flex flex-col md:flex-row items-center gap-8">
+        <Reveal className="card p-8 flex flex-col md:flex-row items-center gap-8">
           <div className="w-16 h-16 rounded-2xl bg-bg-raised flex items-center justify-center shrink-0">
             <Shield size={28} className="text-aeon-400" />
           </div>
@@ -355,11 +395,11 @@ export default function HomePage() {
             href="https://github.com/easytigar13/aeon-protocol"
             target="_blank"
             rel="noopener noreferrer"
-            className="btn-secondary shrink-0 text-sm"
+            className="btn-secondary shrink-0 text-sm hover:scale-[1.03] active:scale-[0.97]"
           >
             View on GitHub
           </a>
-        </div>
+        </Reveal>
       </section>
     </div>
   )

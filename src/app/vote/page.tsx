@@ -6,7 +6,7 @@ import { useAccount, useReadContract, useWriteContract, useWaitForTransactionRec
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits } from 'viem'
 import { POOLS, CONTRACTS } from '@/config/contracts'
-import { VOTING_ESCROW_ABI, VOTER_ABI } from '@/config/abis'
+import { VOTING_ESCROW_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -366,19 +366,29 @@ export default function VotePage() {
   )
 }
 
+// Robinhood Chain genesis epoch — matches the constant used on /dashboard.
+const GENESIS_S = 1782950400 // 2026-07-02 00:00:00 UTC
+
 function EpochInfo() {
-  const EPOCH_LENGTH = 7 * 24 * 60 * 60 * 1000
+  const WEEK_MS    = 7 * 24 * 60 * 60 * 1000
+  const WEEK_S     = 7 * 24 * 60 * 60
   const now        = Date.now()
-  const epochNum   = Math.floor(now / EPOCH_LENGTH)
-  const epochStart = epochNum * EPOCH_LENGTH
-  const remaining  = epochStart + EPOCH_LENGTH - now
+  const epochStart = Math.floor(now / WEEK_MS) * WEEK_MS
+  const remaining  = epochStart + WEEK_MS - now
   const days       = Math.floor(remaining / (24 * 60 * 60 * 1000))
   const hours      = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+  const epochNum   = Math.floor((now / 1000 - GENESIS_S) / WEEK_S)
 
   const { data: totalWeight } = useReadContract({
     address: CONTRACTS.AeonVoter,
     abi: VOTER_ABI,
     functionName: 'totalWeight',
+  })
+
+  const { data: lastMintAmount } = useReadContract({
+    address: CONTRACTS.EmissionsEngine,
+    abi: EMISSIONS_ENGINE_ABI,
+    functionName: 'lastMintAmount',
   })
 
   return (
@@ -387,7 +397,7 @@ function EpochInfo() {
         { label: 'Current Epoch', value: `#${epochNum}` },
         { label: 'Epoch Ends',    value: `${days}d ${hours}h` },
         { label: 'Total Votes',   value: totalWeight !== undefined ? `${parseFloat(formatUnits(totalWeight, 18)).toFixed(2)} veAEON` : '—' },
-        { label: 'Next Emissions',value: '— AEON' },
+        { label: 'Last Emission', value: lastMintAmount !== undefined ? `${parseFloat(formatUnits(lastMintAmount, 18)).toFixed(2)} AEON` : '— AEON' },
       ].map(item => (
         <div key={item.label} className="flex justify-between text-sm">
           <span className="text-text-muted">{item.label}</span>

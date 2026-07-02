@@ -6,6 +6,16 @@ import { PAIR_ABI } from '@/config/abis'
 const POOL_AEON_USDG = POOLS.find(p => p.name === 'AEON/USDG')!.address
 const POOL_ETH_USDG  = POOLS.find(p => p.name === 'ETH/USDG')!.address
 
+// Static — defined once at module scope so useReadContracts gets a stable
+// reference across renders instead of a fresh array every time (which
+// wagmi treats as a config change and re-queries for).
+const PRICE_CONTRACTS = [
+  { address: POOL_AEON_USDG, abi: PAIR_ABI, functionName: 'getReserves' },
+  { address: POOL_AEON_USDG, abi: PAIR_ABI, functionName: 'token0' },
+  { address: POOL_ETH_USDG,  abi: PAIR_ABI, functionName: 'getReserves' },
+  { address: POOL_ETH_USDG,  abi: PAIR_ABI, functionName: 'token0' },
+] as const
+
 type Reserves = readonly [bigint, bigint, number]
 
 // Derive USD price of "target" token from a pool paired against USDG ($1).
@@ -28,14 +38,7 @@ function deriveUsdPrice(
 export type PriceMap = Record<string, number | null>
 
 export function usePrices(): PriceMap {
-  const contracts = [
-    { address: POOL_AEON_USDG, abi: PAIR_ABI, functionName: 'getReserves' },
-    { address: POOL_AEON_USDG, abi: PAIR_ABI, functionName: 'token0' },
-    { address: POOL_ETH_USDG,  abi: PAIR_ABI, functionName: 'getReserves' },
-    { address: POOL_ETH_USDG,  abi: PAIR_ABI, functionName: 'token0' },
-  ] as const
-
-  const { data } = useReadContracts({ contracts, query: { refetchInterval: 15000 } })
+  const { data } = useReadContracts({ contracts: PRICE_CONTRACTS, query: { refetchInterval: 15000 } })
 
   const get = (i: number) => data?.[i]?.status === 'success' ? data[i].result : undefined
 

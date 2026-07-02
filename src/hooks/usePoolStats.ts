@@ -12,14 +12,17 @@ export interface PoolStat {
   votesFormatted: string  // human-readable veAEON
 }
 
-export function usePoolStats(prices: PriceMap): PoolStat[] {
-  const contracts: any[] = POOLS.flatMap(p => ([
-    { address: p.address, abi: PAIR_ABI,  functionName: 'getReserves' },
-    { address: p.address, abi: PAIR_ABI,  functionName: 'token0' },
-    { address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'weights', args: [p.address] },
-  ]))
+// Static — defined once at module scope so useReadContracts gets a stable
+// reference across renders instead of a fresh array every time (which
+// wagmi treats as a config change and re-queries for).
+const POOL_STAT_CONTRACTS = POOLS.flatMap(p => ([
+  { address: p.address, abi: PAIR_ABI,  functionName: 'getReserves' } as const,
+  { address: p.address, abi: PAIR_ABI,  functionName: 'token0' } as const,
+  { address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'weights', args: [p.address] } as const,
+]))
 
-  const { data } = useReadContracts({ contracts, query: { refetchInterval: 30000 } })
+export function usePoolStats(prices: PriceMap): PoolStat[] {
+  const { data } = useReadContracts({ contracts: POOL_STAT_CONTRACTS, query: { refetchInterval: 30000 } })
 
   return POOLS.map((pool, i) => {
     const base = i * 3
