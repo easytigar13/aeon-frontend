@@ -40,7 +40,6 @@ export default function VotePage() {
   const [tokenIdInput,  setTokenIdInput]  = useState('')
   const [allocations,   setAllocations]   = useState<VoteAllocation[]>([])
   const [search,        setSearch]        = useState('')
-  const [filterType,    setFilterType]    = useState<'all' | 'vAMM' | 'CL' | 'DLMM'>('all')
 
   // Safe conversion — BigInt throws on non-integer strings
   const tokenId = (() => {
@@ -140,7 +139,6 @@ export default function VotePage() {
   const remaining   = 100 - totalWeight
 
   const filteredPools = POOLS.filter(p =>
-    (filterType === 'all' || p.type === filterType) &&
     p.name.toLowerCase().includes(search.toLowerCase())
   )
 
@@ -316,13 +314,6 @@ export default function VotePage() {
         <div className="lg:col-span-2">
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search pools..." className="input-base flex-1 text-sm py-2" />
-            <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl">
-              {(['all', 'vAMM', 'CL', 'DLMM'] as const).map(t => (
-                <button key={t} onClick={() => setFilterType(t)} className={clsx('px-3 py-1.5 rounded-lg text-sm font-medium transition-all capitalize', filterType === t ? 'bg-bg-base text-text-primary' : 'text-text-muted hover:text-text-secondary')}>
-                  {t}
-                </button>
-              ))}
-            </div>
           </div>
 
           <div className="card overflow-hidden">

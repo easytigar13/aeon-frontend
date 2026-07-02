@@ -310,7 +310,7 @@ export default function LockPage() {
             <div className="relative">
               <Flame size={32} className="text-aeon-400 mx-auto mb-3" />
               <h2 className="font-display font-bold text-xl text-text-primary mb-2">The Furnace</h2>
-              <p className="text-sm text-text-secondary leading-relaxed">Burn AEON permanently. Receive a soulbound NFT with static voting power that never decays. Earn your share of 95% of all protocol fees forever.</p>
+              <p className="text-sm text-text-secondary leading-relaxed">Burn AEON permanently. Receive a soulbound NFT with static voting power that never decays. Earn a share of every emission's Furnace bonus, plus a share of buyback-redistributed AEON — liquid rewards without ever unstaking.</p>
             </div>
           </div>
 

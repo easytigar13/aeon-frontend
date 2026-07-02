@@ -54,7 +54,7 @@ export function LiveHomepageStats() {
     {
       label: 'AEON Price',
       value: aeonPrice ? `$${aeonPrice < 0.01 ? aeonPrice.toFixed(6) : aeonPrice.toFixed(4)}` : '$—',
-      sub: 'Chainlink + TWAP',
+      sub: 'TWAP · AEON/USDG',
     },
     {
       label: 'Total Burned',

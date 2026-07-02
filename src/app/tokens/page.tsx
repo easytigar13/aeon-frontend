@@ -1,7 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Search, ArrowUpRight, Copy, Check, TrendingUp, TrendingDown } from 'lucide-react'
+import { Search, Copy, Check, TrendingUp, TrendingDown } from 'lucide-react'
 import { TOKENS, POOLS } from '@/config/contracts'
 import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
@@ -63,7 +63,7 @@ export default function TokensPage() {
             Tradable <span className="text-aeon-400">Tokens</span>
           </h1>
           <p className="text-text-secondary text-sm">
-            Every asset live on AEON Protocol — ve(3,3) liquidity across vAMM, CL &amp; DLMM pools on Avalanche C-Chain.
+            Every asset live on AEON Protocol — ve(3,3) liquidity on Robinhood Chain.
           </p>
         </div>
 
@@ -85,7 +85,7 @@ export default function TokensPage() {
           <span>{new Set(POOLS.map(p => p.address)).size} pools</span>
           <span className="w-1 h-1 rounded-full bg-text-muted" />
           <span className="flex items-center gap-1.5">
-            <ChainBadge size={12} /> Avalanche C-Chain
+            <ChainBadge size={12} /> Robinhood Chain
           </span>
         </div>
 
@@ -151,14 +151,6 @@ export default function TokensPage() {
                     {shortAddr(t.address)}
                   </button>
                   <div className="flex items-center gap-2">
-                    <a
-                      href={`https://snowtrace.io/address/${t.address}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-2xs text-text-muted hover:text-aeon-400 transition-colors flex items-center gap-0.5"
-                    >
-                      Explorer <ArrowUpRight size={10} />
-                    </a>
                     <Link
                       href={`/swap?from=${key}`}
                       className="text-2xs font-medium px-2.5 py-1 rounded-lg bg-aeon-400/10 text-aeon-400 hover:bg-aeon-400/20 transition-colors"

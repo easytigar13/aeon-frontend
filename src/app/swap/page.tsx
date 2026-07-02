@@ -5,8 +5,8 @@ import { clsx } from 'clsx'
 import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
-import { TOKENS, CONTRACTS } from '@/config/contracts'
-import { AEON_ROUTER_ABI, ERC20_ABI } from '@/config/abis'
+import { TOKENS, CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
+import { AEON_ROUTER_ABI, ERC20_ABI, WETH_ABI } from '@/config/abis'
 import { useRouting } from '@/hooks/useRouting'
 import { usePrices } from '@/hooks/usePrices'
 import { TokenIcon } from '@/components/TokenIcon'
@@ -37,7 +37,7 @@ const TOKEN_LIST = Object.entries(TOKENS).map(([key, val]) => ({ key: key as Tok
 
 function useTokenBalance(tokenKey: TokenKey, address?: `0x${string}`) {
   const token = TOKENS[tokenKey]
-  const isNative = token.address === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
+  const isNative = token.address === NATIVE_SENTINEL
   const { data } = useBalance({
     address,
     token: isNative ? undefined : token.address,
@@ -47,11 +47,6 @@ function useTokenBalance(tokenKey: TokenKey, address?: `0x${string}`) {
   return { formatted: parseFloat(formatUnits(data.value, data.decimals)).toFixed(4), raw: data.value, decimals: data.decimals }
 }
 
-const WAVAX_ABI = [
-  { name: 'deposit',  type: 'function', stateMutability: 'payable',    inputs: [],                                  outputs: [] },
-  { name: 'withdraw', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'wad', type: 'uint256' }], outputs: [] },
-] as const
-
 export default function SwapPage() {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
@@ -60,7 +55,7 @@ export default function SwapPage() {
   const isConnected = mounted && _isConnected
   const { openConnectModal } = useConnectModal()
 
-  const [tokenIn,  setTokenIn]  = useState<TokenKey>('WAVAX')
+  const [tokenIn,  setTokenIn]  = useState<TokenKey>('WETH')
   const [tokenOut, setTokenOut] = useState<TokenKey>('AEON')
   const [amountIn, setAmountIn] = useState('')
   const [slippage, setSlippage] = useState('0.5')
@@ -72,9 +67,9 @@ export default function SwapPage() {
   const balanceOut = useTokenBalance(tokenOut, address)
   const prices     = usePrices()
 
-  const isWrapUnwrap = (tokenIn === 'AVAX' && tokenOut === 'WAVAX') || (tokenIn === 'WAVAX' && tokenOut === 'AVAX')
+  const isWrapUnwrap = (tokenIn === 'ETH' && tokenOut === 'WETH') || (tokenIn === 'WETH' && tokenOut === 'ETH')
 
-  const isNativeIn = TOKENS[tokenIn].address === '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
+  const isNativeIn = TOKENS[tokenIn].address === NATIVE_SENTINEL
 
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: isNativeIn ? undefined : TOKENS[tokenIn].address,
@@ -141,30 +136,34 @@ export default function SwapPage() {
 
   function buildRouterSteps() {
     if (!route) return []
-    const wavaxAddr = TOKENS['WAVAX'].address
+    const wethAddr = TOKENS['WETH'].address
     return route.steps.map(step => ({
-      tokenIn:  step.tokenIn  === 'AVAX' ? wavaxAddr : TOKENS[step.tokenIn  as keyof typeof TOKENS].address,
-      tokenOut: step.tokenOut === 'AVAX' ? wavaxAddr : TOKENS[step.tokenOut as keyof typeof TOKENS].address,
+      tokenIn:  step.tokenIn  === 'ETH' ? wethAddr : TOKENS[step.tokenIn  as keyof typeof TOKENS].address,
+      tokenOut: step.tokenOut === 'ETH' ? wethAddr : TOKENS[step.tokenOut as keyof typeof TOKENS].address,
       pool:     step.poolAddress,
       poolType: 0,  // router only implements poolType=0; all pool types share the same swap interface
       feeBps:   Number(step.feeBps),
     }))
   }
 
+  // AeonRouterRH has no native-ETH swap entrypoints — only swapExactTokensForTokens.
+  // A real swap involving native ETH on either side needs to wrap/unwrap first.
+  const needsWrapFirst = hasAmount && !isWrapUnwrap && (tokenIn === 'ETH' || tokenOut === 'ETH')
+
   function handleSwapClick() {
     if (!isConnected) { openConnectModal?.(); return }
     if (!hasAmount || !address) return
 
     if (isWrapUnwrap) {
-      if (tokenIn === 'AVAX') {
-        writeSwap({ address: TOKENS['WAVAX'].address, abi: WAVAX_ABI, functionName: 'deposit', args: [], value: parsedAmountIn })
+      if (tokenIn === 'ETH') {
+        writeSwap({ address: TOKENS['WETH'].address, abi: WETH_ABI, functionName: 'deposit', args: [], value: parsedAmountIn })
       } else {
-        writeSwap({ address: TOKENS['WAVAX'].address, abi: WAVAX_ABI, functionName: 'withdraw', args: [parsedAmountIn] })
+        writeSwap({ address: TOKENS['WETH'].address, abi: WETH_ABI, functionName: 'withdraw', args: [parsedAmountIn] })
       }
       return
     }
 
-    if (!route) return
+    if (needsWrapFirst || !route) return
 
     if (needsApproval) {
       writeContract({ address: TOKENS[tokenIn].address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, maxUint256] })
@@ -174,13 +173,7 @@ export default function SwapPage() {
     const steps    = buildRouterSteps()
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
 
-    if (tokenIn === 'AVAX') {
-      writeSwap({ address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactAVAXForTokens',    args: [steps, amountOutMin, address, deadline], value: parsedAmountIn })
-    } else if (tokenOut === 'AVAX') {
-      writeSwap({ address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForAVAX',    args: [steps, parsedAmountIn, amountOutMin, address, deadline] })
-    } else {
-      writeSwap({ address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens',  args: [steps, parsedAmountIn, amountOutMin, address, deadline] })
-    }
+    writeSwap({ address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens', args: [steps, parsedAmountIn, amountOutMin, address, deadline] })
   }
 
   const isBusy  = isApproving || isApproveConfirming || isSwapping || isSwapConfirming
@@ -200,6 +193,7 @@ export default function SwapPage() {
     if (!isConnected)  return 'Connect Wallet to Swap'
     if (!hasAmount)    return 'Enter an amount'
     if (overBal)       return 'Insufficient balance'
+    if (needsWrapFirst) return `Wrap ETH → WETH first`
     if (noRoute)       return 'No route found'
     if (noLiquidity)   return 'Insufficient liquidity'
     if (isApproving || isApproveConfirming) return 'Approving…'
@@ -207,7 +201,7 @@ export default function SwapPage() {
     if (swapSuccess)   return '✓ Swap complete!'
     if (badPrice)      return 'Pool price too far from market'
     if (needsApproval) return `Approve ${TOKENS[tokenIn].symbol}`
-    if (isWrapUnwrap)  return tokenIn === 'AVAX' ? 'Wrap AVAX → WAVAX' : 'Unwrap WAVAX → AVAX'
+    if (isWrapUnwrap)  return tokenIn === 'ETH' ? 'Wrap ETH → WETH' : 'Unwrap WETH → ETH'
     return `Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
   }
 
@@ -234,12 +228,12 @@ export default function SwapPage() {
   })()
   const badPrice = marketDeviation > 25   // pool price more than 25% worse than market
 
-  const disabled = isConnected && (!hasAmount || overBal || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy || badPrice)
+  const disabled = isConnected && (!hasAmount || overBal || needsWrapFirst || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy || badPrice)
 
   // Route label for display
   const routeLabel = isWrapUnwrap
     ? `${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
-    : route?.label.replace(/WAVAX/g, 'AVAX/WAVAX') ?? ''
+    : route?.label ?? ''
 
   return (
     <div className="max-w-lg mx-auto px-4 py-12">
@@ -285,7 +279,7 @@ export default function SwapPage() {
                 <span className="font-display font-semibold text-base">{TOKENS[tokenIn].symbol}</span>
                 <ChevronDown size={15} className="text-text-muted" />
               </button>
-              {TOKENS[tokenIn].address !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' && (
+              {TOKENS[tokenIn].address !== NATIVE_SENTINEL && (
                 <button
                   onClick={() => navigator.clipboard.writeText(TOKENS[tokenIn].address)}
                   title="Copy contract address"
@@ -331,7 +325,7 @@ export default function SwapPage() {
                 <span className="font-display font-semibold text-base">{TOKENS[tokenOut].symbol}</span>
                 <ChevronDown size={15} className="text-text-muted" />
               </button>
-              {TOKENS[tokenOut].address !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' && (
+              {TOKENS[tokenOut].address !== NATIVE_SENTINEL && (
                 <button
                   onClick={() => navigator.clipboard.writeText(TOKENS[tokenOut].address)}
                   title="Copy contract address"
@@ -358,7 +352,7 @@ export default function SwapPage() {
           <div className="mt-3 mx-1 p-3 bg-bg-base rounded-xl space-y-1.5">
             {[
               { label: 'Rate',   value: '1 : 1 (no price impact)' },
-              { label: 'Action', value: tokenIn === 'AVAX' ? 'Wrap AVAX → WAVAX' : 'Unwrap WAVAX → AVAX' },
+              { label: 'Action', value: tokenIn === 'ETH' ? 'Wrap ETH → WETH' : 'Unwrap WETH → ETH' },
               { label: 'Fee',    value: 'None' },
             ].map(item => (
               <div key={item.label} className="flex items-center justify-between">
@@ -406,7 +400,13 @@ export default function SwapPage() {
           </div>
         )}
 
-        {noRoute && hasAmount && (
+        {needsWrapFirst && (
+          <div className="mt-3 mx-1 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
+            The router only swaps ERC-20 tokens. Wrap ETH → WETH first (flip to the ETH/WETH pair above), then swap from WETH.
+          </div>
+        )}
+
+        {noRoute && hasAmount && !needsWrapFirst && (
           <div className="mt-3 mx-1 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
             No route found for {TOKENS[tokenIn].symbol} → {TOKENS[tokenOut].symbol}.
           </div>

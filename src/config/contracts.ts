@@ -1,208 +1,45 @@
 // src/config/contracts.ts
-// Replace REPLACE_AFTER_DEPLOY with real addresses after mainnet deploy
+// AEON Protocol on Robinhood Chain (chain id 4663) — deployed 2026-07-02.
+// Fresh deployment: no v1/v2 legacy state, no CL/DLMM pools yet (vAMM only
+// at genesis; Algebra CL pools for the same pairs are planned as a follow-up).
+
+export const CHAIN_ID = 4663
 
 export const CONTRACTS = {
-  AeonRouter:       '0xD847Ea61394ADa3bb23B373349b58C90f9126A9F' as `0x${string}`,
-  // AEON v1 — still the token actually held/traded by all existing AMM pools below.
-  // Kept as TOKENS.AEON. Do not repoint pool trading logic to v2.
-  AeonToken:        '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`,
-  AeonFactory:      '0x3ECf287990A2365d48C6681620393aC1cdF3D268' as `0x${string}`,
-  AeonOracle:       '0x0b18B0f483f1caAaBB7505bCD8D1C3C43197Add9' as `0x${string}`,
-  LiquidityHelper:     '0xFe307aA9b7514949Ee1a0F8a64E951d9277B62CA' as `0x${string}`,
-  PairRegistry:        '0xcfcb643d8f51d640e0b81257340c1ca344238f48' as `0x${string}`,
-  // AEON v2 stack — deployed 2026-07-02. v1's mint role was permanently
-  // dead-ended (EmissionsEngine had no path to reassign AeonToken.emissionsEngine,
-  // and v1's AeonVoter.createGauge() only ever produced fake, codeless gauge
-  // addresses — see AeonVoterV2.sol / EmissionsEngineV2.sol audit notes).
-  // Governance/emissions now run on v2; existing pools still trade v1 AEON.
-  AeonTokenV2:         '0x4173e412b85164Bb592668ce674627752934868B' as `0x${string}`,
-  AeonSwap:            '0x2A85a6634c2EFaA33e441d3C28B6aaDc72A70376' as `0x${string}`, // 1:1 v1→v2 migration
-  AeonVotingEscrow:    '0xd2252ce511DdC0D44A5Aa333e6b729bE8192C040' as `0x${string}`,
-  TheFurnace:          '0x7863970e4888D1cFC7C3fB5A7E6C9e301cc5085C' as `0x${string}`,
-  AeonVoter:           '0x001Af1382370c42c730BF9eed0beD450B07db89a' as `0x${string}`,
-  BuybackEngine:       '0x8538C90eE4008FB11376714d75C5517CB529E536' as `0x${string}`,
-  FeeDistributor:      '0x5F0DCd63a350b4347A13195B95FB5556b7557122' as `0x${string}`,
-  AeonGaugeFactory:    '0x84fF0cCBc41cfA1Bdd8384A958aF272cC9EA74Bb' as `0x${string}`,
-  EmissionsEngine:     '0xE42c5602f0E38524E94c765639E65aB9a2f10FB3' as `0x${string}`,
-  // Trader Joe LB v2.2 — deployed 2026-06-30 to Avalanche C-Chain
-  LBFactory:           '0xDa37277dE28547BfCE9431281560B60Cea00B1Af' as `0x${string}`,
-  LBRouter:            '0x93B1754B48Fdb8C0519975B01cD5c35957066Ab9' as `0x${string}`,
-  LBQuoter:            '0x1dfe97A9555d09F08ae72c96a18702a232221e8C' as `0x${string}`,
-  // Algebra Integral — CL position manager deployed to Avalanche C-Chain
-  AlgebraPositionManager: '0xe35ff3f8F55Af4E79FbFc19250fFf405c95Da910' as `0x${string}`,
+  AeonToken:           '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`,
+  MinterProxy:         '0x05b04A4344520Bb08201Bd9460ec9d37aD5f7918' as `0x${string}`,
+  AeonVotingEscrow:    '0x0b18B0f483f1caAaBB7505bCD8D1C3C43197Add9' as `0x${string}`,
+  TheFurnace:          '0xdeC58B16B24536bc5009Ad4AfDd0C48fF69F919A' as `0x${string}`,
+  AeonVoter:           '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`,
+  AeonGaugeFactory:    '0x044f2A04Ca5D521293E6687D9a2953cf2B27a3C1' as `0x${string}`,
+  BuybackEngine:       '0xe159282352fbD7aF64C22d581cf6338C382b7c5A' as `0x${string}`,
+  FeeDistributor:      '0x772C2Ba92278D47B3A76b3f97b26A5c74d7F7975' as `0x${string}`,
+  EmissionsEngine:     '0xf34feaA8a05b81D8FC0c66cA8F0621475e88C8b6' as `0x${string}`,
+  AeonOracle:          '0x5A1E28EE00C4e83De000C7ffa5b59B22B45BD9BD' as `0x${string}`,
+  ConstantUsdFeed:     '0x182e8039659F8110D47a87BEad1FAAaEf981781d' as `0x${string}`,
+  AeonFactory:         '0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6' as `0x${string}`,
+  AeonRouter:          '0x4d188106175De919a971B0cB6F8A0e3E885a3410' as `0x${string}`,
+  LiquidityHelper:     '0x8e33182d3271e2902Ed36aCA77A79e28c8F22d4e' as `0x${string}`,
+  Whitelist:           '0x0337333fdCf79D08f4ac10321796A91f300b5a80' as `0x${string}`,
 } as const
 
-// Orphaned v1 governance contracts — read-only, kept only so users can see
-// legacy state (old burns, old votes) that isn't recognized by the v2 stack.
-// Burned tokens are permanently gone regardless (sent to 0xdead) — this is
-// just for visibility, not recovery.
-export const LEGACY_V1 = {
-  TheFurnace: '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`,
-} as const
-
-// Real AeonGauge contracts deployed by the old (v1) AeonGaugeFactory
-// (0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6). These were never registered
-// on any Voter's gauges mapping — orphaned, but fully functional: LP tokens
-// staked into them via deposit() are real ERC20 transfers and are still
-// sitting there right now. withdraw()/getReward() both still work.
-// pool: the underlying trading pool this gauge tracks (for labeling only).
-export const LEGACY_GAUGES = [
-  { gauge: '0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3' as `0x${string}`, pool: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489' as `0x${string}` },
-  { gauge: '0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434' as `0x${string}`, pool: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6' as `0x${string}` },
-  { gauge: '0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2' as `0x${string}`, pool: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
-  { gauge: '0x50bCeFB28502C8628Bc2564A0BFEB6D5D33EFA25' as `0x${string}`, pool: '0x29c818b0929F9D247157f7b17a49B89664C9efcE' as `0x${string}` },
-  { gauge: '0x6EE853608078a207A30836Eec6310974D4506c14' as `0x${string}`, pool: '0x6658A37c6F1544129CfBA898F827c64680db00b6' as `0x${string}` },
-  { gauge: '0x8323E657009aBBF1567A15294766203150908b10' as `0x${string}`, pool: '0xEF43D5718ec0e22e105e21b9292bE33a7daC5061' as `0x${string}` },
-  { gauge: '0xAbC3DA2cc75387Caf867B07bC272DF19d3Cff02C' as `0x${string}`, pool: '0xabCE7E6160dF0B1E7a300FfA55AC26843A59710b' as `0x${string}` },
-  { gauge: '0xb55dadbFb20912466F2961cF466f331Fe98706F1' as `0x${string}`, pool: '0x98F41ef967fC9105d83E5a1B44512C25ae15E53E' as `0x${string}` },
-  { gauge: '0x0B499B8c6BA886090ADd7C21f8e1810BDDD8277D' as `0x${string}`, pool: '0x1C95905E0C7D290A46E1d970BeCD315BE10b3421' as `0x${string}` },
-  { gauge: '0xd4F8574d3bC25FE20195Ce58a47d61D79bA7504b' as `0x${string}`, pool: '0x69174eFdFAE19af3BfbC45e2dbdccfC1A44FdE9b' as `0x${string}` },
-  { gauge: '0x35Bd4b5d17192649098aec846c790178A84A982b' as `0x${string}`, pool: '0xecB2EbB887cbbC810BA519906594185d8f1fc704' as `0x${string}` },
-  { gauge: '0xDf769BF01eE70e2f86aDC0417E0717D32c4586be' as `0x${string}`, pool: '0x954068b2289E2EdFA878f17C27b4ab1B015b77a7' as `0x${string}` },
-  { gauge: '0x2f8CBA007598cBb15FfABE7a826a9cC8576ed6be' as `0x${string}`, pool: '0x966fdDEBC8311Bb5a22c625129257213D54a6938' as `0x${string}` },
-  { gauge: '0x90d97Bc8991e6D32a5CF3c6E5684644194699a70' as `0x${string}`, pool: '0x45C0D4fffbe60fBC454F8dB0Eb2643aa139cb706' as `0x${string}` },
-  { gauge: '0x9ccB02D4D9994993f1D7B95298a93230E042B7E5' as `0x${string}`, pool: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7' as `0x${string}` },
-  { gauge: '0x312541E5EF7017f9AD27C10eA695EDC9529ba3D4' as `0x${string}`, pool: '0x1d891FC5954D777ABbb95fadAC8D7dE880b9F49a' as `0x${string}` },
-  { gauge: '0x932f5AC813465D6573b4649528dA593f213aEA81' as `0x${string}`, pool: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086' as `0x${string}` },
-  { gauge: '0x021033c66B9de3D11A3D7C5807C4B4a4Fe05958b' as `0x${string}`, pool: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b' as `0x${string}` },
-  { gauge: '0x12c2c9dC225cdcAdD17B8BA9A3cffb0183fa05DB' as `0x${string}`, pool: '0x4fAA1a9B62Be8465f33fB3c3ac767F6bc4e510DB' as `0x${string}` },
-  { gauge: '0xbB5e8A475fCF427AA5aB2627acE5aC58943d8bb6' as `0x${string}`, pool: '0xE82347882508179DDED4e74BD4645fad0895e0E7' as `0x${string}` },
-  { gauge: '0xfBcf062Cf9C6683dA16de58f6646965b7520647f' as `0x${string}`, pool: '0x29dFab19335Bcc8E05811d5F9d047372A391DB9C' as `0x${string}` },
-  { gauge: '0x7Eba4A5cf347cC14436c4fBe7635018A4e8C5E05' as `0x${string}`, pool: '0x1EdEE242F3F1Af2B9B330557816459988a75378b' as `0x${string}` },
-  { gauge: '0x20da4403Cf7294b78F1b60F9e23174BDcFE693Ce' as `0x${string}`, pool: '0x2b97cEC6A8B1D90732E2c5Fe17433E647cDe62Cc' as `0x${string}` },
-  { gauge: '0x887faA05836c92fbd0081aE7F249a893fdBc33AD' as `0x${string}`, pool: '0x836Aeed458857E5Fd4134c7dAF7B36EE20B73DBc' as `0x${string}` },
-  { gauge: '0x3F3E49dA26A8534c58b0D63d71511bC0EaD5a16d' as `0x${string}`, pool: '0x1E173e4d5811F27E72300a214DeeF4eFCB3B6be8' as `0x${string}` },
-  { gauge: '0xF6D8BBf7299253A67A729AD245DcaD32a6125BDd' as `0x${string}`, pool: '0x27e4d2467584b7A370856BCedb1b7F460EF2462C' as `0x${string}` },
-  { gauge: '0xc79A7CE8eB6DDc52e651D5877D4659A88732de6F' as `0x${string}`, pool: '0xddbcC56993a6D44b24Bd9AF0A27000419B0d9B4F' as `0x${string}` },
-  { gauge: '0x0cE5229dB7ef9DA94DA95359e0fdF828BF16142c' as `0x${string}`, pool: '0xaA35b2EA1deB790585f9fd11d1878Dc0606091a3' as `0x${string}` },
-  { gauge: '0xa95d34E3F0A3a768fDF5199E9505496b11E855d0' as `0x${string}`, pool: '0xC84D3fb669b3b0369978E253dC2F1B7329F6D7eF' as `0x${string}` },
-  { gauge: '0x204Ed15c9eb0cC4a1Bf80FbEfc8d43c01327e070' as `0x${string}`, pool: '0xd9AE01537e4099ECAD113B52856a86148A0E6548' as `0x${string}` },
-  { gauge: '0x433627f321a4596E50c4B0edb29568438FeA2BE9' as `0x${string}`, pool: '0x306B89922bccea64545e701795Ffbf20FB5a0f70' as `0x${string}` },
-  { gauge: '0xEB97d2414269e9952544Cb1ddCC7Eb488a8746D2' as `0x${string}`, pool: '0xB39e555F18DEfc9D97fbFd08Fb4F88d784a44944' as `0x${string}` },
-  { gauge: '0xb24b32a0a16ADeF2E857c0a30cc1d3608880869D' as `0x${string}`, pool: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd' as `0x${string}` },
-  { gauge: '0x016DA438386b7e114a9A086B5F67049c08cBfd1A' as `0x${string}`, pool: '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77' as `0x${string}` },
-  { gauge: '0xbB9c311313d61a687b4744f42cd8C31B0C0F9128' as `0x${string}`, pool: '0x19aE273606588fb17D99572321eAD9b0B060DF00' as `0x${string}` },
-  { gauge: '0xD5704702dBF6C92F8b1a4B8D8F7DB1aE3415503F' as `0x${string}`, pool: '0xFb0b8D088691057fE08040f4364494c23B60c66C' as `0x${string}` },
-  { gauge: '0x5F85ec0BC2943C2402d1eEA76982796F958ecAcD' as `0x${string}`, pool: '0xB1a5295A8133097E389221df70Ee1dd021B088F0' as `0x${string}` },
-  { gauge: '0x78C11Cf0a088e26B0013B5C780B22E90a21171fB' as `0x${string}`, pool: '0xeDdBA3C2A4491D77e8d4b69502f7c862C538DC76' as `0x${string}` },
-  { gauge: '0x48871611388c136eeB5C777d58470ee837ccb43A' as `0x${string}`, pool: '0x04de9EE7b6355ec643DB415b2212734390fcB2F8' as `0x${string}` },
-  { gauge: '0x8F66195845a9fff978E85f024C3220507D9E6094' as `0x${string}`, pool: '0xeB55B531C1881751d6c83Ce343EE3870a3eD6CB3' as `0x${string}` },
-  { gauge: '0x0B20720D1a0c27E31aDf368e5B8eBa1aFF541107' as `0x${string}`, pool: '0x56889e4E8c9C1EAF7A91f436c32a1a9fDfcAcB0E' as `0x${string}` },
-  { gauge: '0xaE513e42584C4bCe4c3a9D0D14B8E819fE7462Ba' as `0x${string}`, pool: '0x0d94e9BD42CbddEEf6804B9813da82a42617CC01' as `0x${string}` },
-  { gauge: '0x898115c029fcAe28B1B0963A8936F0E000Af05c3' as `0x${string}`, pool: '0x10235223cBA1939eb5dEe67A08cF1c065BC17a6E' as `0x${string}` },
-  { gauge: '0xaDcC48e44dA5B50E550a44d4C0965ABD68eB9123' as `0x${string}`, pool: '0xeAC2C4b5b9a1169c7E46A44ED6a5e4836BA3bb95' as `0x${string}` },
-] as const
-
-// Static fallback for the "Legacy staked LP" section on /migrate — used when
-// the live multicall-based fetch can't be trusted for a specific wallet.
-// Empty for now: the one wallet previously snapshotted here (0x6D93ab...3a08,
-// 7 positions across AEON/WAVAX, AEON/USDC, WAVAX/USDC, WAVAX/GUNZ, GUNZ/USDC,
-// AEON/SPX6900) confirmed fully unstaked on-chain as of 2026-07-02 — all 7
-// gauge balances verified 0. Add new entries here only for wallets with a
-// live, unconfirmed-by-dynamic-fetch balance.
-export const KNOWN_LEGACY_POSITIONS: Record<string, { gauge: `0x${string}`; pool: `0x${string}`; amount: bigint; asOf: string }[]> = {}
+// Native ETH sentinel — convention used across the app for "the chain's
+// native gas token" wherever an ERC20 address is expected.
+export const NATIVE_SENTINEL = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `0x${string}`
 
 export const TOKENS = {
-  AEON:  { address: '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
-  AVAX:  { address: '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `0x${string}`, symbol: 'AVAX',  decimals: 18, name: 'Avalanche (Native)' },
-  WAVAX: { address: '0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7' as `0x${string}`, symbol: 'WAVAX',  decimals: 18, name: 'Wrapped AVAX' },
-  USDC:  { address: '0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E' as `0x${string}`, symbol: 'USDC',   decimals: 6,  name: 'USD Coin' },
-  WUSDT: { address: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7' as `0x${string}`, symbol: 'WUSDT',  decimals: 6,  name: 'Tether USD' },
-  WBTCE: { address: '0x50b7545627a5162F82A992c33b87aDc75187B218' as `0x${string}`, symbol: 'WBTC.e', decimals: 8,  name: 'Wrapped Bitcoin' },
-  WBTCB: { address: '0x152b9d0fdc40c096757f570a51e494bd4b943e50' as `0x${string}`, symbol: 'WBTC.b', decimals: 8,  name: 'Bitcoin (Native)' },
-  WETHE: { address: '0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB' as `0x${string}`, symbol: 'WETH.e', decimals: 18, name: 'Wrapped Ether' },
-  SPX:   { address: '0x6F911b6B39Bcc665A463129c94B5380A4387b7eb' as `0x${string}`, symbol: 'SPX6900', decimals: 18, name: 'SPX6900' },
-  GUNZ:  { address: '0x26deBD39D5eD069770406FCa10A0E4f8d2c743eB' as `0x${string}`, symbol: 'GUNZ',   decimals: 18, name: 'GUNZ' },
-  ARENA: { address: '0xB8d7710f7d8349A506b75dD184F05777c82dAd0C' as `0x${string}`, symbol: 'ARENA',  decimals: 18, name: 'Arena' },
-  COQ:   { address: '0x420FcA0121DC28039145009570975747295f2329' as `0x${string}`, symbol: 'COQ',    decimals: 18, name: 'Coq Inu' },
-  AEONV2:{ address: '0x4173e412b85164Bb592668ce674627752934868B' as `0x${string}`, symbol: 'AEON',   decimals: 18, name: 'Aeon' },
+  AEON:  { address: CONTRACTS.AeonToken,                                       symbol: 'AEON', decimals: 18, name: 'Aeon' },
+  ETH:   { address: NATIVE_SENTINEL,                                           symbol: 'ETH',  decimals: 18, name: 'Ether (Native)' },
+  WETH:  { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73' as `0x${string}`, symbol: 'WETH', decimals: 18, name: 'Wrapped Ether' },
+  USDG:  { address: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168' as `0x${string}`, symbol: 'USDG', decimals: 6,  name: 'USDG' },
 } as const
 
+// vAMM only at genesis. CL pools for the same pairs are planned as a
+// follow-up once Algebra Integral is deployed to Robinhood Chain.
 export const POOLS = [
-  // vAMM — token0/token1 verified on-chain
-  { name: 'AEON/WAVAX', token0: 'WAVAX', token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0xF03A55f9578c35Ec442e2F5dA040C20fF3A59489' as `0x${string}` },
-  { name: 'AEON/USDC',  token0: 'USDC',  token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0xFD029a446632618f218189d4a0B572896CD29B58' as `0x${string}` },
-  { name: 'WAVAX/USDC', token0: 'WAVAX', token1: 'USDC', type: 'vAMM', fee: '0.3%',  address: '0x3feb54fE68d7C6B2105EB0b06eD8c92cf0182086' as `0x${string}` },
-  // Previously untracked vAMM pool — found via legacy gauge audit (governor held 474 LP staked here)
-  { name: 'ARENA/AEON', token0: 'ARENA', token1: 'AEON', type: 'vAMM', fee: '1%',    address: '0x978968E5f40f1b183959Ca8852718e22A6f3fcE7' as `0x${string}` },
-  // AEON v2 vAMM pools — deployed 2026-07-02, seeded from deployer wallet, gauges registered on AeonVoterV2
-  { name: 'AEONV2/WAVAX', token0: 'AEONV2', token1: 'WAVAX', type: 'vAMM', fee: '1%', address: '0x3373422ED651b96A4f88C7BC338e7cD04B45273d' as `0x${string}` },
-  { name: 'AEONV2/SPX6900',token0: 'AEONV2', token1: 'SPX', type: 'vAMM', fee: '1%', address: '0x7064d03493454C4CD7d161fD94aA46E32d7fa793' as `0x${string}` },
-  { name: 'AEONV2/USDC',  token0: 'AEONV2', token1: 'USDC', type: 'vAMM', fee: '1%', address: '0x80D4e74dD9245b05B443c8200F73a321AfaE7012' as `0x${string}` },
-  { name: 'AEONV2/GUNZ',  token0: 'GUNZ', token1: 'AEONV2', type: 'vAMM', fee: '1%', address: '0x40454480D2BBdDcCb9074835F4Cfaa1583cb24c7' as `0x${string}` },
-  // CL — Algebra Integral pools deployed 2026-07-01, token0/token1 is actual on-chain ordering
-  { name: 'AEON/WAVAX',  token0: 'AEON',  token1: 'WAVAX', type: 'CL', fee: '0.25%', address: '0x141ebD42bdFB433d6038f109C9ec3215B50DECA0' as `0x${string}` },
-  { name: 'AEON/USDC',   token0: 'AEON',  token1: 'USDC',  type: 'CL', fee: '0.25%', address: '0x4919Fa49f2678AfFDB8E6F6d79B37F00eEdaBB9E' as `0x${string}` },
-  { name: 'AEON/WBTCE',  token0: 'AEON',  token1: 'WBTCE', type: 'CL', fee: '0.25%', address: '0x793d52b1aA39B99780498D0DfC3a4c16E866Cf1F' as `0x${string}` },
-  { name: 'AEON/WETHE',  token0: 'AEON',  token1: 'WETHE', type: 'CL', fee: '0.25%', address: '0xfB91EeC408fe053e0bc21D40C0481dd948ac8176' as `0x${string}` },
-  { name: 'AEON/GUNZ',   token0: 'AEON',  token1: 'GUNZ',  type: 'CL', fee: '0.25%', address: '0xE7F3F20a930076CC9593263CE7395821490394A9' as `0x${string}` },
-  { name: 'AEON/ARENA',  token0: 'AEON',  token1: 'ARENA', type: 'CL', fee: '0.25%', address: '0x4A969d19ba450847256a9C46fD2107fA9c30251f' as `0x${string}` },
-  { name: 'AEON/COQ',    token0: 'AEON',  token1: 'COQ',   type: 'CL', fee: '0.25%', address: '0x0bfB3cAb947b042ebB67e2F908f25dfe0903B9FA' as `0x${string}` },
-  { name: 'AEON/WBTCB',  token0: 'AEON',  token1: 'WBTCB', type: 'CL', fee: '0.25%', address: '0xd5d166fF75c0040b22d10F3C7552ef3BDf1b4b72' as `0x${string}` },
-  { name: 'AEON/SPX6900',token0: 'AEON',  token1: 'SPX',   type: 'CL', fee: '0.25%', address: '0x5c8C45B87Ed8cE4eA9efF3df5f9Be461daEf9711' as `0x${string}` },
-  { name: 'WAVAX/USDC',  token0: 'USDC',  token1: 'WAVAX', type: 'CL', fee: '0.25%', address: '0xdA9Ec34217a7FbA3099f1a0D6471089D9C969C5C' as `0x${string}` },
-  { name: 'WAVAX/WETHE', token0: 'WAVAX', token1: 'WETHE', type: 'CL', fee: '0.25%', address: '0x70EB6bc48bEdd1780C617A53a2473D954D658120' as `0x${string}` },
-  { name: 'WAVAX/WBTCE', token0: 'WAVAX', token1: 'WBTCE', type: 'CL', fee: '0.25%', address: '0x3a2dC7DAc3f46B6C70A76D48c391187B32d32970' as `0x${string}` },
-  { name: 'WAVAX/GUNZ',  token0: 'GUNZ',  token1: 'WAVAX', type: 'CL', fee: '0.25%', address: '0x605bF42f228Ca4A8277D6C487ff2e145104Fe357' as `0x${string}` },
-  { name: 'WAVAX/ARENA', token0: 'ARENA', token1: 'WAVAX', type: 'CL', fee: '0.25%', address: '0x6bC9FF1569F073b05422abeee18dAd4559a4FBDe' as `0x${string}` },
-  { name: 'WAVAX/COQ',   token0: 'COQ',   token1: 'WAVAX', type: 'CL', fee: '0.25%', address: '0x59397b073dc2AF3293E86aa09450B4B3820587C4' as `0x${string}` },
-  { name: 'WAVAX/WBTCB', token0: 'WAVAX', token1: 'WBTCB', type: 'CL', fee: '0.25%', address: '0x22AB413D078ec54E6491b4ec71Bb786CF57663C9' as `0x${string}` },
-  { name: 'WBTCE/USDC',  token0: 'USDC',  token1: 'WBTCE', type: 'CL', fee: '0.25%', address: '0x3EffEA68D7F585241D0c51B9736a12F01a68e5D0' as `0x${string}` },
-  { name: 'WETHE/USDC',  token0: 'USDC',  token1: 'WETHE', type: 'CL', fee: '0.25%', address: '0x5dbbB7f9E977475935Cbf47f618d0Eb52938C340' as `0x${string}` },
-  { name: 'GUNZ/USDC',   token0: 'GUNZ',  token1: 'USDC',  type: 'CL', fee: '0.25%', address: '0xb660a29575CFF72b1Cf90B7Ce23ed47cBB7be1f3' as `0x${string}` },
-  { name: 'ARENA/USDC',  token0: 'ARENA', token1: 'USDC',  type: 'CL', fee: '0.25%', address: '0x9AA84ca69AAa1c4F04aa119aeee322faC9080b49' as `0x${string}` },
-  { name: 'COQ/USDC',    token0: 'COQ',   token1: 'USDC',  type: 'CL', fee: '0.25%', address: '0x5C1745446F342Cec648e4D884074FB91b3F7f803' as `0x${string}` },
-  { name: 'USDC/WUSDT',  token0: 'USDC',  token1: 'WUSDT', type: 'CL', fee: '0.25%', address: '0xc96c5B6A11A2e6707d36c5f889FaA99627f46853' as `0x${string}` },
-  { name: 'WBTCB/WBTCE', token0: 'WBTCB', token1: 'WBTCE', type: 'CL', fee: '0.25%', address: '0x939831edAC3C89584Ea07Bf145a91265aaE5F5AC' as `0x${string}` },
-  // Full Range CL pools — original Algebra vAMM-style full-range pools, kept alongside the concentrated ones so LPs can still unstake/withdraw or provide full-range liquidity.
-  { name: 'AEON/WAVAX (Full Range)', token0: 'WAVAX', token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0xd1C58E8B2E3d54FbFf443F34c67952c033aC77a6' as `0x${string}` },
-  { name: 'AEON/USDC (Full Range)',  token0: 'USDC',  token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0x29c818b0929F9D247157f7b17a49B89664C9efcE' as `0x${string}` },
-  { name: 'AEON/WBTCE (Full Range)', token0: 'WBTCE', token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0x6658A37c6F1544129CfBA898F827c64680db00b6' as `0x${string}` },
-  { name: 'AEON/WETHE (Full Range)', token0: 'WETHE', token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0xEF43D5718ec0e22e105e21b9292bE33a7daC5061' as `0x${string}` },
-  { name: 'AEON/GUNZ (Full Range)',  token0: 'GUNZ',  token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0x98F41ef967fC9105d83E5a1B44512C25ae15E53E' as `0x${string}` },
-  { name: 'AEON/ARENA (Full Range)', token0: 'ARENA', token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0x1C95905E0C7D290A46E1d970BeCD315BE10b3421' as `0x${string}` },
-  { name: 'AEON/COQ (Full Range)',   token0: 'COQ',   token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0x69174eFdFAE19af3BfbC45e2dbdccfC1A44FdE9b' as `0x${string}` },
-  { name: 'WAVAX/USDC (Full Range)', token0: 'WAVAX', token1: 'USDC', type: 'CL',   fee: '0.05%', address: '0x5205f2D5BF9957335eF847E59F799Bc0a801B01b' as `0x${string}` },
-  { name: 'WAVAX/WETHE (Full Range)',token0: 'WETHE', token1: 'WAVAX',type: 'CL',   fee: '0.3%',  address: '0x4fAA1a9B62Be8465f33fB3c3ac767F6bc4e510DB' as `0x${string}` },
-  { name: 'WAVAX/WBTCE (Full Range)',token0: 'WBTCE', token1: 'WAVAX',type: 'CL',   fee: '0.3%',  address: '0xE82347882508179DDED4e74BD4645fad0895e0E7' as `0x${string}` },
-  { name: 'WAVAX/GUNZ (Full Range)', token0: 'GUNZ',  token1: 'WAVAX',type: 'CL',   fee: '0.3%',  address: '0x29dFab19335Bcc8E05811d5F9d047372A391DB9C' as `0x${string}` },
-  { name: 'WAVAX/ARENA (Full Range)',token0: 'WAVAX', token1: 'ARENA',type: 'CL',   fee: '0.3%',  address: '0x1EdEE242F3F1Af2B9B330557816459988a75378b' as `0x${string}` },
-  { name: 'WAVAX/COQ (Full Range)',  token0: 'COQ',   token1: 'WAVAX',type: 'CL',   fee: '0.3%',  address: '0x2b97cEC6A8B1D90732E2c5Fe17433E647cDe62Cc' as `0x${string}` },
-  { name: 'WBTCE/USDC (Full Range)', token0: 'WBTCE', token1: 'USDC', type: 'CL',   fee: '0.3%',  address: '0xC84D3fb669b3b0369978E253dC2F1B7329F6D7eF' as `0x${string}` },
-  { name: 'WETHE/USDC (Full Range)', token0: 'WETHE', token1: 'USDC', type: 'CL',   fee: '0.05%', address: '0x306B89922bccea64545e701795Ffbf20FB5a0f70' as `0x${string}` },
-  { name: 'GUNZ/USDC (Full Range)',  token0: 'GUNZ',  token1: 'USDC', type: 'CL',   fee: '0.3%',  address: '0x1cf8d65A13D7cA3a793a8E6bb28aA5Ae90ea14Dd' as `0x${string}` },
-  { name: 'ARENA/USDC (Full Range)', token0: 'ARENA', token1: 'USDC', type: 'CL',   fee: '0.3%',  address: '0xBf9F67B3dA5F27035DCEff232b0b31F08CfB2a77' as `0x${string}` },
-  { name: 'COQ/USDC (Full Range)',   token0: 'COQ',   token1: 'USDC', type: 'CL',   fee: '0.3%',  address: '0x19aE273606588fb17D99572321eAD9b0B060DF00' as `0x${string}` },
-  { name: 'USDC/WUSDT (Full Range)', token0: 'WUSDT', token1: 'USDC', type: 'CL',   fee: '0.01%', address: '0xB1a5295A8133097E389221df70Ee1dd021B088F0' as `0x${string}` },
-  { name: 'AEON/WBTCB (Full Range)',  token0: 'WBTCB', token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0x04de9ee7b6355ec643db415b2212734390fcb2f8' as `0x${string}` },
-  { name: 'WAVAX/WBTCB (Full Range)', token0: 'WBTCB', token1: 'WAVAX',type: 'CL',   fee: '0.3%',  address: '0xeb55b531c1881751d6c83ce343ee3870a3ed6cb3' as `0x${string}` },
-  { name: 'AEON/SPX6900 (Full Range)', token0: 'SPX',  token1: 'AEON', type: 'CL',   fee: '0.3%',  address: '0x56889e4e8c9c1eaf7a91f436c32a1a9fdfcacb0e' as `0x${string}` },
-  // DLMM — real Trader Joe LB v2.2 pairs deployed 2026-06-30
-  // tokenX is the "priced" asset, tokenY is the quote (LB ordering)
-  // binStep is actual LB binStep (basis points per bin)
-  { name: 'AEON/WAVAX', token0: 'AEON',  token1: 'WAVAX', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xbA292A7bB1F27A9F37aF0d29a633A574249a0Ceb' as `0x${string}` },
-  { name: 'AEON/USDC',  token0: 'AEON',  token1: 'USDC',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xdCc749323Ebc82fa73BC40d76598D8cEbb42ff28' as `0x${string}` },
-  { name: 'AEON/WBTCE', token0: 'AEON',  token1: 'WBTCE', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x39b6f6AE9345938CCAe6B7627e6e8DCc97272C49' as `0x${string}` },
-  { name: 'AEON/WETHE', token0: 'AEON',  token1: 'WETHE', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xc304E547991502a13a93f95431bF81d68738F9b2' as `0x${string}` },
-  { name: 'AEON/GUNZ',  token0: 'AEON',  token1: 'GUNZ',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xD3CFAAe7CfA5B909Ef4572B6f50aBb2a8affC7a1' as `0x${string}` },
-  { name: 'AEON/ARENA', token0: 'AEON',  token1: 'ARENA', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x9f992b3C9F1108956DAF7Fef26740A99647a52cb' as `0x${string}` },
-  { name: 'AEON/COQ',   token0: 'AEON',  token1: 'COQ',   type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x75d2Cb746c484451a913bF1D7Afb25528aB095c6' as `0x${string}` },
-  { name: 'AEON/WBTCB', token0: 'AEON',  token1: 'WBTCB', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x8426379EdB14b7be2395AdB3eFc6662A70e7dBC0' as `0x${string}` },
-  { name: 'AEON/SPX6900',token0: 'AEON', token1: 'SPX',   type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x55099A2307FE072cdbE5050d725133BfB3f86b93' as `0x${string}` },
-  { name: 'WAVAX/USDC', token0: 'WAVAX', token1: 'USDC',  type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0xdf9C7DAA6278c4026865dFf438261c92dfE82dF4' as `0x${string}` },
-  { name: 'WAVAX/WETHE',token0: 'WAVAX', token1: 'WETHE', type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0x8074bfC5758A93cAC70b8ED9Be242c152D6Da3f5' as `0x${string}` },
-  { name: 'WAVAX/WBTCE',token0: 'WAVAX', token1: 'WBTCE', type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0x84a1C69D376CD4861DBD6201b0145DaD1D9A85F1' as `0x${string}` },
-  { name: 'WAVAX/GUNZ', token0: 'WAVAX', token1: 'GUNZ',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x35970292c5bd867C717E3185554738609BDED102' as `0x${string}` },
-  { name: 'WAVAX/ARENA',token0: 'WAVAX', token1: 'ARENA', type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x4B4dC6A027189FfC1D9bF976D146bcB5697EeC37' as `0x${string}` },
-  { name: 'WAVAX/COQ',  token0: 'WAVAX', token1: 'COQ',   type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x3D5FAeaCFEC59d031DDd3Ae9b6DB25Bdade7eb7E' as `0x${string}` },
-  { name: 'WAVAX/WBTCB',token0: 'WAVAX', token1: 'WBTCB', type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0x4FC4895D801a7Cae8403686b5AC2E5D17d70279c' as `0x${string}` },
-  { name: 'WBTCE/USDC', token0: 'WBTCE', token1: 'USDC',  type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0x3BdAa6d818dA6B55D1496E918b24CF43623f298A' as `0x${string}` },
-  { name: 'WETHE/USDC', token0: 'WETHE', token1: 'USDC',  type: 'DLMM', fee: '0.1%',  binStep: 10,  address: '0xd384f78f376C4927b91946E9D9Ef009eaCfA0dce' as `0x${string}` },
-  { name: 'GUNZ/USDC',  token0: 'GUNZ',  token1: 'USDC',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xAd6F3ee4A6D05f3EB5BD958467DA9f5665FB0C01' as `0x${string}` },
-  { name: 'ARENA/USDC', token0: 'ARENA', token1: 'USDC',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0x3859f8487231d955F7f1498f186FB3086a674AE4' as `0x${string}` },
-  { name: 'COQ/USDC',   token0: 'COQ',   token1: 'USDC',  type: 'DLMM', fee: '0.25%', binStep: 25,  address: '0xbCbAb0aB380C1c222D63b12E1f7bF17e7B881fCC' as `0x${string}` },
-  { name: 'USDC/WUSDT', token0: 'WUSDT', token1: 'USDC',  type: 'DLMM', fee: '0.05%', binStep: 5,   address: '0x54DF1C2B3487f7738Dbc448Dd7838497d93Bc4dd' as `0x${string}` },
-  { name: 'WBTCB/WBTCE',token0: 'WBTCB', token1: 'WBTCE', type: 'DLMM', fee: '0.05%', binStep: 5,   address: '0x62E1208D1FF4333Af4621Fd93101696DC23bB685' as `0x${string}` },
+  { name: 'AEON/ETH',  token0: 'AEON', token1: 'WETH', type: 'vAMM', fee: '1%',   address: '0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3' as `0x${string}` },
+  { name: 'AEON/USDG', token0: 'AEON', token1: 'USDG', type: 'vAMM', fee: '1%',   address: '0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434' as `0x${string}` },
+  { name: 'ETH/USDG',  token0: 'WETH', token1: 'USDG', type: 'vAMM', fee: '0.3%', address: '0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2' as `0x${string}` },
 ]
 
 export const CL_RANGE_PRESETS = [
@@ -212,17 +49,18 @@ export const CL_RANGE_PRESETS = [
   { key: 'full',   label: 'Full Range', desc: '0 → ∞',   pctLow: -99.9,  pctHigh: 99999  },
 ]
 
+// Genesis + ongoing tokenomics — mirrors EmissionsEngineRH.sol / FeeDistributorV3.sol / BuybackEngineV3.sol
 export const EPOCH_CONFIG = {
-  epochLength:         604800,
-  bootstrapEpochs:     2,
-  bootstrapAmount:     '250000000000000000000',
-  emissionRatio:       10,
-  feeVoterSplit:       95,
-  feeBuybackSplit:     5,
-  emissionVoterSplit:  95,
-  emissionFurnaceSplit:5,
-  minStakeUSD:         '5000000000000000000',
-  poolCreationFeeUSD:  '500000000000000000000',
+  epochLength:            604800,
+  emissionRatio:           10,     // tokensToMint = feesUSD / emissionRatio / aeonPrice
+  emissionVoterSplit:      95,     // of each mint: 95% to voters
+  emissionFurnaceSplit:     5,     // of each mint: 5% to Furnace bonus
+  feeVoterSplit:           80,     // of raw collected fees: 80% straight to voters
+  feeBuybackSplit:         20,     // of raw collected fees: 20% to BuybackEngine
+  buybackBurnSplit:        50,     // of that 20%: 50% swapped to AEON and burned
+  buybackRedistributeSplit:50,     // of that 20%: 50% swapped to AEON and redistributed to Furnace burners
+  genesisTotal:            '90000000000000000000000',  // 90,000 AEON
+  genesisLpEach:           '20000000000000000000000',  // 20,000 AEON -> each of AEON/ETH, AEON/USDG
+  genesisBurn:             '50000000000000000000000',  // 50,000 AEON -> burned, voted 25k/25k
+  whitelistCostAEON:       '100000000000000000000',    // 100 AEON to unlock adding liquidity
 }
-
-export const CHAIN_ID = 43114

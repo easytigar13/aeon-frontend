@@ -1,15 +1,16 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, Droplets, BarChart3 } from 'lucide-react'
+import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, BarChart3 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
-import { POOLS, CONTRACTS, TOKENS } from '@/config/contracts'
-import { ERC20_ABI, GAUGE_ABI, GAUGE_FACTORY_ABI, PAIR_ABI, LIQUIDITY_HELPER_ABI, VOTER_ABI, BRIBE_ABI } from '@/config/abis'
+import { POOLS, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
+import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_ABI, VOTER_ABI, WHITELIST_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
+import { TokenIcon } from '@/components/TokenIcon'
 
 type PriceMap = Record<string, number | null>
 
@@ -20,15 +21,10 @@ function fmtUsd(n: number | null): string {
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function tokenIcon(sym: string) {
-  if (sym.startsWith('WBTC')) return '₿'
-  return sym[0]
-}
+const UNIQUE_POOLS = POOLS
 
-const UNIQUE_POOLS = POOLS.filter((p, _, arr) => arr.findIndex(x => x.address === p.address) === arr.indexOf(p))
-
-type Step    = 'idle' | 'approving' | 'approve_wait' | 'staking' | 'stake_wait' | 'done' | 'unstaking' | 'unstake_wait' | 'claiming' | 'claim_wait' | 'fee_claiming' | 'fee_claim_wait'
-type LiqStep = 'idle' | 'app0' | 'app0_wait' | 'app1' | 'app1_wait' | 'adding' | 'adding_wait' | 'rem_app' | 'rem_app_wait' | 'removing' | 'removing_wait' | 'done'
+type Step = 'idle' | 'approving' | 'approve_wait' | 'staking' | 'stake_wait' | 'done' | 'unstaking' | 'unstake_wait' | 'claiming' | 'claim_wait'
+type LiqStep = 'idle' | 'app0' | 'app0_wait' | 'app1' | 'app1_wait' | 'adding' | 'adding_wait'
 
 function parseFeeRate(fee: string): number { return parseFloat(fee.replace('%', '')) / 100 }
 function fmtApr(apr: number | null): string {
@@ -36,8 +32,6 @@ function fmtApr(apr: number | null): string {
   if (apr >= 1000) return '>1000%'
   return apr.toFixed(2) + '%'
 }
-
-// ─── Pool Price Hook ──────────────────────────────────────────────────────────
 
 function usePoolPrice(pool: typeof UNIQUE_POOLS[number]) {
   const { data: reservesData } = useReadContracts({
@@ -69,8 +63,6 @@ function usePoolPrice(pool: typeof UNIQUE_POOLS[number]) {
   return { hasLiquidity, price, priceLabel }
 }
 
-// ─── Inline Liquidity Panel ───────────────────────────────────────────────────
-
 function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   pool: typeof UNIQUE_POOLS[number]
   wallet: `0x${string}`
@@ -80,46 +72,42 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
 }) {
   const [amt0,      setAmt0]      = useState('')
   const [amt1,      setAmt1]      = useState('')
-  const [removeAmt, setRemoveAmt] = useState('')
   const [liqStep,   setLiqStep]   = useState<LiqStep>('idle')
   const [liqErr,    setLiqErr]    = useState('')
 
   const t0 = TOKENS[pool.token0 as keyof typeof TOKENS]
   const t1 = TOKENS[pool.token1 as keyof typeof TOKENS]
 
+  const { data: isWhitelistedRaw } = useReadContract({
+    address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'isWhitelisted', args: [wallet],
+  })
+  const isWhitelisted = !!isWhitelistedRaw
+
   const { data: bal0Raw,    refetch: refBal0   } = useReadContract({ address: t0?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t0, refetchInterval: 15000 } })
   const { data: bal1Raw,    refetch: refBal1   } = useReadContract({ address: t1?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t1, refetchInterval: 15000 } })
   const { data: lpBalRaw,   refetch: refLpBal  } = useReadContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { refetchInterval: 15000 } })
-  const { data: lpTsRaw                        } = useReadContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'totalSupply', query: { refetchInterval: 30000 } })
   const { data: allow0Raw,  refetch: refAllow0 } = useReadContract({ address: t0?.address, abi: ERC20_ABI, functionName: 'allowance', args: [wallet, CONTRACTS.LiquidityHelper], query: { enabled: !!t0 } })
   const { data: allow1Raw,  refetch: refAllow1 } = useReadContract({ address: t1?.address, abi: ERC20_ABI, functionName: 'allowance', args: [wallet, CONTRACTS.LiquidityHelper], query: { enabled: !!t1 } })
-  const { data: lpAllowRaw, refetch: refLpAl   } = useReadContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'allowance', args: [wallet, CONTRACTS.LiquidityHelper] })
 
   const bal0    = (bal0Raw    as bigint | undefined) ?? 0n
   const bal1    = (bal1Raw    as bigint | undefined) ?? 0n
   const lpBal   = (lpBalRaw  as bigint | undefined) ?? 0n
-  const lpTs    = (lpTsRaw   as bigint | undefined) ?? 0n
   const allow0  = (allow0Raw as bigint | undefined) ?? 0n
   const allow1  = (allow1Raw as bigint | undefined) ?? 0n
-  const lpAllow = (lpAllowRaw as bigint | undefined) ?? 0n
 
   const bal0Fmt = t0 ? parseFloat(formatUnits(bal0, t0.decimals)).toFixed(6) : '0'
   const bal1Fmt = t1 ? parseFloat(formatUnits(bal1, t1.decimals)).toFixed(6) : '0'
   const lpFmt   = parseFloat(formatUnits(lpBal, 18)).toFixed(8)
-  const lpShare = lpTs > 0n ? Number(lpBal) / Number(lpTs) : 0
-  const lpUsd   = tvlUsd && lpShare > 0 ? lpShare * tvlUsd : null
 
   const { writeContract: liqWrite, data: liqHash, error: liqWriteErr } = useWriteContract()
   const { isSuccess: liqSuccess } = useWaitForTransactionReceipt({ hash: liqHash })
 
   useEffect(() => {
     if (!liqSuccess) return
-    refBal0(); refBal1(); refLpBal(); refAllow0(); refAllow1(); refLpAl(); onDone?.()
-    if (liqStep === 'app0_wait')     { setLiqStep('app1');     return }
-    if (liqStep === 'app1_wait')     { setLiqStep('adding');   return }
-    if (liqStep === 'adding_wait')   { setLiqStep('done');     setAmt0(''); setAmt1(''); return }
-    if (liqStep === 'rem_app_wait')  { setLiqStep('removing'); return }
-    if (liqStep === 'removing_wait') { setLiqStep('idle');     setRemoveAmt(''); return }
+    refBal0(); refBal1(); refLpBal(); refAllow0(); refAllow1(); onDone?.()
+    if (liqStep === 'app0_wait')     { setLiqStep('app1');   return }
+    if (liqStep === 'app1_wait')     { setLiqStep('adding'); return }
+    if (liqStep === 'adding_wait')   { setLiqStep('idle');   setAmt0(''); setAmt1(''); return }
   }, [liqSuccess])
 
   useEffect(() => {
@@ -139,12 +127,6 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
       liqWrite({ address: CONTRACTS.LiquidityHelper, abi: LIQUIDITY_HELPER_ABI, functionName: 'addLiquidity', args: [pool.address as `0x${string}`, t0.address, a0, t1.address, a1, wallet] })
       setLiqStep('adding_wait')
     }
-    if (liqStep === 'rem_app') { liqWrite({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelper, maxUint256] }); setLiqStep('rem_app_wait') }
-    if (liqStep === 'removing') {
-      const amt = parseUnits(removeAmt || '0', 18)
-      liqWrite({ address: CONTRACTS.LiquidityHelper, abi: LIQUIDITY_HELPER_ABI, functionName: 'removeLiquidity', args: [pool.address as `0x${string}`, amt, wallet] })
-      setLiqStep('removing_wait')
-    }
   }, [liqStep])
 
   function autoFill0(v: string) {
@@ -161,25 +143,19 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   }
 
   function handleAdd() {
-    if (!amt0 || !amt1 || !t0 || !t1 || parseFloat(amt0) <= 0 || parseFloat(amt1) <= 0) return
+    if (!amt0 || !amt1 || !t0 || !t1 || parseFloat(amt0) <= 0 || parseFloat(amt1) <= 0 || !isWhitelisted) return
     if (allow0 < parseUnits(amt0, t0.decimals)) { setLiqStep('app0'); return }
     if (allow1 < parseUnits(amt1, t1.decimals)) { setLiqStep('app1'); return }
     setLiqStep('adding')
   }
-  function handleRemove() {
-    if (!removeAmt || parseFloat(removeAmt) <= 0) return
-    if (lpAllow < parseUnits(removeAmt, 18)) { setLiqStep('rem_app'); return }
-    setLiqStep('removing')
-  }
 
-  const addBusy = ['app0','app0_wait','app1','app1_wait','adding','adding_wait'].includes(liqStep)
-  const remBusy = ['rem_app','rem_app_wait','removing','removing_wait'].includes(liqStep)
+  const addBusy = ['app0', 'app0_wait', 'app1', 'app1_wait', 'adding', 'adding_wait'].includes(liqStep)
 
   function addLabel() {
+    if (!isWhitelisted) return 'Join Whitelist First'
     if (liqStep === 'app0' || liqStep === 'app0_wait') return `Approving ${t0?.symbol}…`
     if (liqStep === 'app1' || liqStep === 'app1_wait') return `Approving ${t1?.symbol}…`
     if (liqStep === 'adding' || liqStep === 'adding_wait') return 'Adding…'
-    if (liqStep === 'done') return '✓ Added!'
     const na0 = amt0 && t0 && parseFloat(amt0) > 0 && parseUnits(amt0, t0.decimals) > allow0
     const na1 = amt1 && t1 && parseFloat(amt1) > 0 && parseUnits(amt1, t1.decimals) > allow1
     if (na0 || na1) return 'Approve & Add'
@@ -187,83 +163,42 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   }
 
   return (
-    <div className="space-y-5">
-      {lpBal > 0n && (
-        <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 flex items-center justify-between text-xs">
-          <span className="text-text-muted">Your LP Position</span>
-          <div className="text-right">
-            <div className="font-mono text-emerald-400 font-bold">{lpFmt} LP</div>
-            <div className="text-text-muted font-mono">{lpUsd ? fmtUsd(lpUsd) : `${(lpShare * 100).toFixed(4)}% of pool`}</div>
-          </div>
+    <div className="space-y-3">
+      {!isWhitelisted && (
+        <div className="text-2xs text-violet-400 font-mono px-1">
+          Whitelist required to add liquidity — <a href="/whitelist" className="underline">join here</a> (100 AEON, one-time)
         </div>
       )}
-
-      <div className="grid md:grid-cols-2 gap-5">
-        {/* Add */}
-        <div className="space-y-2">
-          <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-2">Add Liquidity</div>
-          <div>
-            <div className="flex justify-between text-2xs text-text-muted mb-1">
-              <span>{t0?.symbol ?? pool.token0}</span>
-              <button onClick={() => autoFill0(bal0Fmt)} className="text-aeon-400 font-mono hover:underline">MAX {bal0Fmt}</button>
-            </div>
-            <input type="number" value={amt0} onChange={e => autoFill0(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
-          </div>
-          <div>
-            <div className="flex justify-between text-2xs text-text-muted mb-1">
-              <span>{t1?.symbol ?? pool.token1}</span>
-              <button onClick={() => autoFill1(bal1Fmt)} className="text-aeon-400 font-mono hover:underline">MAX {bal1Fmt}</button>
-            </div>
-            <input type="number" value={amt1} onChange={e => autoFill1(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
-          </div>
-          {!prices[pool.token0] && !prices[pool.token1] && (
-            <div className="text-2xs text-yellow-400 font-mono px-1">No price feed yet — enter both amounts manually to set the initial ratio</div>
-          )}
-          <button
-            disabled={!amt0 || !amt1 || parseFloat(amt0 || '0') <= 0 || parseFloat(amt1 || '0') <= 0 || addBusy || remBusy}
-            onClick={handleAdd}
-            className="btn-primary w-full text-sm py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40"
-          >
-            {addBusy && <Loader2 size={12} className="animate-spin" />}
-            {addLabel()}
-          </button>
+      <div>
+        <div className="flex justify-between text-2xs text-text-muted mb-1">
+          <span>{t0?.symbol ?? pool.token0}</span>
+          <button onClick={() => autoFill0(bal0Fmt)} className="text-aeon-400 font-mono hover:underline">MAX {bal0Fmt}</button>
         </div>
-
-        {/* Remove */}
-        <div className="space-y-2">
-          <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-2">Remove Liquidity</div>
-          <div>
-            <div className="flex justify-between text-2xs text-text-muted mb-1">
-              <span>LP Token Amount</span>
-              <button onClick={() => setRemoveAmt(lpFmt)} className="text-text-muted font-mono hover:underline hover:text-text-secondary">MAX {lpFmt}</button>
-            </div>
-            <input type="number" value={removeAmt} onChange={e => setRemoveAmt(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
-          </div>
-          <div className="text-2xs text-text-muted">
-            {lpBal > 0n
-              ? `Your LP: ${lpFmt}${lpUsd ? ` (${fmtUsd(lpUsd)})` : ''}`
-              : 'You have no LP tokens in this pool'}
-          </div>
-          <button
-            disabled={!removeAmt || parseFloat(removeAmt || '0') <= 0 || lpBal === 0n || addBusy || remBusy}
-            onClick={handleRemove}
-            className="btn-ghost border border-bg-border w-full text-sm py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40"
-          >
-            {remBusy && <Loader2 size={12} className="animate-spin" />}
-            {liqStep === 'rem_app' || liqStep === 'rem_app_wait' ? 'Approving LP…'
-              : liqStep === 'removing' || liqStep === 'removing_wait' ? 'Removing…'
-              : 'Remove Liquidity'}
-          </button>
-        </div>
+        <input type="number" value={amt0} onChange={e => autoFill0(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
       </div>
-
+      <div>
+        <div className="flex justify-between text-2xs text-text-muted mb-1">
+          <span>{t1?.symbol ?? pool.token1}</span>
+          <button onClick={() => autoFill1(bal1Fmt)} className="text-aeon-400 font-mono hover:underline">MAX {bal1Fmt}</button>
+        </div>
+        <input type="number" value={amt1} onChange={e => autoFill1(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
+      </div>
+      {!prices[pool.token0] && !prices[pool.token1] && (
+        <div className="text-2xs text-yellow-400 font-mono px-1">No price feed yet — enter both amounts manually to set the initial ratio</div>
+      )}
+      <button
+        disabled={!amt0 || !amt1 || parseFloat(amt0 || '0') <= 0 || parseFloat(amt1 || '0') <= 0 || addBusy || !isWhitelisted}
+        onClick={handleAdd}
+        className="btn-primary w-full text-sm py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40"
+      >
+        {addBusy && <Loader2 size={12} className="animate-spin" />}
+        {addLabel()}
+      </button>
       {liqErr && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{liqErr}</div>}
-      <div className="text-2xs text-text-muted text-center">Full-range liquidity · {pool.fee} fee tier · amounts auto-estimated from prices</div>
+      {lpBal > 0n && <div className="text-2xs text-text-muted text-center">Your LP: {lpFmt} · use the <a href="/liquidity" className="text-aeon-400 hover:underline">Liquidity</a> page to remove</div>}
     </div>
   )
 }
-
-// ─── Pool Row ─────────────────────────────────────────────────────────────────
 
 function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   pool: typeof UNIQUE_POOLS[number]
@@ -273,7 +208,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   prices: PriceMap
 }) {
   const [expanded,   setExpanded]   = useState(false)
-  // poolTab removed — only Earn tab shown
+  const [innerTab,   setInnerTab]   = useState<'earn' | 'liquidity'>('earn')
   const [stakeAmt,   setStakeAmt]   = useState('')
   const [unstakeAmt, setUnstakeAmt] = useState('')
   const [step,       setStep]       = useState<Step>('idle')
@@ -314,7 +249,6 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   })
   const allowance = (allowanceRaw as bigint | undefined) ?? 0n
 
-  // vAPR — gauge emission rate vs pool TVL
   const { data: rewardRateRaw } = useReadContract({
     address: gauge, abi: GAUGE_ABI, functionName: 'rewardRate',
     query: { enabled: !!gauge, refetchInterval: 60000 },
@@ -331,41 +265,6 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
     ? (Number(formatUnits(rewardRate, 18)) * 365 * 24 * 3600 * aeonPrice) / tvlUsd * 100
     : null
 
-  // Fee rewards — for veNFT voters
-  const { data: tokenIdRaw } = useReadContract({
-    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'lastVotedTokenId',
-    args: wallet ? [wallet] : undefined, query: { enabled: !!wallet && expanded, refetchInterval: 30000 },
-  })
-  const veTokenId = (tokenIdRaw as bigint | undefined)
-
-  const { data: bribeAddrRaw } = useReadContract({
-    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'internalBribes',
-    args: gauge ? [gauge] : undefined, query: { enabled: !!gauge && expanded },
-  })
-  const bribe = bribeAddrRaw && bribeAddrRaw !== '0x0000000000000000000000000000000000000000'
-    ? bribeAddrRaw as `0x${string}` : undefined
-
-  const tok0Addr = TOKENS[pool.token0 as keyof typeof TOKENS]?.address
-  const tok1Addr = TOKENS[pool.token1 as keyof typeof TOKENS]?.address
-  const tok0Dec  = TOKENS[pool.token0 as keyof typeof TOKENS]?.decimals ?? 18
-  const tok1Dec  = TOKENS[pool.token1 as keyof typeof TOKENS]?.decimals ?? 18
-
-  const { data: feeEarned0Raw, refetch: refetchFee0 } = useReadContract({
-    address: bribe, abi: BRIBE_ABI, functionName: 'earned',
-    args: veTokenId && tok0Addr ? [veTokenId, tok0Addr] : undefined,
-    query: { enabled: !!bribe && !!veTokenId && !!tok0Addr && veTokenId > 0n, refetchInterval: 30000 },
-  })
-  const { data: feeEarned1Raw, refetch: refetchFee1 } = useReadContract({
-    address: bribe, abi: BRIBE_ABI, functionName: 'earned',
-    args: veTokenId && tok1Addr ? [veTokenId, tok1Addr] : undefined,
-    query: { enabled: !!bribe && !!veTokenId && !!tok1Addr && veTokenId > 0n, refetchInterval: 30000 },
-  })
-  const fee0 = (feeEarned0Raw as bigint | undefined) ?? 0n
-  const fee1 = (feeEarned1Raw as bigint | undefined) ?? 0n
-  const fee0Fmt = fee0 > 0n ? parseFloat(formatUnits(fee0, tok0Dec)).toFixed(4) : '0'
-  const fee1Fmt = fee1 > 0n ? parseFloat(formatUnits(fee1, tok1Dec)).toFixed(4) : '0'
-  const hasFeeRewards = fee0 > 0n || fee1 > 0n
-
   const { writeContract, data: txHash, error: writeError } = useWriteContract()
   const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash })
 
@@ -376,7 +275,6 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
     if (step === 'stake_wait')      { setStep('done');     setStakeAmt('');   return }
     if (step === 'unstake_wait')    { setStep('idle');     setUnstakeAmt(''); return }
     if (step === 'claim_wait')      { setStep('idle');     return }
-    if (step === 'fee_claim_wait')  { setStep('idle');     refetchFee0(); refetchFee1(); return }
   }, [txSuccess])
 
   useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
@@ -404,11 +302,6 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
       writeContract({ address: gauge, abi: GAUGE_ABI, functionName: 'getReward', args: [wallet as `0x${string}`] })
       setStep('claim_wait')
     }
-    if (step === 'fee_claiming') {
-      if (!bribe || !veTokenId || !tok0Addr || !tok1Addr) { setStep('idle'); return }
-      writeContract({ address: bribe, abi: BRIBE_ABI, functionName: 'getReward', args: [veTokenId, [tok0Addr, tok1Addr] as `0x${string}`[]] })
-      setStep('fee_claim_wait')
-    }
   }, [step])
 
   function handleStake() {
@@ -417,7 +310,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
     setStep('staking')
   }
 
-  const isBusy = ['approving','approve_wait','staking','stake_wait','unstaking','unstake_wait','claiming','claim_wait','fee_claiming','fee_claim_wait'].includes(step)
+  const isBusy = ['approving', 'approve_wait', 'staking', 'stake_wait', 'unstaking', 'unstake_wait', 'claiming', 'claim_wait'].includes(step)
 
   function stakeLabel() {
     if (step === 'approving' || step === 'approve_wait') return 'Approving…'
@@ -438,8 +331,8 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
       >
         <div className="col-span-3 flex items-center gap-2">
           <div className="flex -space-x-1">
-            <div className="w-7 h-7 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-xs font-bold z-10">{tokenIcon(pool.token0)}</div>
-            <div className="w-7 h-7 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-xs font-bold">{tokenIcon(pool.token1)}</div>
+            <TokenIcon symbol={pool.token0} size={28} />
+            <TokenIcon symbol={pool.token1} size={28} />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
@@ -449,7 +342,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
                 : <span className="text-2xs px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-mono font-bold">● Empty</span>}
             </div>
             <div className="flex items-center gap-1 mt-0.5">
-              <span className={clsx('text-2xs font-mono font-bold', pool.type === 'vAMM' ? 'text-blue-400' : pool.type === 'CL' ? 'text-violet-400' : 'text-emerald-400')}>{pool.type}</span>
+              <span className="text-2xs font-mono font-bold text-blue-400">{pool.type}</span>
               <span className="text-2xs text-text-muted">· {pool.fee}</span>
               {poolPrice.priceLabel && <span className="text-2xs text-text-muted font-mono ml-1 hidden xl:inline">· {poolPrice.priceLabel}</span>}
             </div>
@@ -479,13 +372,14 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
       {expanded && (
         <div className="border-t border-bg-border bg-bg-raised">
           <div className="flex gap-1 px-4 pt-3">
-            <button className="flex items-center gap-1.5 px-4 py-1.5 rounded-t-lg text-xs font-medium border border-b-0 transition-all bg-bg-base border-bg-border text-text-primary">
-              <Coins size={11} /> Earn
-            </button>
+            {(['earn', 'liquidity'] as const).map(t => (
+              <button key={t} onClick={() => setInnerTab(t)} className={clsx('flex items-center gap-1.5 px-4 py-1.5 rounded-t-lg text-xs font-medium border border-b-0 transition-all', innerTab === t ? 'bg-bg-base border-bg-border text-text-primary' : 'border-transparent text-text-muted')}>
+                <Coins size={11} /> {t === 'earn' ? 'Earn' : 'Add Liquidity'}
+              </button>
+            ))}
           </div>
 
           <div className="px-4 pb-4 pt-0 bg-bg-base">
-            {/* Pool status bar */}
             <div className={clsx('my-4 p-3 rounded-xl flex items-center justify-between text-xs font-mono',
               poolPrice.hasLiquidity ? 'bg-emerald-500/5 border border-emerald-500/20' : 'bg-red-500/5 border border-red-500/20'
             )}>
@@ -495,94 +389,67 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
               {poolPrice.priceLabel && <span className="text-text-muted hidden sm:inline">{poolPrice.priceLabel}</span>}
             </div>
 
-            {!wallet
+            {innerTab === 'liquidity' ? (
+              !wallet
+                ? <div className="p-4 text-center text-sm text-text-muted">Connect wallet to add liquidity</div>
+                : <LiquidityPanel pool={pool} wallet={wallet} prices={prices} tvlUsd={tvlUsd} onDone={refetchLP} />
+            ) : !wallet
               ? <div className="p-4 text-center text-sm text-text-muted">Connect wallet to stake and earn</div>
               : !gauge
                 ? <div className="p-4 text-center text-xs text-yellow-400">Gauge not yet deployed for this pool</div>
                 : (
-                    <div className="grid md:grid-cols-2 gap-6">
-                      <div>
-                        <h4 className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Stake LP — Earn AEON Emissions</h4>
-                        <div className="space-y-3">
-                          <div className="flex items-center gap-2">
-                            <input type="number" value={stakeAmt} onChange={e => setStakeAmt(e.target.value)} placeholder="0.0" className="input-base flex-1 text-sm py-2" />
-                            <button onClick={() => setStakeAmt(lpFormatted)} className="text-xs text-aeon-400 font-mono hover:underline px-1">MAX</button>
-                            <button
-                              disabled={!stakeAmt || parseFloat(stakeAmt) <= 0 || isBusy}
-                              onClick={handleStake}
-                              className="btn-primary text-sm py-2 px-4 disabled:opacity-40 flex items-center gap-1 min-w-[110px] justify-center"
-                            >
-                              {(step === 'approving' || step === 'approve_wait' || step === 'staking' || step === 'stake_wait') && <Loader2 size={12} className="animate-spin" />}
-                              {stakeLabel()}
-                            </button>
-                          </div>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-text-muted">LP Balance: <span className="font-mono text-text-primary">{lpFormatted}</span></span>
-                            <span className="text-text-muted">Staked: <span className="font-mono text-text-primary">{stakedFormatted}</span></span>
-                          </div>
-                          {staked > 0n && (
-                            <div className="flex items-center gap-2">
-                              <input type="number" value={unstakeAmt} onChange={e => setUnstakeAmt(e.target.value)} placeholder="Unstake amount" className="input-base flex-1 text-sm py-2" />
-                              <button onClick={() => setUnstakeAmt(stakedFormatted)} className="text-xs text-text-muted font-mono hover:underline px-1">MAX</button>
-                              <button
-                                disabled={!unstakeAmt || parseFloat(unstakeAmt) <= 0 || isBusy}
-                                onClick={() => setStep('unstaking')}
-                                className="btn-ghost text-sm py-2 px-4 border border-bg-border disabled:opacity-40 flex items-center gap-1"
-                              >
-                                {(step === 'unstaking' || step === 'unstake_wait') && <Loader2 size={12} className="animate-spin" />}
-                                Unstake
-                              </button>
-                            </div>
-                          )}
-                          <div className="flex items-center justify-between p-3 bg-bg-raised rounded-xl">
-                            <span className="text-sm text-text-muted">Claimable AEON</span>
-                            <div className="flex items-center gap-2">
-                              <span className={clsx('font-mono font-bold text-sm', earned > 0n ? 'text-aeon-400' : 'text-text-muted')}>{earnedFormatted} AEON</span>
-                              <button
-                                disabled={earned === 0n || isBusy}
-                                onClick={() => setStep('claiming')}
-                                className="text-xs btn-ghost py-1 px-2 text-aeon-400 disabled:opacity-40 flex items-center gap-1"
-                              >
-                                {(step === 'claiming' || step === 'claim_wait') && <Loader2 size={10} className="animate-spin" />}
-                                Claim
-                              </button>
-                            </div>
-                          </div>
-                          {errMsg && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{errMsg}</div>}
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-2">
+                        <input type="number" value={stakeAmt} onChange={e => setStakeAmt(e.target.value)} placeholder="0.0" className="input-base flex-1 text-sm py-2" />
+                        <button onClick={() => setStakeAmt(lpFormatted)} className="text-xs text-aeon-400 font-mono hover:underline px-1">MAX</button>
+                        <button
+                          disabled={!stakeAmt || parseFloat(stakeAmt) <= 0 || isBusy}
+                          onClick={handleStake}
+                          className="btn-primary text-sm py-2 px-4 disabled:opacity-40 flex items-center gap-1 min-w-[110px] justify-center"
+                        >
+                          {(step === 'approving' || step === 'approve_wait' || step === 'staking' || step === 'stake_wait') && <Loader2 size={12} className="animate-spin" />}
+                          {stakeLabel()}
+                        </button>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-text-muted">LP Balance: <span className="font-mono text-text-primary">{lpFormatted}</span></span>
+                        <span className="text-text-muted">Staked: <span className="font-mono text-text-primary">{stakedFormatted}</span></span>
+                      </div>
+                      {staked > 0n && (
+                        <div className="flex items-center gap-2">
+                          <input type="number" value={unstakeAmt} onChange={e => setUnstakeAmt(e.target.value)} placeholder="Unstake amount" className="input-base flex-1 text-sm py-2" />
+                          <button onClick={() => setUnstakeAmt(stakedFormatted)} className="text-xs text-text-muted font-mono hover:underline px-1">MAX</button>
+                          <button
+                            disabled={!unstakeAmt || parseFloat(unstakeAmt) <= 0 || isBusy}
+                            onClick={() => setStep('unstaking')}
+                            className="btn-ghost text-sm py-2 px-4 border border-bg-border disabled:opacity-40 flex items-center gap-1"
+                          >
+                            {(step === 'unstaking' || step === 'unstake_wait') && <Loader2 size={12} className="animate-spin" />}
+                            Unstake
+                          </button>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between p-3 bg-bg-raised rounded-xl">
+                        <span className="text-sm text-text-muted">Claimable AEON</span>
+                        <div className="flex items-center gap-2">
+                          <span className={clsx('font-mono font-bold text-sm', earned > 0n ? 'text-aeon-400' : 'text-text-muted')}>{earnedFormatted} AEON</span>
+                          <button
+                            disabled={earned === 0n || isBusy}
+                            onClick={() => setStep('claiming')}
+                            className="text-xs btn-ghost py-1 px-2 text-aeon-400 disabled:opacity-40 flex items-center gap-1"
+                          >
+                            {(step === 'claiming' || step === 'claim_wait') && <Loader2 size={10} className="animate-spin" />}
+                            Claim
+                          </button>
                         </div>
                       </div>
-                      <div>
-                        <h4 className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Fee Rewards — From Your veNFT Vote</h4>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between p-3 bg-bg-raised rounded-xl">
-                            <span className="text-sm text-text-muted">{pool.token0} fees</span>
-                            <span className={`font-mono text-sm ${fee0 > 0n ? 'text-emerald-400 font-bold' : 'text-text-muted'}`}>{fee0Fmt}</span>
-                          </div>
-                          <div className="flex items-center justify-between p-3 bg-bg-raised rounded-xl">
-                            <span className="text-sm text-text-muted">{pool.token1} fees</span>
-                            <span className={`font-mono text-sm ${fee1 > 0n ? 'text-emerald-400 font-bold' : 'text-text-muted'}`}>{fee1Fmt}</span>
-                          </div>
-                          {veTokenId && veTokenId > 0n ? (
-                            <button
-                              disabled={!hasFeeRewards || isBusy || !bribe}
-                              onClick={() => setStep('fee_claiming')}
-                              className="w-full btn-ghost border border-bg-border text-sm py-2 flex items-center justify-center gap-1.5 disabled:opacity-40 text-emerald-400"
-                            >
-                              {(step === 'fee_claiming' || step === 'fee_claim_wait') && <Loader2 size={12} className="animate-spin" />}
-                              {hasFeeRewards ? 'Claim Fee Rewards' : 'No fee rewards yet'}
-                            </button>
-                          ) : (
-                            <div className="text-2xs text-text-muted text-center pt-1">Vote for this pool with your veNFT to earn fee rewards</div>
-                          )}
-                        </div>
-                      </div>
+                      {errMsg && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{errMsg}</div>}
                     </div>
                   )
             }
 
             <div className="mt-4 pt-3 border-t border-bg-border flex items-center justify-between">
-              <span className="text-2xs text-text-muted font-mono">{pool.address.slice(0,10)}…{pool.address.slice(-8)}</span>
-              <a href={`https://snowtrace.io/address/${pool.address}`} target="_blank" rel="noreferrer" className="text-2xs text-aeon-400 hover:underline font-mono">Snowtrace ↗</a>
+              <span className="text-2xs text-text-muted font-mono">{pool.address.slice(0, 10)}…{pool.address.slice(-8)}</span>
             </div>
           </div>
         </div>
@@ -590,8 +457,6 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
     </div>
   )
 }
-
-// ─── Earn Stats Hook ──────────────────────────────────────────────────────────
 
 function useEarnStats(wallet?: `0x${string}`) {
   const ZERO = '0x0000000000000000000000000000000000000000' as `0x${string}`
@@ -631,8 +496,6 @@ function useEarnStats(wallet?: `0x${string}`) {
   return { totalStaked, totalLPUnstaked, totalEarned, lpByAddr, stakedByAddr, earnedByAddr, fmtLP, fmtAEON }
 }
 
-// ─── Portfolio Tab ────────────────────────────────────────────────────────────
-
 function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
   wallet?: `0x${string}`
   prices: PriceMap
@@ -640,9 +503,9 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
   stakedByAddr: Record<string, bigint>
   tvlByAddr: Record<string, number | null>
 }) {
-  const { data: avaxBal } = useBalance({ address: wallet, query: { enabled: !!wallet, refetchInterval: 15000 } })
+  const { data: ethBal } = useBalance({ address: wallet, query: { enabled: !!wallet, refetchInterval: 15000 } })
 
-  const tokenEntries = Object.entries(TOKENS).filter(([k]) => k !== 'AVAX')
+  const tokenEntries = Object.entries(TOKENS).filter(([k]) => k !== 'ETH')
   const { data: tokenBals } = useReadContracts({
     contracts: tokenEntries.map(([, t]) => ({
       address: t.address as `0x${string}`,
@@ -654,9 +517,9 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
   })
 
   const tokens = [
-    { key: 'AVAX', symbol: 'AVAX', name: 'Avalanche (Native)', decimals: 18,
-      balance: avaxBal ? parseFloat(formatUnits(avaxBal.value, 18)) : null,
-      price: prices['WAVAX'] ?? null },
+    { key: 'ETH', symbol: 'ETH', name: 'Ether (Native)', decimals: 18,
+      balance: ethBal ? parseFloat(formatUnits(ethBal.value, 18)) : null,
+      price: prices['ETH'] ?? null },
     ...tokenEntries.map(([key, t], i) => {
       const raw = tokenBals?.[i]?.status === 'success' ? tokenBals[i].result as bigint : null
       return { key, symbol: t.symbol, name: t.name, decimals: t.decimals,
@@ -701,7 +564,6 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
 
   return (
     <div className="space-y-8">
-      {/* Summary */}
       <div className="card p-6 bg-gradient-to-r from-aeon-400/5 to-transparent">
         <div className="flex items-center gap-3 mb-3">
           <BarChart3 size={18} className="text-aeon-400" />
@@ -724,7 +586,6 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
         )}
       </div>
 
-      {/* Tokens */}
       <div>
         <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Token Balances</div>
         {!wallet ? (
@@ -738,9 +599,7 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
               return (
                 <div key={t.key} className="card px-4 py-3 flex items-center justify-between hover:border-bg-hover transition-colors">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center font-bold">
-                      {tokenIcon(t.symbol)}
-                    </div>
+                    <TokenIcon symbol={t.symbol} size={40} />
                     <div>
                       <div className="text-sm font-semibold text-text-primary">{t.symbol}</div>
                       <div className="text-2xs text-text-muted">{t.name}</div>
@@ -759,7 +618,6 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
         )}
       </div>
 
-      {/* LP Positions */}
       {wallet && lpPositions.length > 0 && (
         <div>
           <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">LP Positions</div>
@@ -768,13 +626,13 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
               <div key={pool.address} className="card px-4 py-3 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex -space-x-2">
-                    <div className="w-9 h-9 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-sm font-bold z-10">{tokenIcon(pool.token0)}</div>
-                    <div className="w-9 h-9 rounded-full bg-bg-raised border border-bg-border flex items-center justify-center text-sm font-bold">{tokenIcon(pool.token1)}</div>
+                    <TokenIcon symbol={pool.token0} size={36} />
+                    <TokenIcon symbol={pool.token1} size={36} />
                   </div>
                   <div>
                     <div className="text-sm font-semibold text-text-primary">{pool.name}</div>
                     <div className="flex gap-2 mt-0.5">
-                      <span className={clsx('text-2xs font-mono font-bold', pool.type === 'vAMM' ? 'text-blue-400' : pool.type === 'CL' ? 'text-violet-400' : 'text-emerald-400')}>{pool.type}</span>
+                      <span className="text-2xs font-mono font-bold text-blue-400">{pool.type}</span>
                       <span className="text-2xs text-text-muted">{pool.fee}</span>
                     </div>
                   </div>
@@ -799,8 +657,6 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
     </div>
   )
 }
-
-// ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function EarnPage() {
   const [mounted, setMounted] = useState(false)
@@ -849,7 +705,6 @@ export default function EarnPage() {
         )}
       </div>
 
-      {/* Top-level tabs */}
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-8 w-fit">
         {(['earn', 'portfolio'] as const).map(t => (
           <button key={t} onClick={() => setMainTab(t)}
@@ -872,13 +727,12 @@ export default function EarnPage() {
         />
       ) : (
         <>
-          {/* Summary cards */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             {[
               { label: 'My Staked LP',     value: isConnected ? `${stats.fmtLP(stats.totalStaked)} LP`     : '—', sub: 'across all gauges' },
               { label: 'Unstaked LP',      value: isConnected ? `${stats.fmtLP(stats.totalLPUnstaked)} LP`  : '—', sub: 'not yet earning'   },
               { label: 'Claimable Emiss.', value: isConnected ? `${stats.fmtAEON(stats.totalEarned)} AEON`  : '—', sub: 'from staked LP'    },
-              { label: 'Claimable Fees',   value: '— AEON',                                                         sub: 'from voted pools'  },
+              { label: 'Pools',            value: `${UNIQUE_POOLS.length}`,                                        sub: 'vAMM at genesis'  },
             ].map(s => (
               <div key={s.label} className="card p-4">
                 <div className="stat-label mb-1">{s.label}</div>
@@ -888,7 +742,6 @@ export default function EarnPage() {
             ))}
           </div>
 
-          {/* Filter + claim all */}
           <div className="flex items-center justify-between mb-4">
             <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl">
               {(['all', 'my'] as const).map(t => (
@@ -898,21 +751,17 @@ export default function EarnPage() {
                 </button>
               ))}
             </div>
-            <button disabled className="btn-primary text-sm py-2 px-4 flex items-center gap-2 opacity-40">
-              <Coins size={14} /> Claim All
-            </button>
           </div>
 
-          {/* Table header */}
           <div className="grid grid-cols-12 gap-2 px-4 mb-2">
-            {[['Pool','col-span-3'],['TVL','col-span-2 hidden md:block'],['APR','col-span-2'],['vAPR','col-span-2 hidden sm:block'],['My Stake','col-span-2'],['','col-span-1']].map(([h,cls]) => (
+            {[['Pool', 'col-span-3'], ['TVL', 'col-span-2 hidden md:block'], ['APR', 'col-span-2'], ['vAPR', 'col-span-2 hidden sm:block'], ['My Stake', 'col-span-2'], ['', 'col-span-1']].map(([h, cls]) => (
               <div key={h} className={clsx('text-2xs font-mono text-text-muted uppercase tracking-wider', cls)}>{h}</div>
             ))}
           </div>
 
           {filterTab === 'my' && isConnected && displayPools.length === 0 && (
             <div className="card p-8 text-center text-sm text-text-muted">
-              No LP positions found. Expand any pool below and click <strong>Liquidity</strong> to add your first deposit.
+              No LP positions found. Expand any pool below and click <strong>Add Liquidity</strong> to add your first deposit.
             </div>
           )}
 

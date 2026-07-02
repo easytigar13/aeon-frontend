@@ -6,7 +6,7 @@ import { PAIR_ABI } from '@/config/abis'
 
 export interface RouteStep {
   poolAddress: `0x${string}`
-  tokenIn:  string   // TOKENS key (never 'AVAX' — use 'WAVAX')
+  tokenIn:  string   // TOKENS key (never 'ETH' — use 'WETH')
   tokenOut: string
   feeBps:   bigint
   poolType: number   // 0=vAMM, 1=CL, 2=DLMM
@@ -16,12 +16,12 @@ export interface BestRoute {
   steps:        RouteStep[]
   amountOut:    bigint
   priceImpact:  number   // percent, single-hop only (0 for multi-hop)
-  label:        string   // e.g. "AEON → WAVAX → USDC"
+  label:        string   // e.g. "AEON → WETH → USDG"
   via:          string   // pool name(s)
 }
 
 // Hub tokens we route through for 2-hop
-const HUBS = ['WAVAX', 'USDC', 'AEON'] as const
+const HUBS = ['WETH', 'USDG', 'AEON'] as const
 
 function feeToBps(fee: string): bigint {
   return BigInt(Math.round(parseFloat(fee) * 100))
@@ -63,9 +63,9 @@ export function useRouting(
   tokenOutKey: string,
   amountIn:    bigint,
 ): BestRoute | null {
-  // Normalise AVAX → WAVAX for pool graph
-  const tkIn  = tokenInKey  === 'AVAX' ? 'WAVAX' : tokenInKey
-  const tkOut = tokenOutKey === 'AVAX' ? 'WAVAX' : tokenOutKey
+  // Normalise ETH → WETH for pool graph
+  const tkIn  = tokenInKey  === 'ETH' ? 'WETH' : tokenInKey
+  const tkOut = tokenOutKey === 'ETH' ? 'WETH' : tokenOutKey
 
   const pools = useMemo(() => {
     if (tkIn === tkOut) return []

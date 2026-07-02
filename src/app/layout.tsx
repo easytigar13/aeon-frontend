@@ -23,8 +23,8 @@ const spaceMono = Space_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'AEON Protocol — ve(3,3) DEX on Avalanche',
-  description: 'The first fee-anchored DEX. Emissions = Fees ÷ 10. Built on Avalanche C-Chain.',
+  title: 'AEON Protocol — ve(3,3) DEX on Robinhood Chain',
+  description: 'The first fee-anchored DEX. Emissions = Fees ÷ 10. Built on Robinhood Chain.',
   icons: {
     icon: '/logo.png',
     apple: '/logo.png',
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
   },
   openGraph: {
     title: 'AEON Protocol',
-    description: 'Fee-anchored ve(3,3) DEX on Avalanche',
+    description: 'Fee-anchored ve(3,3) DEX on Robinhood Chain',
     images: ['/og.png'],
   },
 }

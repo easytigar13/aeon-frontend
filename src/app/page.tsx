@@ -16,7 +16,7 @@ export default function HomePage() {
                         bg-aeon-400/10 border border-aeon-400/20 mb-8">
           <Zap size={12} className="text-aeon-400" />
           <span className="text-xs font-mono text-aeon-400 font-bold tracking-wider uppercase">
-            Fair Launch — Deployer holds 0 AEON
+            Live on Robinhood Chain — Genesis Epoch 0
           </span>
         </div>
 
@@ -27,7 +27,7 @@ export default function HomePage() {
         </h1>
 
         <p className="text-text-secondary text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed">
-          AEON is a ve(3,3) DEX on Avalanche where emissions are anchored to real trading fees.
+          AEON is a ve(3,3) DEX on Robinhood Chain where emissions are anchored to real trading fees.
           <br />
           <span className="font-mono text-aeon-400">Weekly Emissions = Last Epoch Fees ÷ 10</span>
         </p>
@@ -206,7 +206,7 @@ export default function HomePage() {
             {
               icon: <TrendingUp className="text-aeon-400" size={24} />,
               title: 'Trade & Generate Fees',
-              body: '46 pools across vAMM, CL, and DLMM. 95% of fees go to veNFT voters of each pool in the pool\'s native tokens.',
+              body: '3 pools at genesis — AEON/ETH, AEON/USDG, ETH/USDG. 80% of every fee goes straight to veNFT voters of that pool.',
               accent: 'aeon',
             },
             {
@@ -217,8 +217,8 @@ export default function HomePage() {
             },
             {
               icon: <Flame className="text-emerald-400" size={24} />,
-              title: 'Buybacks Burn Forever',
-              body: '5% of all fees are used to buy AEON on the open market and burn it permanently. Less supply = more value per token.',
+              title: 'Buybacks Burn & Reward',
+              body: '20% of fees route to the buyback engine — half swapped to AEON and burned forever, half redistributed in liquid AEON to Furnace burners.',
               accent: 'emerald',
             },
           ].map(item => (
@@ -251,13 +251,13 @@ export default function HomePage() {
             </h2>
             <p className="text-text-secondary text-lg max-w-xl mx-auto mb-8">
               Burn AEON permanently to receive a soulbound NFT with static voting power that never decays.
-              Earn 95% of protocol fee share + 5% emission bonus — forever.
+              Earn a share of every emission's Furnace bonus, plus liquid AEON from buyback redistribution — forever.
             </p>
             <div className="flex flex-wrap justify-center gap-4 mb-8">
               {[
                 { label: 'Voting Power', value: '1:1 with burned' },
                 { label: 'Power Decay', value: 'Never' },
-                { label: 'Fee Share', value: '95% of all fees' },
+                { label: 'Rewards', value: 'Emission bonus + buyback share' },
                 { label: 'Transferable', value: 'No — Soulbound' },
               ].map(item => (
                 <div key={item.label} className="card px-4 py-3 text-center min-w-[140px]">
@@ -273,63 +273,34 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Pool types */}
+      {/* Pools */}
       <section className="max-w-7xl mx-auto px-4 py-16">
         <div className="text-center mb-12">
           <h2 className="font-display font-bold text-3xl text-text-primary mb-3">
-            46 Pools at Launch
+            3 Pools at Genesis
           </h2>
-          <p className="text-text-secondary">Three pool types for every strategy</p>
+          <p className="text-text-secondary">vAMM to start — concentrated liquidity pools land next</p>
         </div>
 
         <div className="grid md:grid-cols-3 gap-6">
           {[
-            {
-              type: 'vAMM',
-              label: 'Constant Product',
-              desc: 'Classic x*y=k pools. Zero management, full range liquidity. Best for retail buying and aggregator routing.',
-              pools: ['AEON/AVAX 1%', 'AEON/USDC 1%', 'AVAX/USDC 0.3%'],
-              badge: 'pool-type-vamm',
-              count: '3 pools',
-            },
-            {
-              type: 'CL',
-              label: 'Concentrated Liquidity',
-              desc: 'Uniswap V3 style. Provide in ±2.5%, ±5%, ±10%, or full range. Higher capital efficiency, higher fees.',
-              pools: ['AEON/AVAX', 'AEON/USDC', 'WAVAX/USDC', '+17 more'],
-              badge: 'pool-type-cl',
-              count: '20 pools',
-            },
-            {
-              type: 'DLMM',
-              label: 'Discrete Liquidity Bins',
-              desc: 'Trader Joe LB style. Zero slippage within active bin. Bin steps from 1bps (stables) to 100bps (volatile).',
-              pools: ['USDC/USDT 1bps', 'AEON/AVAX 100bps', 'WBTCB/WBTCE 5bps', '+20 more'],
-              badge: 'pool-type-dlmm',
-              count: '23 pools',
-            },
+            { name: 'AEON / ETH',  desc: 'Seeded at genesis with 20,000 AEON paired against ETH.', fee: '1%' },
+            { name: 'AEON / USDG', desc: 'Seeded at genesis with 20,000 AEON paired against USDG.', fee: '1%' },
+            { name: 'ETH / USDG',  desc: 'The base trading pair between the chain\'s native asset and USDG.', fee: '0.3%' },
           ].map(item => (
-            <div key={item.type} className="card p-6">
+            <div key={item.name} className="card p-6">
               <div className="flex items-center justify-between mb-4">
-                <span className={item.badge}>{item.type}</span>
-                <span className="text-xs text-text-muted font-mono">{item.count}</span>
+                <span className="pool-type-vamm">vAMM</span>
+                <span className="text-xs text-text-muted font-mono">{item.fee} fee</span>
               </div>
-              <h3 className="font-display font-semibold text-text-primary mb-2">{item.label}</h3>
-              <p className="text-text-secondary text-sm mb-4 leading-relaxed">{item.desc}</p>
-              <div className="space-y-1">
-                {item.pools.map(p => (
-                  <div key={p} className="text-xs font-mono text-text-muted flex items-center gap-1">
-                    <span className="w-1 h-1 rounded-full bg-bg-border" />
-                    {p}
-                  </div>
-                ))}
-              </div>
+              <h3 className="font-display font-semibold text-text-primary mb-2">{item.name}</h3>
+              <p className="text-text-secondary text-sm leading-relaxed">{item.desc}</p>
             </div>
           ))}
         </div>
       </section>
 
-      {/* Pre-Genesis Protocol Liquidity */}
+      {/* Genesis Epoch */}
       <section className="max-w-7xl mx-auto px-4 py-8">
         <div className="card p-8 border-aeon-400/20 bg-gradient-to-r from-aeon-400/5 to-transparent">
           <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
@@ -338,23 +309,26 @@ export default function HomePage() {
             </div>
             <div className="flex-1">
               <h3 className="font-display font-bold text-xl text-text-primary mb-2">
-                Protocol-Owned Liquidity — Forever
+                Genesis Epoch — 90,000 AEON, Zero to the Team
               </h3>
               <p className="text-text-secondary text-sm leading-relaxed max-w-2xl">
-                10% of the total AEON supply is held by the protocol at genesis. This allocation is never sold — it is permanently deployed as liquidity in the AEON/USDC pool and continuously compounds. Every epoch, fees earned are re-added to the pool. This ensures baseline liquidity exists at all times and grows with the protocol, with no team extraction ever.
+                At genesis, the protocol minted 90,000 AEON exactly once. 20,000 went into AEON/ETH liquidity, 20,000 into AEON/USDG liquidity,
+                and 50,000 was burned via the Furnace and immediately voted 25,000/25,000 across both AEON pools — guaranteeing gauge weight
+                from day one. None of it went to a deployer wallet or a team allocation. After genesis, the protocol runs on pure fee-anchored
+                emissions, forever.
               </p>
               <div className="flex gap-4 mt-4 flex-wrap">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-aeon-400" />
-                  <span className="text-xs font-mono text-text-muted">10% of supply, protocol-controlled</span>
+                  <span className="text-xs font-mono text-text-muted">40,000 AEON seeded as pool liquidity</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span className="text-xs font-mono text-text-muted">100% compounding into AEON/USDC</span>
+                  <span className="text-xs font-mono text-text-muted">50,000 AEON burned permanently</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full bg-violet-400" />
-                  <span className="text-xs font-mono text-text-muted">Never withdrawable, never sold</span>
+                  <span className="text-xs font-mono text-text-muted">0 AEON to the team</span>
                 </div>
               </div>
             </div>
@@ -370,12 +344,11 @@ export default function HomePage() {
           </div>
           <div className="flex-1">
             <h3 className="font-display font-bold text-xl text-text-primary mb-2">
-              232 Tests. 232,000+ Executions.
+              Built and Tested Against Live Chain State
             </h3>
             <p className="text-text-secondary text-sm leading-relaxed">
-              Every attack vector tested: flash loans, oracle manipulation, MEV sandwiching, governance takeover,
-              reentrancy, gas griefing, approve race conditions, checkpoint DoS, and 15 additional edge cases.
-              All 232 tests passing with 1,000 fuzz runs each before mainnet deploy.
+              Every contract was tested against a live Robinhood Chain mainnet fork before deployment — TWAP directionality, oracle pricing,
+              whitelist gating, and the exact genesis mint/burn/vote split were all verified on-chain before a single transaction broadcast.
             </p>
           </div>
           <a

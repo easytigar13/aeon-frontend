@@ -4,13 +4,13 @@
 // https://support.geckoterminal.com/hc/en-us/requests/new as your "pairs endpoint".
 import { NextResponse } from 'next/server'
 import { createPublicClient, http, formatUnits } from 'viem'
-import { avalanche } from 'viem/chains'
+import { robinhoodChain } from '@/config/wagmi'
 import { POOLS, TOKENS } from '@/config/contracts'
 import { PAIR_ABI } from '@/config/abis'
 
 const client = createPublicClient({
-  chain: avalanche,
-  transport: http('https://api.avax.network/ext/bc/C/rpc'),
+  chain: robinhoodChain,
+  transport: http('https://rpc.mainnet.chain.robinhood.com'),
 })
 
 const CORS = {
@@ -63,7 +63,7 @@ export async function GET() {
     const priceNative = r0 > 0 ? (r1 / r0).toFixed(10) : '0'
 
     return {
-      chainId:      'avalanche',
+      chainId:      'robinhood-chain',
       dexId:        'aeondex',
       url:          `https://aeonprotocol.net/liquidity`,
       pairAddress:  pool.address,

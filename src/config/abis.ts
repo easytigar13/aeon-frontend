@@ -140,43 +140,12 @@ export const AEON_ROUTER_ABI = [
     ],
     outputs: [{ name: 'amountOut', type: 'uint256' }],
   },
-  {
-    name: 'swapExactAVAXForTokens',
-    type: 'function',
-    stateMutability: 'payable',
-    inputs: [
-      { name: 'routes', type: 'tuple[]', components: [
-        { name: 'tokenIn',  type: 'address' },
-        { name: 'tokenOut', type: 'address' },
-        { name: 'pool',     type: 'address' },
-        { name: 'poolType', type: 'uint8'   },
-        { name: 'feeBps',   type: 'uint24'  },
-      ]},
-      { name: 'amountOutMin', type: 'uint256' },
-      { name: 'to',           type: 'address' },
-      { name: 'deadline',     type: 'uint256' },
-    ],
-    outputs: [{ name: 'amountOut', type: 'uint256' }],
-  },
-  {
-    name: 'swapExactTokensForAVAX',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      { name: 'routes', type: 'tuple[]', components: [
-        { name: 'tokenIn',  type: 'address' },
-        { name: 'tokenOut', type: 'address' },
-        { name: 'pool',     type: 'address' },
-        { name: 'poolType', type: 'uint8'   },
-        { name: 'feeBps',   type: 'uint24'  },
-      ]},
-      { name: 'amountIn',     type: 'uint256' },
-      { name: 'amountOutMin', type: 'uint256' },
-      { name: 'to',           type: 'address' },
-      { name: 'deadline',     type: 'uint256' },
-    ],
-    outputs: [{ name: 'amountOut', type: 'uint256' }],
-  },
+] as const
+
+// WETH9-style wrap/unwrap — used for the native ETH <-> WETH pair directly
+export const WETH_ABI = [
+  { name: 'deposit',  type: 'function', stateMutability: 'payable',    inputs: [],                                  outputs: [] },
+  { name: 'withdraw', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'wad', type: 'uint256' }], outputs: [] },
 ] as const
 
 export const ERC20_ABI = [
@@ -343,23 +312,42 @@ export const VOTING_ESCROW_ABI = [
   },
 ] as const
 
+// EmissionsEngineRH.sol
 export const EMISSIONS_ENGINE_ABI = [
   {
-    name: 'weeklyEmissions',
+    name: 'lastMintAmount',
     type: 'function',
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
-    name: 'epochFees',
+    name: 'activePeriod',
     type: 'function',
     stateMutability: 'view',
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
-    name: 'lastEpochFees',
+    name: 'genesisDone',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'updatePeriod',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [{ name: 'period', type: 'uint256' }],
+  },
+] as const
+
+// FeeDistributorV3.sol
+export const FEE_DISTRIBUTOR_ABI = [
+  {
+    name: 'lastEpochFeesUSD',
     type: 'function',
     stateMutability: 'view',
     inputs: [],
@@ -367,13 +355,36 @@ export const EMISSIONS_ENGINE_ABI = [
   },
 ] as const
 
-export const VOTER_ABI_WHITELIST = [
+// WhitelistRH.sol — pay 100 AEON to the protocol treasury to permanently
+// unlock the ability to add liquidity via LiquidityHelperRH.
+export const WHITELIST_ABI = [
   {
-    name: 'whitelist',
+    name: 'joinWhitelist',
     type: 'function',
     stateMutability: 'nonpayable',
-    inputs: [{ name: '_token', type: 'address' }],
+    inputs: [],
     outputs: [],
+  },
+  {
+    name: 'isWhitelisted',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'account', type: 'address' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'WHITELIST_COST',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'treasury',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'address' }],
   },
 ] as const
 

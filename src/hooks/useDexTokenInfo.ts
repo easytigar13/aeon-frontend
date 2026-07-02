@@ -8,8 +8,8 @@ export type DexTokenInfo = {
   priceChange24h: number | null
 }
 
-// Native AVAX has no real contract; skip it and copy from WAVAX after fetching
-const TOKEN_ENTRIES = Object.entries(TOKENS).filter(([k]) => k !== 'AVAX')
+// Native ETH has no real contract; skip it and copy from WETH after fetching
+const TOKEN_ENTRIES = Object.entries(TOKENS).filter(([k]) => k !== 'ETH')
 
 const SESSION_KEY = 'aeon_dex_token_info_v2'
 const TTL = 5 * 60 * 1000
@@ -33,7 +33,7 @@ export function useDexTokenInfo(): Record<string, DexTokenInfo> {
       let tokenJson: any = { data: [], included: [] }
       try {
         const r = await fetch(
-          `https://api.geckoterminal.com/api/v2/networks/avax/tokens/multi/${addrs.join(',')}?include=top_pools`,
+          `https://api.geckoterminal.com/api/v2/networks/robinhood-chain/tokens/multi/${addrs.join(',')}?include=top_pools`,
           { headers: { Accept: 'application/json;version=20230302' } }
         )
         if (r.ok) tokenJson = await r.json()
@@ -53,7 +53,7 @@ export function useDexTokenInfo(): Record<string, DexTokenInfo> {
         if (inc.type === 'pool') {
           poolAddrById[inc.id] = inc.attributes?.address ?? ''
           const baseId: string = inc.relationships?.base_token?.data?.id ?? ''
-          baseByPoolId[inc.id] = baseId.replace(/^avax_/, '').toLowerCase()
+          baseByPoolId[inc.id] = baseId.replace(/^robinhood-chain_/, '').toLowerCase()
         }
       }
 
@@ -82,7 +82,7 @@ export function useDexTokenInfo(): Record<string, DexTokenInfo> {
           if (pool) {
             try {
               const r = await fetch(
-                `https://api.geckoterminal.com/api/v2/networks/avax/pools/${pool.poolAddr}/ohlcv/hour?limit=24&token=${pool.role}`,
+                `https://api.geckoterminal.com/api/v2/networks/robinhood-chain/pools/${pool.poolAddr}/ohlcv/hour?limit=24&token=${pool.role}`,
                 { headers: { Accept: 'application/json;version=20230302' } }
               )
               if (r.ok) {
@@ -102,8 +102,8 @@ export function useDexTokenInfo(): Record<string, DexTokenInfo> {
         })
       )
 
-      // Native AVAX: mirror WAVAX chart data
-      result['AVAX'] = result['WAVAX'] ?? { imageUrl: null, sparkline: [], priceChange24h: null }
+      // Native ETH: mirror WETH chart data
+      result['ETH'] = result['WETH'] ?? { imageUrl: null, sparkline: [], priceChange24h: null }
 
       setInfo(result)
       try {

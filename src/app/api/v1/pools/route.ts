@@ -3,13 +3,13 @@
 // Returns live reserves + token metadata for every unique AeonDEX pool.
 import { NextResponse } from 'next/server'
 import { createPublicClient, http, formatUnits } from 'viem'
-import { avalanche } from 'viem/chains'
-import { POOLS, TOKENS } from '@/config/contracts'
+import { robinhoodChain } from '@/config/wagmi'
+import { POOLS, TOKENS, CONTRACTS, CHAIN_ID } from '@/config/contracts'
 import { PAIR_ABI } from '@/config/abis'
 
 const client = createPublicClient({
-  chain: avalanche,
-  transport: http('https://api.avax.network/ext/bc/C/rpc'),
+  chain: robinhoodChain,
+  transport: http('https://rpc.mainnet.chain.robinhood.com'),
 })
 
 const CORS = {
@@ -89,10 +89,10 @@ export async function GET() {
 
   return NextResponse.json(
     {
-      chain_id:  43114,
+      chain_id:  CHAIN_ID,
       dex:       'AeonDEX',
-      factory:   '0x3ECf287990A2365d48C6681620393aC1cdF3D268',
-      router:    '0xD847Ea61394ADa3bb23B373349b58C90f9126A9F',
+      factory:   CONTRACTS.AeonFactory,
+      router:    CONTRACTS.AeonRouter,
       pair_type: 'UniswapV2-compatible',
       swap_selector: '0x022c0d9f',   // swap(uint256,uint256,address,bytes)
       updated_at: new Date().toISOString(),

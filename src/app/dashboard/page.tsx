@@ -5,7 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import { useReadContract } from 'wagmi'
 import { formatUnits } from 'viem'
 import { POOLS, CONTRACTS } from '@/config/contracts'
-import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI } from '@/config/abis'
+import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI, FEE_DISTRIBUTOR_ABI } from '@/config/abis'
 import { clsx } from 'clsx'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useTotalTVL } from '@/hooks/usePoolStats'
@@ -43,8 +43,8 @@ export default function DashboardPage() {
   const { data: veTotalSupply } = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'totalSupply' })
   const { data: veTokenCount }  = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId' })
   const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight' })
-  const { data: weeklyEmissions } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'weeklyEmissions' })
-  const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'epochFees' })
+  const { data: weeklyEmissions } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount' })
+  const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.FeeDistributor,  abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD' })
 
   const WEEK_MS       = 7 * 24 * 60 * 60 * 1000
   const WEEK_S        = 7 * 24 * 60 * 60
@@ -56,7 +56,7 @@ export default function DashboardPage() {
   const hours         = Math.floor((remaining % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
   const fmtDate       = (ms: number) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
   const epochLabel    = `${fmtDate(epochStartMs)} – ${fmtDate(epochEndMs)}`
-  const GENESIS_S     = 1751000000
+  const GENESIS_S     = 1782950400 // Robinhood Chain genesis epoch, 2026-07-02
   const protocolEpoch = Math.floor((now / 1000 - GENESIS_S) / WEEK_S) + 1
 
   // Epoch timing
@@ -72,9 +72,9 @@ export default function DashboardPage() {
       ? (volume24h * 7 * blendedFeePct) / 10 / aeonPrice
       : null
 
-  // Fees this epoch — prefer on-chain, fall back to volume estimate
+  // Fees this epoch — FeeDistributorV3.lastEpochFeesUSD is already USD-denominated (18 dec)
   const feesThisEpoch = epochFeesRaw
-    ? parseFloat(formatUnits(epochFeesRaw as bigint, 18)) * (aeonPrice ?? 0)
+    ? parseFloat(formatUnits(epochFeesRaw as bigint, 18))
     : (volume24h !== null)
       ? volume24h * elapsedDays * blendedFeePct
       : null
@@ -120,7 +120,7 @@ export default function DashboardPage() {
         {[
           { label: 'Total Value Locked', value: fmtUsd(totalTVL || null, true),   icon: <TrendingUp size={16} className="text-aeon-400" />,    delta: `${POOLS.length} pools` },
           { label: 'Volume 24h',         value: fmtUsd(volume24h, true),          icon: <BarChart3  size={16} className="text-violet-400" />,  delta: 'from on-chain swap events' },
-          { label: 'AEON Supply',        value: `${fmt18(aeonSupply)} AEON`,      icon: <Vote       size={16} className="text-emerald-400" />, delta: 'genesis: 1,000' },
+          { label: 'AEON Supply',        value: `${fmt18(aeonSupply)} AEON`,      icon: <Vote       size={16} className="text-emerald-400" />, delta: 'genesis: 90,000' },
           { label: 'AEON Burned',        value: `${fmt18(totalBurned)} AEON`,     icon: <Flame      size={16} className="text-red-400" />,     delta: `${burnedPct}% of supply` },
         ].map(kpi => (
           <div key={kpi.label} className="card p-4">
