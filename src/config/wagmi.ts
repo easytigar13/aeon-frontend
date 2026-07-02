@@ -1,15 +1,8 @@
 'use client'
 import { getDefaultConfig } from '@rainbow-me/rainbowkit'
-import { defineChain } from 'viem'
+import { robinhoodChain } from './chain'
 
-export const robinhoodChain = defineChain({
-  id: 4663,
-  name: 'Robinhood Chain',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-  rpcUrls: {
-    default: { http: ['https://rpc.mainnet.chain.robinhood.com'] },
-  },
-})
+export { robinhoodChain }
 
 export const wagmiConfig = getDefaultConfig({
   appName: 'AEON Protocol',

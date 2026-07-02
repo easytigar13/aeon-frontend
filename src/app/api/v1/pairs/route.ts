@@ -4,7 +4,7 @@
 // https://support.geckoterminal.com/hc/en-us/requests/new as your "pairs endpoint".
 import { NextResponse } from 'next/server'
 import { createPublicClient, http, formatUnits } from 'viem'
-import { robinhoodChain } from '@/config/wagmi'
+import { robinhoodChain } from '@/config/chain'
 import { POOLS, TOKENS } from '@/config/contracts'
 import { PAIR_ABI } from '@/config/abis'
 

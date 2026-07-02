@@ -3,7 +3,7 @@
 // Returns live reserves + token metadata for every unique AeonDEX pool.
 import { NextResponse } from 'next/server'
 import { createPublicClient, http, formatUnits } from 'viem'
-import { robinhoodChain } from '@/config/wagmi'
+import { robinhoodChain } from '@/config/chain'
 import { POOLS, TOKENS, CONTRACTS, CHAIN_ID } from '@/config/contracts'
 import { PAIR_ABI } from '@/config/abis'
 
