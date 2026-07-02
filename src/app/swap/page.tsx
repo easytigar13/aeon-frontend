@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { ArrowUpDown, Settings, ChevronDown, Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
@@ -34,6 +34,7 @@ function safeParseUnits(val: string, decimals: number): bigint {
 }
 
 const TOKEN_LIST = Object.entries(TOKENS).map(([key, val]) => ({ key: key as TokenKey, ...val }))
+const WETH_ADDR = TOKENS['WETH'].address
 
 function useTokenBalance(tokenKey: TokenKey, address?: `0x${string}`) {
   const token = TOKENS[tokenKey]
@@ -46,6 +47,11 @@ function useTokenBalance(tokenKey: TokenKey, address?: `0x${string}`) {
   if (!address || !data) return { formatted: '—', raw: 0n, decimals: 18 }
   return { formatted: parseFloat(formatUnits(data.value, data.decimals)).toFixed(4), raw: data.value, decimals: data.decimals }
 }
+
+// idle -> [wrap -> wrap_wait] -> [approve -> approve_wait] -> swap -> swap_wait -> [unwrap -> unwrap_wait] -> done
+// Every step but 'swap' is conditional on the token pair — a plain ERC20<->ERC20
+// swap with existing allowance skips straight from idle to swap.
+type Step = 'idle' | 'wrap' | 'wrap_wait' | 'approve' | 'approve_wait' | 'swap' | 'swap_wait' | 'unwrap' | 'unwrap_wait' | 'done'
 
 export default function SwapPage() {
   const [mounted, setMounted] = useState(false)
@@ -62,35 +68,51 @@ export default function SwapPage() {
   const [showSettings,      setShowSettings]      = useState(false)
   const [showTokenInModal,  setShowTokenInModal]  = useState(false)
   const [showTokenOutModal, setShowTokenOutModal] = useState(false)
+  const [step, setStep] = useState<Step>('idle')
+  const [manualErrMsg, setErrMsgState] = useState('')
 
   const balanceIn  = useTokenBalance(tokenIn,  address)
   const balanceOut = useTokenBalance(tokenOut, address)
   const prices     = usePrices()
 
+  // Direct ETH<->WETH pair: a single deposit()/withdraw() call, no router involved.
   const isWrapUnwrap = (tokenIn === 'ETH' && tokenOut === 'WETH') || (tokenIn === 'WETH' && tokenOut === 'ETH')
+  // Any other pair touching native ETH needs an auto wrap-then-swap or swap-then-unwrap chain,
+  // since AeonRouterRH only implements swapExactTokensForTokens (ERC20 in, ERC20 out).
+  const needsWrapStep   = tokenIn  === 'ETH' && !isWrapUnwrap
+  const needsUnwrapStep = tokenOut === 'ETH' && !isWrapUnwrap
 
-  const isNativeIn = TOKENS[tokenIn].address === NATIVE_SENTINEL
+  // The address actually approved/spent by the router for this swap — WETH when starting from native ETH.
+  const swapTokenInAddr = needsWrapStep ? WETH_ADDR : TOKENS[tokenIn].address
 
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
-    address: isNativeIn ? undefined : TOKENS[tokenIn].address,
+    address: swapTokenInAddr,
     abi: ERC20_ABI,
     functionName: 'allowance',
     args: address ? [address, CONTRACTS.AeonRouter] : undefined,
-    query: { enabled: !!address && !isNativeIn },
+    query: { enabled: !!address && !isWrapUnwrap },
   })
 
+  // Tracks the user's WETH balance so a swap-then-unwrap flow can unwrap exactly
+  // what was received, regardless of any WETH they already held beforehand.
+  const { refetch: refetchWethBal } = useBalance({
+    address, token: WETH_ADDR, query: { enabled: !!address && needsUnwrapStep },
+  })
+  const preSwapWethBalRef = useRef<bigint>(0n)
+
   const { writeContract, data: approveTxHash, isPending: isApproving, error: approveError } = useWriteContract()
-  const { writeContract: writeSwap, data: swapTxHash, isPending: isSwapping, error: swapError } = useWriteContract()
+  const { writeContract: writeAction, data: actionTxHash, isPending: isActing, error: actionError } = useWriteContract()
   const { isLoading: isApproveConfirming, isSuccess: approveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash })
-  const { isLoading: isSwapConfirming,   isSuccess: swapSuccess }    = useWaitForTransactionReceipt({ hash: swapTxHash })
+  const { isLoading: isActionConfirming, isSuccess: actionSuccess }   = useWaitForTransactionReceipt({ hash: actionTxHash })
 
-  useEffect(() => { if (approveSuccess) refetchAllowance() }, [approveSuccess])
+  const flip = useCallback(() => { setTokenIn(tokenOut); setTokenOut(tokenIn); setAmountIn(''); setStep('idle') }, [tokenIn, tokenOut])
 
-  const flip = useCallback(() => { setTokenIn(tokenOut); setTokenOut(tokenIn); setAmountIn('') }, [tokenIn, tokenOut])
+  // Reset the flow whenever the pair changes so a stale step never carries over.
+  useEffect(() => { setStep('idle') }, [tokenIn, tokenOut])
 
   const parsedAmountIn = safeParseUnits(amountIn, TOKENS[tokenIn].decimals)
 
-  // Multi-hop routing (skipped for wrap/unwrap)
+  // Multi-hop routing (skipped for wrap/unwrap) — useRouting already normalises ETH -> WETH internally.
   const route = useRouting(
     isWrapUnwrap ? '' : tokenIn,
     isWrapUnwrap ? '' : tokenOut,
@@ -112,7 +134,7 @@ export default function SwapPage() {
     : ''
 
   const hasAmount      = parsedAmountIn > 0n
-  const needsApproval  = !isNativeIn && hasAmount && allowance !== undefined && allowance < parsedAmountIn
+  const needsApproval  = !isWrapUnwrap && hasAmount && allowance !== undefined && allowance < parsedAmountIn
   const slippageSafe   = safeSlippage(slippage)          // always 0.01–49, never NaN
   const slippagePct    = slippageSafe / 100
   const highSlippage   = slippageSafe >= 5
@@ -136,19 +158,28 @@ export default function SwapPage() {
 
   function buildRouterSteps() {
     if (!route) return []
-    const wethAddr = TOKENS['WETH'].address
     return route.steps.map(step => ({
-      tokenIn:  step.tokenIn  === 'ETH' ? wethAddr : TOKENS[step.tokenIn  as keyof typeof TOKENS].address,
-      tokenOut: step.tokenOut === 'ETH' ? wethAddr : TOKENS[step.tokenOut as keyof typeof TOKENS].address,
+      tokenIn:  step.tokenIn  === 'ETH' ? WETH_ADDR : TOKENS[step.tokenIn  as keyof typeof TOKENS].address,
+      tokenOut: step.tokenOut === 'ETH' ? WETH_ADDR : TOKENS[step.tokenOut as keyof typeof TOKENS].address,
       pool:     step.poolAddress,
       poolType: 0,  // router only implements poolType=0; all pool types share the same swap interface
       feeBps:   Number(step.feeBps),
     }))
   }
 
-  // AeonRouterRH has no native-ETH swap entrypoints — only swapExactTokensForTokens.
-  // A real swap involving native ETH on either side needs to wrap/unwrap first.
-  const needsWrapFirst = hasAmount && !isWrapUnwrap && (tokenIn === 'ETH' || tokenOut === 'ETH')
+  // Fires the actual router swap. For swap-then-unwrap, snapshots the pre-swap
+  // WETH balance first so the success handler can unwrap exactly the delta.
+  async function fireSwap() {
+    if (!address) return
+    if (needsUnwrapStep) {
+      const fresh = await refetchWethBal()
+      preSwapWethBalRef.current = fresh.data?.value ?? 0n
+    }
+    const steps    = buildRouterSteps()
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
+    writeAction({ address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens', args: [steps, parsedAmountIn, amountOutMin, address, deadline] })
+    setStep('swap_wait')
+  }
 
   function handleSwapClick() {
     if (!isConnected) { openConnectModal?.(); return }
@@ -156,34 +187,83 @@ export default function SwapPage() {
 
     if (isWrapUnwrap) {
       if (tokenIn === 'ETH') {
-        writeSwap({ address: TOKENS['WETH'].address, abi: WETH_ABI, functionName: 'deposit', args: [], value: parsedAmountIn })
+        writeAction({ address: WETH_ADDR, abi: WETH_ABI, functionName: 'deposit', args: [], value: parsedAmountIn })
       } else {
-        writeSwap({ address: TOKENS['WETH'].address, abi: WETH_ABI, functionName: 'withdraw', args: [parsedAmountIn] })
+        writeAction({ address: WETH_ADDR, abi: WETH_ABI, functionName: 'withdraw', args: [parsedAmountIn] })
+      }
+      setStep('swap_wait') // reuses the same "done" landing as a plain swap; no unwrap follows a direct wrap/unwrap
+      return
+    }
+
+    if (!route) return
+
+    if (needsWrapStep) {
+      writeAction({ address: WETH_ADDR, abi: WETH_ABI, functionName: 'deposit', args: [], value: parsedAmountIn })
+      setStep('wrap_wait')
+      return
+    }
+
+    if (needsApproval) {
+      writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, maxUint256] })
+      setStep('approve_wait')
+      return
+    }
+
+    fireSwap()
+  }
+
+  // Advance the chain once each step's transaction confirms.
+  useEffect(() => {
+    if (!actionSuccess) return
+    if (step === 'wrap_wait') {
+      refetchAllowance().then(res => {
+        if ((res.data ?? 0n) < parsedAmountIn) {
+          writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, maxUint256] })
+          setStep('approve_wait')
+        } else {
+          fireSwap()
+        }
+      })
+      return
+    }
+    if (step === 'swap_wait') {
+      if (needsUnwrapStep) {
+        refetchWethBal().then(res => {
+          const delta = (res.data?.value ?? 0n) - preSwapWethBalRef.current
+          if (delta > 0n) {
+            writeAction({ address: WETH_ADDR, abi: WETH_ABI, functionName: 'withdraw', args: [delta] })
+            setStep('unwrap_wait')
+          } else {
+            setStep('done')
+          }
+        })
+      } else {
+        setStep('done')
       }
       return
     }
+    if (step === 'unwrap_wait') { setStep('done'); return }
+  }, [actionSuccess])
 
-    if (needsWrapFirst || !route) return
+  useEffect(() => {
+    if (!approveSuccess) return
+    refetchAllowance()
+    if (step === 'approve_wait') fireSwap()
+  }, [approveSuccess])
 
-    if (needsApproval) {
-      writeContract({ address: TOKENS[tokenIn].address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, maxUint256] })
-      return
-    }
+  useEffect(() => { if (approveError) { setErrMsgState(approveError.message); setStep('idle') } }, [approveError])
+  useEffect(() => { if (actionError)  { setErrMsgState(actionError.message);  setStep('idle') } }, [actionError])
+  useEffect(() => { if (hasAmount) setErrMsgState('') }, [amountIn, tokenIn, tokenOut])
 
-    const steps    = buildRouterSteps()
-    const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
-
-    writeSwap({ address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens', args: [steps, parsedAmountIn, amountOutMin, address, deadline] })
-  }
-
-  const isBusy  = isApproving || isApproveConfirming || isSwapping || isSwapConfirming
+  const isBusy  = isApproving || isApproveConfirming || isActing || isActionConfirming || (step !== 'idle' && step !== 'done')
+  const isFlowLocked = step !== 'idle' && step !== 'done' // freeze inputs mid-chain so amountOutMin/route stay consistent with the tx already in flight
 
   function sanitizeErr(msg?: string): string {
     if (!msg) return ''
     // Strip URLs and long hex strings that could be used for social engineering
     return msg.replace(/https?:\/\/\S+/g, '[url]').replace(/0x[0-9a-fA-F]{20,}/g, '[addr]').slice(0, 120)
   }
-  const errMsg  = sanitizeErr(approveError?.message ?? swapError?.message)
+  const errMsg  = sanitizeErr(manualErrMsg)
 
   const noRoute     = hasAmount && !route && !isWrapUnwrap
   const overBal     = hasAmount && balanceIn.raw > 0n && parsedAmountIn > balanceIn.raw
@@ -193,19 +273,21 @@ export default function SwapPage() {
     if (!isConnected)  return 'Connect Wallet to Swap'
     if (!hasAmount)    return 'Enter an amount'
     if (overBal)       return 'Insufficient balance'
-    if (needsWrapFirst) return `Wrap ETH → WETH first`
     if (noRoute)       return 'No route found'
     if (noLiquidity)   return 'Insufficient liquidity'
-    if (isApproving || isApproveConfirming) return 'Approving…'
-    if (isSwapping   || isSwapConfirming)   return 'Swapping…'
-    if (swapSuccess)   return '✓ Swap complete!'
+    if (step === 'wrap' || step === 'wrap_wait')       return 'Wrapping ETH…'
+    if (step === 'approve' || step === 'approve_wait') return `Approving ${needsWrapStep ? 'WETH' : TOKENS[tokenIn].symbol}…`
+    if (step === 'swap_wait' && !isWrapUnwrap)         return 'Swapping…'
+    if (step === 'unwrap' || step === 'unwrap_wait')   return 'Unwrapping to ETH…'
+    if (isWrapUnwrap && step === 'swap_wait')          return tokenIn === 'ETH' ? 'Wrapping…' : 'Unwrapping…'
+    if (step === 'done')   return '✓ Swap complete!'
     if (badPrice)      return 'Pool price too far from market'
     if (needsApproval) return `Approve ${TOKENS[tokenIn].symbol}`
     if (isWrapUnwrap)  return tokenIn === 'ETH' ? 'Wrap ETH → WETH' : 'Unwrap WETH → ETH'
+    if (needsWrapStep)   return `Wrap & Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
+    if (needsUnwrapStep) return `Swap & Unwrap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
     return `Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
   }
-
-  // disabled is computed after badPrice (declared below with priceIn/priceOut)
 
   function fmtUsd(n: number | null): string {
     if (!n || n <= 0) return ''
@@ -228,7 +310,7 @@ export default function SwapPage() {
   })()
   const badPrice = marketDeviation > 25   // pool price more than 25% worse than market
 
-  const disabled = isConnected && (!hasAmount || overBal || needsWrapFirst || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy || badPrice)
+  const disabled = isConnected && (!hasAmount || overBal || (noRoute && !isWrapUnwrap) || !!noLiquidity || isBusy || badPrice)
 
   // Route label for display
   const routeLabel = isWrapUnwrap
@@ -272,9 +354,9 @@ export default function SwapPage() {
             <span className="text-xs text-text-muted font-mono">Balance: {balanceIn.formatted}</span>
           </div>
           <div className="flex items-center gap-3">
-            <input type="number" value={amountIn} onChange={e => setAmountIn(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-2xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
+            <input type="number" value={amountIn} onChange={e => setAmountIn(e.target.value)} disabled={isFlowLocked} placeholder="0.0" className="flex-1 bg-transparent text-2xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:opacity-60" />
             <div className="flex flex-col items-end gap-0.5 shrink-0">
-              <button onClick={() => setShowTokenInModal(true)} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all">
+              <button onClick={() => !isFlowLocked && setShowTokenInModal(true)} disabled={isFlowLocked} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all disabled:opacity-60">
                 <TokenIcon symbol={tokenIn} size={28} />
                 <span className="font-display font-semibold text-base">{TOKENS[tokenIn].symbol}</span>
                 <ChevronDown size={15} className="text-text-muted" />
@@ -294,7 +376,7 @@ export default function SwapPage() {
             <span className="text-xs text-text-muted font-mono">{valueIn ? fmtUsd(valueIn) : '≈ $—'}</span>
             <div className="flex gap-1">
               {(['25', '50', 'MAX'] as const).map(label => (
-                <button key={label} onClick={() => setPercent(label === 'MAX' ? 100 : parseInt(label))} disabled={!isConnected} className="text-2xs text-text-muted hover:text-aeon-400 px-1.5 py-0.5 rounded border border-bg-border hover:border-aeon-400/30 transition-all font-mono disabled:opacity-40">
+                <button key={label} onClick={() => setPercent(label === 'MAX' ? 100 : parseInt(label))} disabled={!isConnected || isFlowLocked} className="text-2xs text-text-muted hover:text-aeon-400 px-1.5 py-0.5 rounded border border-bg-border hover:border-aeon-400/30 transition-all font-mono disabled:opacity-40">
                   {label === '25' ? '25%' : label === '50' ? '50%' : 'MAX'}
                 </button>
               ))}
@@ -304,7 +386,7 @@ export default function SwapPage() {
 
         {/* Flip */}
         <div className="flex justify-center -my-0.5 relative z-10">
-          <button onClick={flip} className="w-9 h-9 rounded-xl bg-bg-base border border-bg-border hover:border-aeon-400/50 hover:text-aeon-400 transition-all flex items-center justify-center text-text-muted">
+          <button onClick={flip} disabled={isFlowLocked} className="w-9 h-9 rounded-xl bg-bg-base border border-bg-border hover:border-aeon-400/50 hover:text-aeon-400 transition-all flex items-center justify-center text-text-muted disabled:opacity-60">
             <ArrowUpDown size={16} />
           </button>
         </div>
@@ -320,7 +402,7 @@ export default function SwapPage() {
               {amountOutFormatted || <span className="text-text-muted">0.0</span>}
             </div>
             <div className="flex flex-col items-end gap-0.5 shrink-0">
-              <button onClick={() => setShowTokenOutModal(true)} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all">
+              <button onClick={() => !isFlowLocked && setShowTokenOutModal(true)} disabled={isFlowLocked} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all disabled:opacity-60">
                 <TokenIcon symbol={tokenOut} size={28} />
                 <span className="font-display font-semibold text-base">{TOKENS[tokenOut].symbol}</span>
                 <ChevronDown size={15} className="text-text-muted" />
@@ -363,6 +445,16 @@ export default function SwapPage() {
           </div>
         )}
 
+        {/* Wrap/unwrap chain notice */}
+        {(needsWrapStep || needsUnwrapStep) && hasAmount && (
+          <div className="mt-3 mx-1 p-3 bg-bg-base rounded-xl space-y-1.5">
+            <div className="text-2xs text-text-muted">
+              {needsWrapStep && 'This swap wraps ETH → WETH automatically, then routes to your output token — confirm each step in your wallet.'}
+              {needsUnwrapStep && 'This swap routes to WETH, then unwraps to native ETH automatically — confirm each step in your wallet.'}
+            </div>
+          </div>
+        )}
+
         {/* High slippage warning */}
         {highSlippage && (
           <div className="mt-3 mx-1 p-2 rounded-xl bg-red-500/10 border border-red-500/30 text-xs text-red-400 text-center font-mono">
@@ -400,13 +492,7 @@ export default function SwapPage() {
           </div>
         )}
 
-        {needsWrapFirst && (
-          <div className="mt-3 mx-1 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
-            The router only swaps ERC-20 tokens. Wrap ETH → WETH first (flip to the ETH/WETH pair above), then swap from WETH.
-          </div>
-        )}
-
-        {noRoute && hasAmount && !needsWrapFirst && (
+        {noRoute && hasAmount && (
           <div className="mt-3 mx-1 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
             No route found for {TOKENS[tokenIn].symbol} → {TOKENS[tokenOut].symbol}.
           </div>
@@ -466,7 +552,7 @@ function TokenRow({ token, walletAddress, onSelect }: { token: typeof TOKEN_LIST
       <div>
         <div className="font-semibold text-sm text-text-primary">{token.symbol}</div>
         <div className="text-xs text-text-muted">{token.name}</div>
-        {token.address !== '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' && (
+        {token.address !== NATIVE_SENTINEL && (
           <div className="text-2xs font-mono text-text-muted/60">{token.address.slice(0, 6)}…{token.address.slice(-4)}</div>
         )}
       </div>
