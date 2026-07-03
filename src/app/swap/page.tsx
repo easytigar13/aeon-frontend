@@ -12,6 +12,7 @@ import { useRouting } from '@/hooks/useRouting'
 import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
 import { useVolume24h } from '@/hooks/useVolume24h'
+import { useDexScreenerPairs, dexTokenStats } from '@/hooks/useDexScreener'
 import { TokenIcon } from '@/components/TokenIcon'
 import { Sparkline } from '@/components/Sparkline'
 
@@ -97,6 +98,7 @@ export default function SwapPage() {
   const prices     = usePrices()
   const dexInfo    = useDexTokenInfo()
   const volResult  = useVolume24h(prices)
+  const dexScreenerPairs = useDexScreenerPairs()
 
   // Direct ETH<->WETH pair: a single deposit()/withdraw() call, no router involved.
   const isWrapUnwrap = (tokenIn === 'ETH' && tokenOut === 'WETH') || (tokenIn === 'WETH' && tokenOut === 'ETH')
@@ -341,9 +343,7 @@ export default function SwapPage() {
     : route?.label ?? ''
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-12">
-    <div className="flex flex-col lg:flex-row gap-6 lg:items-start">
-    <div className="w-full lg:max-w-lg mx-auto lg:mx-0">
+    <div className="max-w-lg mx-auto px-4 py-12">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display font-bold text-2xl text-text-primary">Swap</h1>
@@ -534,13 +534,23 @@ export default function SwapPage() {
           </button>
         </div>
       </div>
-    </div>
 
-    <div className="w-full lg:w-80 shrink-0 space-y-4">
-      <TokenInfoCard tokenKey={tokenIn} info={dexInfo[tokenIn]} price={prices[tokenIn] ?? null} onChainSparkline={volResult.priceHistory[tokenIn]} />
-      <TokenInfoCard tokenKey={tokenOut} info={dexInfo[tokenOut]} price={prices[tokenOut] ?? null} onChainSparkline={volResult.priceHistory[tokenOut]} />
-    </div>
-    </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+        <TokenInfoCard
+          tokenKey={tokenIn}
+          info={dexInfo[tokenIn]}
+          price={prices[tokenIn] ?? null}
+          onChainSparkline={volResult.priceHistory[tokenIn]}
+          dexStats={dexTokenStats(dexScreenerPairs, tokenIn)}
+        />
+        <TokenInfoCard
+          tokenKey={tokenOut}
+          info={dexInfo[tokenOut]}
+          price={prices[tokenOut] ?? null}
+          onChainSparkline={volResult.priceHistory[tokenOut]}
+          dexStats={dexTokenStats(dexScreenerPairs, tokenOut)}
+        />
+      </div>
 
       {(showTokenInModal || showTokenOutModal) && (
         <TokenSelectModal
@@ -562,20 +572,26 @@ export default function SwapPage() {
 // just shows none rather than a fake flat line.
 // ─────────────────────────────────────────────────────────────────────────
 
-function TokenInfoCard({ tokenKey, info, price, onChainSparkline }: {
+function TokenInfoCard({ tokenKey, info, price, onChainSparkline, dexStats }: {
   tokenKey: TokenKey
   info: ReturnType<typeof useDexTokenInfo>[string] | undefined
   price: number | null
   onChainSparkline: number[] | undefined
+  dexStats: ReturnType<typeof dexTokenStats>
 }) {
   const token = TOKENS[tokenKey]
-  const change = info?.priceChange24h ?? null
   const geckoSparkline = info?.sparkline ?? []
   const chainSparkline = onChainSparkline ?? []
 
-  // Prefer GeckoTerminal's hourly chart when it has data; otherwise fall back
-  // to a live chart built from this token's own real on-chain trades (see
-  // useVolume24h's priceHistory) rather than showing nothing.
+  // DexScreener actually indexes this chain (GeckoTerminal doesn't — confirmed
+  // 404 on every lookup), so prefer its price/change/volume when it has the
+  // token; GeckoTerminal's hourly chart is still the best chart source when
+  // present, otherwise fall back to a live chart built from this token's own
+  // real on-chain trades (useVolume24h's priceHistory) rather than nothing.
+  const displayPrice  = dexStats.priceUsd ?? price
+  const change        = dexStats.priceChange24h ?? info?.priceChange24h ?? null
+  const volume24h     = dexStats.volume24h
+
   const usingGecko = geckoSparkline.length >= 2
   const usingChain = !usingGecko && chainSparkline.length >= 2
   const sparkline = usingGecko ? geckoSparkline : chainSparkline
@@ -596,8 +612,8 @@ function TokenInfoCard({ tokenKey, info, price, onChainSparkline }: {
           <div className="text-xs text-text-muted truncate">{token.name}</div>
         </div>
         <div className="ml-auto text-right shrink-0">
-          <div className="font-mono text-sm text-text-primary">{fmtPrice(price)}</div>
-          {usingGecko && change !== null && (
+          <div className="font-mono text-sm text-text-primary">{fmtPrice(displayPrice)}</div>
+          {change !== null && (
             <div className={clsx('flex items-center justify-end gap-0.5 text-2xs font-mono mt-0.5', positive ? 'text-emerald-400' : 'text-red-400')}>
               {positive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
               {change >= 0 ? '+' : ''}{change.toFixed(2)}%
@@ -616,6 +632,12 @@ function TokenInfoCard({ tokenKey, info, price, onChainSparkline }: {
       )}
 
       <div className="mt-3 pt-3 border-t border-bg-border space-y-1.5">
+        {volume24h !== null && (
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-text-muted">Volume 24h</span>
+            <span className="font-mono text-text-secondary">${volume24h.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+          </div>
+        )}
         <div className="flex items-center justify-between text-xs">
           <span className="text-text-muted">In pools</span>
           <span className="font-mono text-text-secondary">{poolCount}</span>

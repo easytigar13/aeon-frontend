@@ -45,8 +45,32 @@ const POOL_ADDRESSES = [...new Set(POOLS.map(p => p.address))] as `0x${string}`[
 // token regardless of how POOLS happens to be ordered.
 const POOL_TOKEN0_CONTRACTS = POOL_ADDRESSES.map(addr => ({ address: addr, abi: PAIR_ABI, functionName: 'token0' } as const))
 
-// Try progressively smaller block ranges until one succeeds
-const RANGES = [43200n, 10000n, 2048n, 512n]
+// Robinhood Chain's real block time is ~0.2s (measured), nowhere near the
+// ~2s Ethereum-derived guess a fixed 43200-block range assumes — that guess
+// covered barely 2.4 real hours, not 24, and silently missed real swaps
+// that happened a few hours ago (confirmed: DexScreener showed real 24h
+// volume while this undercounted to $0). Measure the actual block time
+// each poll and convert 24h into the right block count instead of guessing.
+const SAMPLE_BLOCKS = 2000n
+const FALLBACK_BLOCKS_24H = 43200n // used only if the timestamp measurement itself fails
+
+async function blocksFor24h(client: NonNullable<ReturnType<typeof usePublicClient>>): Promise<bigint> {
+  try {
+    const latest = await client.getBlockNumber()
+    if (latest <= SAMPLE_BLOCKS) return latest
+    const [latestBlock, oldBlock] = await Promise.all([
+      client.getBlock({ blockNumber: latest }),
+      client.getBlock({ blockNumber: latest - SAMPLE_BLOCKS }),
+    ])
+    const dtSeconds = Number(latestBlock.timestamp - oldBlock.timestamp)
+    if (dtSeconds <= 0) return FALLBACK_BLOCKS_24H
+    const secondsPerBlock = dtSeconds / Number(SAMPLE_BLOCKS)
+    const blocks = BigInt(Math.ceil(86400 / secondsPerBlock))
+    return blocks < latest ? blocks : latest
+  } catch {
+    return FALLBACK_BLOCKS_24H
+  }
+}
 
 export interface VolumeResult {
   total: number | null
@@ -85,8 +109,15 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
 
       try {
         const currentBlock = await client!.getBlockNumber()
+        const primaryRange = await blocksFor24h(client!)
+        // Try the measured 24h range first; degrade to smaller windows only
+        // if the RPC itself rejects the range (e.g. a provider-side cap) —
+        // never silently accept a narrower window when the wide one just
+        // returned zero results, since "no real trades" and "range too
+        // small to see them" look identical otherwise.
+        const candidateRanges = [...new Set([primaryRange, 43200n, 10000n, 2048n, 512n])]
 
-        for (const range of RANGES) {
+        for (const range of candidateRanges) {
           const fromBlock = currentBlock > range ? currentBlock - range : 0n
           try {
             logs = await (client as any).getLogs({
