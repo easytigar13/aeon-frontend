@@ -11,6 +11,7 @@ import { AEON_ROUTER_ABI, ERC20_ABI, WETH_ABI } from '@/config/abis'
 import { useRouting } from '@/hooks/useRouting'
 import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
+import { useVolume24h } from '@/hooks/useVolume24h'
 import { TokenIcon } from '@/components/TokenIcon'
 import { Sparkline } from '@/components/Sparkline'
 
@@ -95,6 +96,7 @@ export default function SwapPage() {
   const balanceOut = useTokenBalance(tokenOut, address)
   const prices     = usePrices()
   const dexInfo    = useDexTokenInfo()
+  const volResult  = useVolume24h(prices)
 
   // Direct ETH<->WETH pair: a single deposit()/withdraw() call, no router involved.
   const isWrapUnwrap = (tokenIn === 'ETH' && tokenOut === 'WETH') || (tokenIn === 'WETH' && tokenOut === 'ETH')
@@ -535,8 +537,8 @@ export default function SwapPage() {
     </div>
 
     <div className="w-full lg:w-80 shrink-0 space-y-4">
-      <TokenInfoCard tokenKey={tokenIn} info={dexInfo[tokenIn]} price={prices[tokenIn] ?? null} />
-      <TokenInfoCard tokenKey={tokenOut} info={dexInfo[tokenOut]} price={prices[tokenOut] ?? null} />
+      <TokenInfoCard tokenKey={tokenIn} info={dexInfo[tokenIn]} price={prices[tokenIn] ?? null} onChainSparkline={volResult.priceHistory[tokenIn]} />
+      <TokenInfoCard tokenKey={tokenOut} info={dexInfo[tokenOut]} price={prices[tokenOut] ?? null} onChainSparkline={volResult.priceHistory[tokenOut]} />
     </div>
     </div>
 
@@ -560,13 +562,30 @@ export default function SwapPage() {
 // just shows none rather than a fake flat line.
 // ─────────────────────────────────────────────────────────────────────────
 
-function TokenInfoCard({ tokenKey, info, price }: { tokenKey: TokenKey; info: ReturnType<typeof useDexTokenInfo>[string] | undefined; price: number | null }) {
+function TokenInfoCard({ tokenKey, info, price, onChainSparkline }: {
+  tokenKey: TokenKey
+  info: ReturnType<typeof useDexTokenInfo>[string] | undefined
+  price: number | null
+  onChainSparkline: number[] | undefined
+}) {
   const token = TOKENS[tokenKey]
   const change = info?.priceChange24h ?? null
-  const positive = change === null || change >= 0
-  const sparkline = info?.sparkline ?? []
+  const geckoSparkline = info?.sparkline ?? []
+  const chainSparkline = onChainSparkline ?? []
+
+  // Prefer GeckoTerminal's hourly chart when it has data; otherwise fall back
+  // to a live chart built from this token's own real on-chain trades (see
+  // useVolume24h's priceHistory) rather than showing nothing.
+  const usingGecko = geckoSparkline.length >= 2
+  const usingChain = !usingGecko && chainSparkline.length >= 2
+  const sparkline = usingGecko ? geckoSparkline : chainSparkline
+  const positive = usingChain
+    ? (sparkline.length < 2 || sparkline[sparkline.length - 1] >= sparkline[0])
+    : (change === null || change >= 0)
+
   const poolCount = POOL_COUNT_BY_SYMBOL[tokenKey] ?? 0
   const explorerUrl = robinhoodChain.blockExplorers?.default.url
+  const isNative = token.address === NATIVE_SENTINEL
 
   return (
     <div className="card p-4">
@@ -578,7 +597,7 @@ function TokenInfoCard({ tokenKey, info, price }: { tokenKey: TokenKey; info: Re
         </div>
         <div className="ml-auto text-right shrink-0">
           <div className="font-mono text-sm text-text-primary">{fmtPrice(price)}</div>
-          {change !== null && (
+          {usingGecko && change !== null && (
             <div className={clsx('flex items-center justify-end gap-0.5 text-2xs font-mono mt-0.5', positive ? 'text-emerald-400' : 'text-red-400')}>
               {positive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
               {change >= 0 ? '+' : ''}{change.toFixed(2)}%
@@ -590,10 +609,10 @@ function TokenInfoCard({ tokenKey, info, price }: { tokenKey: TokenKey; info: Re
       {sparkline.length >= 2 ? (
         <div className="mt-3">
           <Sparkline prices={sparkline} positive={positive} width={280} height={52} />
-          <div className="text-2xs text-text-muted mt-1">24h · hourly</div>
+          <div className="text-2xs text-text-muted mt-1">{usingGecko ? '24h · hourly' : 'Recent trades · on-chain'}</div>
         </div>
       ) : (
-        <div className="text-2xs text-text-muted text-center py-4 mt-1">No chart data yet</div>
+        <div className="text-2xs text-text-muted text-center py-4 mt-1">No chart data yet — shows once this token trades</div>
       )}
 
       <div className="mt-3 pt-3 border-t border-bg-border space-y-1.5">
@@ -601,23 +620,23 @@ function TokenInfoCard({ tokenKey, info, price }: { tokenKey: TokenKey; info: Re
           <span className="text-text-muted">In pools</span>
           <span className="font-mono text-text-secondary">{poolCount}</span>
         </div>
-        {token.address !== NATIVE_SENTINEL && (
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-text-muted">Contract</span>
-            {explorerUrl ? (
-              <a
-                href={`${explorerUrl}/token/${token.address}`}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-1 font-mono text-aeon-400 hover:underline"
-              >
-                {token.address.slice(0, 6)}…{token.address.slice(-4)} <ExternalLink size={10} />
-              </a>
-            ) : (
-              <span className="font-mono text-text-secondary">{token.address.slice(0, 6)}…{token.address.slice(-4)}</span>
-            )}
-          </div>
-        )}
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-text-muted">{isNative ? 'Asset' : 'Contract'}</span>
+          {isNative ? (
+            <span className="font-mono text-text-secondary">Native token</span>
+          ) : explorerUrl ? (
+            <a
+              href={`${explorerUrl}/token/${token.address}`}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1 font-mono text-aeon-400 hover:underline"
+            >
+              {token.address.slice(0, 6)}…{token.address.slice(-4)} <ExternalLink size={10} />
+            </a>
+          ) : (
+            <span className="font-mono text-text-secondary">{token.address.slice(0, 6)}…{token.address.slice(-4)}</span>
+          )}
+        </div>
       </div>
     </div>
   )

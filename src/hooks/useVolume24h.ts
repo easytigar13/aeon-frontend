@@ -51,6 +51,11 @@ const RANGES = [43200n, 10000n, 2048n, 512n]
 export interface VolumeResult {
   total: number | null
   byPool: Record<string, number>
+  // token key -> chronological execution prices in USD, derived from real
+  // Swap events on that token's direct USDG-paired vAMM pool (USDG ~= $1).
+  // No third-party indexer involved — this is the same log fetch above,
+  // just also read for its price info. Empty until a real trade happens.
+  priceHistory: Record<string, number[]>
 }
 
 export function useVolume24h(prices: PriceMap): VolumeResult {
@@ -68,7 +73,7 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
   })
   onChainToken0Ref.current = token0Map
 
-  const [result, setResult] = useState<VolumeResult>({ total: null, byPool: {} })
+  const [result, setResult] = useState<VolumeResult>({ total: null, byPool: {}, priceHistory: {} })
 
   useEffect(() => {
     if (!client) return
@@ -105,6 +110,7 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
       const p = pricesRef.current
       let totalUsd = 0
       const byPool: Record<string, number> = {}
+      const priceHistory: Record<string, number[]> = {}
 
       for (const log of logs) {
         const poolAddr = log.address.toLowerCase()
@@ -129,7 +135,8 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
           args = decoded.args
         } catch { continue }
 
-        const { amount0In, amount1In } = args as { amount0In: bigint; amount1In: bigint }
+        const { amount0In, amount1In, amount0Out, amount1Out } = args as
+          { amount0In: bigint; amount1In: bigint; amount0Out: bigint; amount1Out: bigint }
         const t0 = TOKENS[key0 as keyof typeof TOKENS]
         const t1 = TOKENS[key1 as keyof typeof TOKENS]
         const p0 = p[key0] ?? null
@@ -146,9 +153,33 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
           totalUsd += swapUsd
           byPool[poolAddr] = (byPool[poolAddr] ?? 0) + swapUsd
         }
+
+        // Execution price from a real trade, only when one side is USDG
+        // (~$1) — no oracle needed, the trade itself prices the other side.
+        if (t0 && t1 && (key0 === 'USDG' || key1 === 'USDG')) {
+          if (amount0In > 0n && amount1Out > 0n) {
+            const amtIn  = Number(formatUnits(amount0In,  t0.decimals))
+            const amtOut = Number(formatUnits(amount1Out, t1.decimals))
+            if (amtIn > 0 && amtOut > 0) {
+              const usdPrice = key1 === 'USDG' ? amtOut / amtIn : amtIn / amtOut
+              const tokenKey = key1 === 'USDG' ? key0 : key1
+              ;(priceHistory[tokenKey] ??= []).push(usdPrice)
+            }
+          } else if (amount1In > 0n && amount0Out > 0n) {
+            const amtIn  = Number(formatUnits(amount1In,  t1.decimals))
+            const amtOut = Number(formatUnits(amount0Out, t0.decimals))
+            if (amtIn > 0 && amtOut > 0) {
+              const usdPrice = key0 === 'USDG' ? amtOut / amtIn : amtIn / amtOut
+              const tokenKey = key0 === 'USDG' ? key1 : key0
+              ;(priceHistory[tokenKey] ??= []).push(usdPrice)
+            }
+          }
+        }
       }
 
-      setResult({ total: totalUsd, byPool })
+      priceHistory['ETH'] = priceHistory['WETH'] ?? []
+
+      setResult({ total: totalUsd, byPool, priceHistory })
     }
 
     fetchVolume()
