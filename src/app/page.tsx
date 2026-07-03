@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowRight, Flame, Lock, TrendingUp, Zap, Shield, Crown, AlertTriangle, CheckCircle2, ChevronRight } from 'lucide-react'
+import { ArrowRight, Flame, Lock, TrendingUp, Zap, Shield, Crown, AlertTriangle, CheckCircle2, ChevronRight, Percent, Users, Unlock, ShieldCheck, Coins, Layers, Rocket, Route } from 'lucide-react'
 import { LiveHomepageStats } from '@/components/LiveHomepageStats'
 import { FlywheelDiagram } from '@/components/FlywheelDiagram'
 import { Reveal } from '@/components/Reveal'
@@ -207,6 +207,56 @@ export default function HomePage() {
         </Reveal>
       </section>
 
+      {/* Why buy AEON */}
+      <section className="max-w-7xl mx-auto px-4 py-16">
+        <Reveal className="text-center mb-12">
+          <h2 className="font-display font-bold text-3xl md:text-4xl text-text-primary mb-3">
+            Why buy AEON
+          </h2>
+          <p className="text-text-secondary max-w-xl mx-auto">
+            Not a pitch about price. A pitch about mechanics you can read in the contracts.
+          </p>
+        </Reveal>
+
+        <div className="grid md:grid-cols-3 gap-6">
+          {[
+            {
+              icon: <TrendingUp size={20} className="text-aeon-400" />,
+              title: 'Fees fund emissions, not thin air',
+              body: 'New AEON each epoch is minted as last epoch\'s trading fees ÷ 10 — computed from fees that already happened. No trading, no new supply.',
+            },
+            {
+              icon: <Percent size={20} className="text-aeon-400" />,
+              title: '80% of every fee, by contract',
+              body: 'Every swap fee splits 80/20 — 80% straight to veAEON voters, 20% to buybacks. Not a setting someone can quietly change later — the contract.',
+            },
+            {
+              icon: <Flame size={20} className="text-aeon-400" />,
+              title: 'Two burn mechanisms, running forever',
+              body: 'Buybacks burn AEON on every trade. The Furnace lets anyone burn AEON for permanent voting power. Both are one-way, real supply sinks.',
+            },
+            {
+              icon: <Users size={20} className="text-aeon-400" />,
+              title: 'Zero team allocation',
+              body: 'All 90,000 genesis AEON went to pool liquidity or was burned. None held back for a team — no vesting cliff waiting to dump on holders.',
+            },
+            {
+              icon: <Lock size={20} className="text-aeon-400" />,
+              title: 'Locking is real governance',
+              body: 'veAEON votes decide which pools get emissions and fee share — a vote with direct financial consequences, not a symbolic poll.',
+            },
+          ].map((item, i) => (
+            <Reveal key={item.title} delay={i * 80} className="card p-6 transition-all duration-300 hover:border-aeon-400/30 hover:-translate-y-1">
+              <div className="w-10 h-10 rounded-xl bg-aeon-400/10 flex items-center justify-center mb-4">
+                {item.icon}
+              </div>
+              <h3 className="font-display font-semibold text-lg text-text-primary mb-2">{item.title}</h3>
+              <p className="text-text-secondary text-sm leading-relaxed">{item.body}</p>
+            </Reveal>
+          ))}
+        </div>
+      </section>
+
       {/* How it works */}
       <section className="max-w-7xl mx-auto px-4 py-16">
         <Reveal className="text-center mb-4">
@@ -311,6 +361,61 @@ export default function HomePage() {
             </Link>
           </div>
         </Reveal>
+      </section>
+
+      {/* Why provide liquidity */}
+      <section className="max-w-7xl mx-auto px-4 py-16">
+        <Reveal className="text-center mb-12">
+          <h2 className="font-display font-bold text-3xl md:text-4xl text-text-primary mb-3">
+            Why provide liquidity
+          </h2>
+          <p className="text-text-secondary max-w-xl mx-auto">
+            No paywall, no admin switch on your fees, and a router that actually finds you.
+          </p>
+        </Reveal>
+
+        <div className="grid md:grid-cols-3 gap-6">
+          {[
+            {
+              icon: <Unlock size={20} className="text-violet-400" />,
+              title: 'No more paywall',
+              body: 'The 100 AEON whitelist to add liquidity is gone. Any wallet can deposit into any pool right now, no approval needed.',
+            },
+            {
+              icon: <ShieldCheck size={20} className="text-violet-400" />,
+              title: 'Fees settle to you, no admin switch',
+              body: "Fee accrual is a direct port of Aerodrome's audited-pattern design — claimFees() is fully permissionless and pays out exactly what your LP earned.",
+            },
+            {
+              icon: <Coins size={20} className="text-violet-400" />,
+              title: 'Stake for a second income stream',
+              body: 'Unstaked LPs earn organic fees. Staked LPs earn those fees plus AEON emissions — and since emissions are fee-funded, that stream is real too.',
+            },
+            {
+              icon: <Layers size={20} className="text-violet-400" />,
+              title: 'Pick your liquidity style',
+              body: "Full-range vAMM, concentrated CL ranges, or discrete DLMM bins — same pairs, three shapes. You're never locked into one strategy.",
+            },
+            {
+              icon: <Rocket size={20} className="text-violet-400" />,
+              title: 'Early LPs get a bigger slice',
+              body: "Every new pair starts thin. The earlier you're in, the larger your share of that pool's fees before liquidity fills in behind you.",
+            },
+            {
+              icon: <Route size={20} className="text-violet-400" />,
+              title: 'Routing finds your liquidity automatically',
+              body: 'Swaps search every path across every vAMM pool and execute whichever route pays out the most — liquidity you provide actually gets used.',
+            },
+          ].map((item, i) => (
+            <Reveal key={item.title} delay={i * 80} className="card p-6 transition-all duration-300 hover:border-violet-400/30 hover:-translate-y-1">
+              <div className="w-10 h-10 rounded-xl bg-violet-400/10 flex items-center justify-center mb-4">
+                {item.icon}
+              </div>
+              <h3 className="font-display font-semibold text-lg text-text-primary mb-2">{item.title}</h3>
+              <p className="text-text-secondary text-sm leading-relaxed">{item.body}</p>
+            </Reveal>
+          ))}
+        </div>
       </section>
 
       {/* Pools */}
