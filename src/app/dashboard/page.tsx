@@ -1,6 +1,6 @@
 ﻿'use client'
 import { useState } from 'react'
-import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock } from 'lucide-react'
+import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useReadContract } from 'wagmi'
 import { formatUnits } from 'viem'
@@ -84,6 +84,12 @@ export default function DashboardPage() {
     ? ((Number(totalBurned) / Number(aeonSupply)) * 100).toFixed(2)
     : '—'
 
+  // No team allocation or treasury lockup to net out (verified at genesis) --
+  // circulating = total supply minus everything permanently burned.
+  const circulatingSupply = (aeonSupply !== undefined && totalBurned !== undefined)
+    ? (aeonSupply as bigint) - (totalBurned as bigint)
+    : undefined
+
   const lockRate = aeonSupply && totalVotes && aeonSupply > 0n
     ? ((Number(totalVotes) / Number(aeonSupply)) * 100).toFixed(1)
     : '—'
@@ -117,11 +123,12 @@ export default function DashboardPage() {
         <p className="text-text-secondary">Protocol stats, pool performance, and epoch data</p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
         {[
           { label: 'Total Value Locked', value: fmtUsd(totalTVL || null, true),   icon: <TrendingUp size={16} className="text-aeon-400" />,    delta: `${POOLS.length + CL_POOLS.length + DLMM_POOLS.length} pools` },
           { label: 'Volume 24h',         value: fmtUsd(volume24h, true),          icon: <BarChart3  size={16} className="text-violet-400" />,  delta: 'from on-chain swap events' },
           { label: 'AEON Supply',        value: `${fmt18(aeonSupply)} AEON`,      icon: <Vote       size={16} className="text-emerald-400" />, delta: 'genesis: 90,000' },
+          { label: 'Circulating Supply', value: `${fmt18(circulatingSupply)} AEON`, icon: <Coins    size={16} className="text-blue-400" />,    delta: 'supply − burned' },
           { label: 'AEON Burned',        value: `${fmt18(totalBurned)} AEON`,     icon: <Flame      size={16} className="text-red-400" />,     delta: `${burnedPct}% of supply` },
         ].map(kpi => (
           <div key={kpi.label} className="card p-4">
@@ -189,6 +196,14 @@ export default function DashboardPage() {
                 <span className={clsx('text-sm font-mono', (item as { highlight?: boolean }).highlight ? 'text-aeon-400' : 'text-text-primary')}>{item.value}</span>
               </div>
             ))}
+            <div className="pt-2 mt-1 border-t border-bg-border">
+              <p className="text-2xs text-text-muted leading-relaxed">
+                Note: the protocol's own 25k/25k genesis vote still points at the two vAMM pools retired in the fee-fix
+                migration — that's most of the total votes above, and why per-pool votes below read close to zero. It
+                can't be redirected until this epoch ends (veAEON votes are locked for the epoch they're cast in);
+                it'll be re-pointed at the current pools once that unlocks.
+              </p>
+            </div>
           </div>
         </div>
 

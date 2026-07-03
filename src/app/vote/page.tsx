@@ -244,10 +244,14 @@ export default function VotePage() {
 
   const isOwner = nftOwner && address && nftOwner.toLowerCase() === address.toLowerCase()
 
+  // Matches AeonVoterV2.MAX_POOLS (the real on-chain cap) -- not an arbitrary
+  // UI limit, so this stays correct as more pools get added.
+  const MAX_VOTE_POOLS = 30
+
   function addPool(pool: typeof POOLS[number]) {
-    if (allocations.length >= 6) return
+    if (allocations.length >= MAX_VOTE_POOLS) return
     if (allocations.find(a => a.poolAddress === pool.address)) return
-    const share = Math.floor(remaining / (6 - allocations.length + 1))
+    const share = Math.floor(remaining / (MAX_VOTE_POOLS - allocations.length + 1))
     setAllocations(prev => [...prev, { pool: pool.name + ' ' + pool.type, poolAddress: pool.address, weight: share }])
   }
 
@@ -469,6 +473,10 @@ export default function VotePage() {
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search pools..." className="input-base flex-1 text-sm py-2" />
           </div>
+          <p className="text-2xs text-text-muted mb-3 -mt-1">
+            Every vAMM pool is votable, including new ones as they launch — up to {MAX_VOTE_POOLS} at once, matching the on-chain limit.
+            CL and DLMM pools aren't listed yet: they don't have gauges, so voting for one would revert.
+          </p>
 
           <div className="card overflow-hidden">
             <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-bg-border">
@@ -502,7 +510,7 @@ export default function VotePage() {
                     <div className="col-span-1 flex justify-end">
                       <button
                         onClick={() => isSelected ? removePool(pool.address) : addPool(pool)}
-                        disabled={allocations.length >= 6 && !isSelected}
+                        disabled={allocations.length >= MAX_VOTE_POOLS && !isSelected}
                         className={clsx('w-7 h-7 rounded-lg flex items-center justify-center transition-all', isSelected ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' : 'bg-aeon-400/10 text-aeon-400 hover:bg-aeon-400/20', allocations.length >= 6 && !isSelected && 'opacity-30 cursor-not-allowed')}
                       >
                         {isSelected ? <X size={12} /> : <Plus size={12} />}
@@ -513,7 +521,7 @@ export default function VotePage() {
               })}
             </div>
           </div>
-          <p className="text-xs text-text-muted mt-3 text-center font-mono">{filteredPools.length} pools · Max 6 pools per vote</p>
+          <p className="text-xs text-text-muted mt-3 text-center font-mono">{filteredPools.length} pools · Max {MAX_VOTE_POOLS} pools per vote</p>
         </div>
       </div>
     </div>
