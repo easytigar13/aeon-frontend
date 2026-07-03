@@ -40,6 +40,10 @@ export const TOKENS = {
   // ours) — verified via Blockscout (582 holders) and cross-checked against its
   // own live WETH/VIRTUAL and USDG/VIRTUAL pools before wiring in a CL pool for it
   VIRTUAL: { address: '0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31' as `0x${string}`, symbol: 'VIRTUAL', decimals: 18, name: 'Virtuals Protocol' },
+  // real, independently-deployed token, already trading on a separate DEX on
+  // this same chain (DexScreener: ~$21k liquidity, real volume) — added
+  // 2026-07-05 at the user's request, with an AEON vAMM pool
+  ROBINFUN: { address: '0x56A98Db16Cf501b686c14BA00a5DeC02E87083FA' as `0x${string}`, symbol: 'ROBINFUN', decimals: 18, name: 'Robinfun' },
 } as const
 
 // Migrated 2026-07-03: the genesis vAMM pools had no way to ever claim swap
@@ -57,6 +61,10 @@ export const POOLS = [
   // unlike the fee-fix migration's pools, so its own on-chain registry stays
   // in sync for this one).
   { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'vAMM', fee: '1%',   address: '0x50bCeFB28502C8628Bc2564A0BFEB6D5D33EFA25' as `0x${string}` },
+  // Added 2026-07-05 — small/dust-sized on purpose (deployer's AEON balance
+  // was the binding constraint): 6.5 AEON against a price-matched ~1991
+  // ROBINFUN, pegged to ROBINFUN's real price on its other DEX listing.
+  { name: 'ROBINFUN/AEON', token0: 'ROBINFUN', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x6EE853608078a207A30836Eec6310974D4506c14' as `0x${string}` },
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3
