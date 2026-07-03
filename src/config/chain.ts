@@ -10,4 +10,7 @@ export const robinhoodChain = defineChain({
   rpcUrls: {
     default: { http: ['https://rpc.mainnet.chain.robinhood.com'] },
   },
+  blockExplorers: {
+    default: { name: 'Blockscout', url: 'https://robinhoodchain.blockscout.com' },
+  },
 })

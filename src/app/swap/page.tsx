@@ -1,15 +1,18 @@
 'use client'
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { ArrowUpDown, Settings, ChevronDown, Loader2 } from 'lucide-react'
+import { ArrowUpDown, Settings, ChevronDown, Loader2, TrendingUp, TrendingDown, ExternalLink } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
-import { TOKENS, CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
+import { TOKENS, POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
+import { robinhoodChain } from '@/config/chain'
 import { AEON_ROUTER_ABI, ERC20_ABI, WETH_ABI } from '@/config/abis'
 import { useRouting } from '@/hooks/useRouting'
 import { usePrices } from '@/hooks/usePrices'
+import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
 import { TokenIcon } from '@/components/TokenIcon'
+import { Sparkline } from '@/components/Sparkline'
 
 type TokenKey = keyof typeof TOKENS
 
@@ -38,6 +41,21 @@ function safeParseUnits(val: string, decimals: number): bigint {
 const TOKEN_LIST = Object.entries(TOKENS).filter(([key]) => key !== 'VIRTUAL').map(([key, val]) => ({ key: key as TokenKey, ...val }))
 const WETH_ADDR = TOKENS['WETH'].address
 
+// symbol → number of pools (across all 3 pool types) that hold it
+const POOL_COUNT_BY_SYMBOL: Record<string, number> = {}
+for (const p of [...POOLS, ...CL_POOLS, ...DLMM_POOLS]) {
+  POOL_COUNT_BY_SYMBOL[p.token0] = (POOL_COUNT_BY_SYMBOL[p.token0] ?? 0) + 1
+  POOL_COUNT_BY_SYMBOL[p.token1] = (POOL_COUNT_BY_SYMBOL[p.token1] ?? 0) + 1
+}
+POOL_COUNT_BY_SYMBOL['ETH'] = POOL_COUNT_BY_SYMBOL['WETH'] ?? 0
+
+function fmtPrice(p: number | null): string {
+  if (p === null) return '—'
+  if (p >= 1) return '$' + p.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  if (p >= 0.0001) return '$' + p.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
+  return '$' + p.toExponential(2)
+}
+
 function useTokenBalance(tokenKey: TokenKey, address?: `0x${string}`) {
   const token = TOKENS[tokenKey]
   const isNative = token.address === NATIVE_SENTINEL
@@ -63,7 +81,7 @@ export default function SwapPage() {
   const isConnected = mounted && _isConnected
   const { openConnectModal } = useConnectModal()
 
-  const [tokenIn,  setTokenIn]  = useState<TokenKey>('WETH')
+  const [tokenIn,  setTokenIn]  = useState<TokenKey>('ETH')
   const [tokenOut, setTokenOut] = useState<TokenKey>('AEON')
   const [amountIn, setAmountIn] = useState('')
   const [slippage, setSlippage] = useState('0.5')
@@ -76,6 +94,7 @@ export default function SwapPage() {
   const balanceIn  = useTokenBalance(tokenIn,  address)
   const balanceOut = useTokenBalance(tokenOut, address)
   const prices     = usePrices()
+  const dexInfo    = useDexTokenInfo()
 
   // Direct ETH<->WETH pair: a single deposit()/withdraw() call, no router involved.
   const isWrapUnwrap = (tokenIn === 'ETH' && tokenOut === 'WETH') || (tokenIn === 'WETH' && tokenOut === 'ETH')
@@ -320,7 +339,9 @@ export default function SwapPage() {
     : route?.label ?? ''
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-12">
+    <div className="max-w-4xl mx-auto px-4 py-12">
+    <div className="flex flex-col lg:flex-row gap-6 lg:items-start">
+    <div className="w-full lg:max-w-lg mx-auto lg:mx-0">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display font-bold text-2xl text-text-primary">Swap</h1>
@@ -511,6 +532,13 @@ export default function SwapPage() {
           </button>
         </div>
       </div>
+    </div>
+
+    <div className="w-full lg:w-80 shrink-0 space-y-4">
+      <TokenInfoCard tokenKey={tokenIn} info={dexInfo[tokenIn]} price={prices[tokenIn] ?? null} />
+      <TokenInfoCard tokenKey={tokenOut} info={dexInfo[tokenOut]} price={prices[tokenOut] ?? null} />
+    </div>
+    </div>
 
       {(showTokenInModal || showTokenOutModal) && (
         <TokenSelectModal
@@ -520,6 +548,77 @@ export default function SwapPage() {
           walletAddress={address}
         />
       )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Token info side panel — real price, real 24h chart (GeckoTerminal hourly
+// OHLCV via useDexTokenInfo, same source already used on /tokens), contract
+// address with a link to the real Robinhood Chain explorer, and how many
+// AEON pools carry it. No invented numbers — a token with no chart data yet
+// just shows none rather than a fake flat line.
+// ─────────────────────────────────────────────────────────────────────────
+
+function TokenInfoCard({ tokenKey, info, price }: { tokenKey: TokenKey; info: ReturnType<typeof useDexTokenInfo>[string] | undefined; price: number | null }) {
+  const token = TOKENS[tokenKey]
+  const change = info?.priceChange24h ?? null
+  const positive = change === null || change >= 0
+  const sparkline = info?.sparkline ?? []
+  const poolCount = POOL_COUNT_BY_SYMBOL[tokenKey] ?? 0
+  const explorerUrl = robinhoodChain.blockExplorers?.default.url
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-start gap-3">
+        <TokenIcon symbol={tokenKey} size={36} imageUrl={info?.imageUrl} />
+        <div className="min-w-0">
+          <div className="font-display font-bold text-text-primary leading-tight truncate">{token.symbol}</div>
+          <div className="text-xs text-text-muted truncate">{token.name}</div>
+        </div>
+        <div className="ml-auto text-right shrink-0">
+          <div className="font-mono text-sm text-text-primary">{fmtPrice(price)}</div>
+          {change !== null && (
+            <div className={clsx('flex items-center justify-end gap-0.5 text-2xs font-mono mt-0.5', positive ? 'text-emerald-400' : 'text-red-400')}>
+              {positive ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+              {change >= 0 ? '+' : ''}{change.toFixed(2)}%
+            </div>
+          )}
+        </div>
+      </div>
+
+      {sparkline.length >= 2 ? (
+        <div className="mt-3">
+          <Sparkline prices={sparkline} positive={positive} width={280} height={52} />
+          <div className="text-2xs text-text-muted mt-1">24h · hourly</div>
+        </div>
+      ) : (
+        <div className="text-2xs text-text-muted text-center py-4 mt-1">No chart data yet</div>
+      )}
+
+      <div className="mt-3 pt-3 border-t border-bg-border space-y-1.5">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-text-muted">In pools</span>
+          <span className="font-mono text-text-secondary">{poolCount}</span>
+        </div>
+        {token.address !== NATIVE_SENTINEL && (
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-text-muted">Contract</span>
+            {explorerUrl ? (
+              <a
+                href={`${explorerUrl}/token/${token.address}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-1 font-mono text-aeon-400 hover:underline"
+              >
+                {token.address.slice(0, 6)}…{token.address.slice(-4)} <ExternalLink size={10} />
+              </a>
+            ) : (
+              <span className="font-mono text-text-secondary">{token.address.slice(0, 6)}…{token.address.slice(-4)}</span>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
