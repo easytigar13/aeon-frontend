@@ -11,7 +11,6 @@ const NAV = [
   { id: 'tokenomics',    label: 'Tokenomics' },
   { id: 'guide-swap',    label: '→ How to Swap',            indent: true },
   { id: 'guide-earn',    label: '→ Earn (LP + Gauge)',      indent: true },
-  { id: 'guide-whitelist', label: '→ Whitelist',            indent: true },
   { id: 'guide-lock',    label: '→ Lock (veNFT)',           indent: true },
   { id: 'guide-vote',    label: '→ Vote',                   indent: true },
   { id: 'contracts',     label: 'Contract Addresses' },
@@ -275,32 +274,15 @@ export default function DocsPage() {
           </Note>
 
           <H2 id="guide-earn">Earn (LP + Gauge Staking)</H2>
-          <Step n={1} title="Join the whitelist">
-            Adding liquidity requires a one-time 100 AEON payment — see the <Link href="#guide-whitelist" className="text-aeon-400 hover:underline">Whitelist</Link> guide below.
-          </Step>
-          <Step n={2} title="Add liquidity">
+          <Step n={1} title="Add liquidity">
             Go to <Link href="/earn" className="text-aeon-400 hover:underline">Earn</Link>, expand a pool, and open the <strong>Add Liquidity</strong> tab. Enter the amounts for both tokens and confirm. You receive LP tokens representing your share.
           </Step>
-          <Step n={3} title="Stake LP in the gauge">
+          <Step n={2} title="Stake LP in the gauge">
             Switch to the <strong>Earn</strong> tab inside the same pool. Approve your LP tokens, then stake them. Your LP is now earning AEON emissions every block.
           </Step>
-          <Step n={4} title="Claim emissions">
+          <Step n={3} title="Claim emissions">
             Claimable AEON accrues in real time. Click <strong>Claim</strong> at any time to receive it.
           </Step>
-
-          <H2 id="guide-whitelist">Whitelist</H2>
-          <P>
-            Adding liquidity on AEON Protocol is gated behind a one-time 100 AEON payment to the protocol treasury — this is a spam/quality filter, not a recurring cost.
-          </P>
-          <Step n={1} title="Go to Whitelist">
-            Navigate to <Link href="/whitelist" className="text-aeon-400 hover:underline">Whitelist</Link>.
-          </Step>
-          <Step n={2} title="Approve and pay">
-            Approve 100 AEON, then confirm the join transaction. Your wallet is now permanently unlocked for adding liquidity.
-          </Step>
-          <Note>
-            This unlock is per-wallet and permanent — you only ever pay once.
-          </Note>
 
           <H2 id="guide-lock">Lock (veNFT)</H2>
           <Step n={1} title="Go to Lock">
@@ -354,7 +336,6 @@ export default function DocsPage() {
             <Addr label="Router"              address={CONTRACTS.AeonRouter} />
             <Addr label="Gauge Factory"       address={CONTRACTS.AeonGaugeFactory} />
             <Addr label="Liquidity Helper"    address={CONTRACTS.LiquidityHelper} />
-            <Addr label="Whitelist"           address={CONTRACTS.Whitelist} />
           </div>
 
           <H3>Token Addresses</H3>

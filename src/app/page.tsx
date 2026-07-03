@@ -388,7 +388,7 @@ export default function HomePage() {
             </h3>
             <p className="text-text-secondary text-sm leading-relaxed">
               Every contract was tested against a live Robinhood Chain mainnet fork before deployment — TWAP directionality, oracle pricing,
-              whitelist gating, and the exact genesis mint/burn/vote split were all verified on-chain before a single transaction broadcast.
+              fee accounting, and the exact genesis mint/burn/vote split were all verified on-chain before a single transaction broadcast.
             </p>
           </div>
           <a

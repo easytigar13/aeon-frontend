@@ -1,13 +1,13 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Lock, Layers, Waves, Grid3x3, Search, ArrowLeft } from 'lucide-react'
+import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Layers, Waves, Grid3x3, Search, ArrowLeft } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, WHITELIST_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
+import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -320,12 +320,6 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   const bal0 = useTokenBal(token0Addr, address)
   const bal1 = useTokenBal(token1Addr, address)
 
-  const { data: isWhitelistedRaw } = useReadContract({
-    address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'isWhitelisted',
-    args: address ? [address] : undefined, query: { enabled: !!address },
-  })
-  const isWhitelisted = !!isWhitelistedRaw
-
   // LP token balance for remove tab
   const { data: lpBalRaw, refetch: refetchLpBal } = useReadContract({
     address: selectedPool.address, abi: ERC20_ABI, functionName: 'balanceOf',
@@ -454,7 +448,7 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
 
   function startAddLiquidity() {
     if (!isConnected) { openConnectModal?.(); return }
-    if (!amount0 || !amount1 || !isWhitelisted) return
+    if (!amount0 || !amount1) return
     setStep('idle')
     setErrMsg('')
     if (needApprove0) { setStep('approve0'); return }
@@ -466,7 +460,6 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
 
   function stepLabel() {
     if (!isConnected) return 'Connect Wallet'
-    if (!isWhitelisted) return 'Join Whitelist to Add Liquidity'
     if (!amount0 && !amount1) return 'Enter amounts'
     if (!amount1) return `Enter ${selectedPool.token1} amount`
     if (!amount0) return `Enter ${selectedPool.token0} amount`
@@ -507,19 +500,6 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
 
   return (
     <>
-      {isConnected && !isWhitelisted && (
-        <div className="card p-4 mb-4 border-violet-400/20 bg-violet-400/5 flex items-start gap-3">
-          <Lock size={16} className="text-violet-400 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <div className="text-sm font-medium text-text-primary mb-1">Whitelist required</div>
-            <p className="text-xs text-text-muted leading-relaxed mb-2">
-              Adding liquidity is gated by a one-time 100 AEON payment to the protocol. Once paid, your wallet can add liquidity forever.
-            </p>
-            <Link href="/whitelist" className="text-xs font-mono text-violet-400 hover:underline">Join Whitelist →</Link>
-          </div>
-        </div>
-      )}
-
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4">
         <button onClick={() => { setTab('add'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'add' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
           <Plus size={14} /> Add
@@ -668,7 +648,7 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
 
           <button
             onClick={startAddLiquidity}
-            disabled={isConnected && (isProcessing || !amount0 || !amount1 || !isWhitelisted)}
+            disabled={isConnected && (isProcessing || !amount0 || !amount1)}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}
@@ -851,12 +831,6 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
   const poolStats = usePoolStats(prices)
   const volResult = useVolume24h(prices)
 
-  const { data: isWhitelistedRaw } = useReadContract({
-    address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'isWhitelisted',
-    args: address ? [address] : undefined, query: { enabled: !!address },
-  })
-  const isWhitelisted = !!isWhitelistedRaw
-
   const token0Key  = selectedPool.token0 as keyof typeof TOKENS
   const token1Key  = selectedPool.token1 as keyof typeof TOKENS
   const token0Addr = TOKENS[token0Key].address
@@ -1025,7 +999,6 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
 
   function startMint() {
     if (!isConnected) { openConnectModal?.(); return }
-    if (!isWhitelisted) return
     if (mintAmount0Wei === 0n && mintAmount1Wei === 0n) return
     setErrMsg('')
     if (needApprove0 && mintAmount0Wei > 0n) { setStep('approve0'); return }
@@ -1037,7 +1010,6 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
 
   function stepLabel() {
     if (!isConnected) return 'Connect Wallet'
-    if (!isWhitelisted) return 'Join Whitelist to Add Liquidity'
     if (!poolInitialized) return 'Pool not initialized'
     if (mintAmount0Wei === 0n && mintAmount1Wei === 0n) return 'Enter an amount'
     if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
@@ -1075,19 +1047,6 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
 
   return (
     <>
-      {isConnected && !isWhitelisted && (
-        <div className="card p-4 mb-4 border-violet-400/20 bg-violet-400/5 flex items-start gap-3">
-          <Lock size={16} className="text-violet-400 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <div className="text-sm font-medium text-text-primary mb-1">Whitelist required</div>
-            <p className="text-xs text-text-muted leading-relaxed mb-2">
-              Adding liquidity is gated by a one-time 100 AEON payment to the protocol. Once paid, your wallet can add liquidity forever.
-            </p>
-            <Link href="/whitelist" className="text-xs font-mono text-violet-400 hover:underline">Join Whitelist →</Link>
-          </div>
-        </div>
-      )}
-
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4">
         <button onClick={() => { setTab('add'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'add' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
           <Plus size={14} /> Add
@@ -1281,7 +1240,7 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
 
           <button
             onClick={startMint}
-            disabled={isConnected && (isProcessing || (mintAmount0Wei === 0n && mintAmount1Wei === 0n) || !isWhitelisted)}
+            disabled={isConnected && (isProcessing || (mintAmount0Wei === 0n && mintAmount1Wei === 0n))}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}
@@ -1406,12 +1365,6 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
   const volResult     = useVolume24h(prices)
   const dlmmPoolStats = useDlmmPoolStats(prices)
 
-  const { data: isWhitelistedRaw } = useReadContract({
-    address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'isWhitelisted',
-    args: address ? [address] : undefined, query: { enabled: !!address },
-  })
-  const isWhitelisted = !!isWhitelistedRaw
-
   const token0Key = selectedPool.token0 as keyof typeof TOKENS
   const token1Key = selectedPool.token1 as keyof typeof TOKENS
   const token0Addr = TOKENS[token0Key].address
@@ -1527,7 +1480,7 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
 
   function startAdd() {
     if (!isConnected) { openConnectModal?.(); return }
-    if (!isWhitelisted || (amount0Wei === 0n && amount1Wei === 0n)) return
+    if (amount0Wei === 0n && amount1Wei === 0n) return
     setErrMsg('')
     if (needApprove0) { setStep('approve0'); return }
     if (needApprove1) { setStep('approve1'); return }
@@ -1538,7 +1491,6 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
 
   function stepLabel() {
     if (!isConnected) return 'Connect Wallet'
-    if (!isWhitelisted) return 'Join Whitelist to Add Liquidity'
     if (amount0Wei === 0n && amount1Wei === 0n) return 'Enter amounts'
     if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
     if (step === 'approve1' || step === 'approve1_wait') return `Approving ${selectedPool.token1}…`
@@ -1553,19 +1505,6 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
 
   return (
     <>
-      {isConnected && !isWhitelisted && (
-        <div className="card p-4 mb-4 border-violet-400/20 bg-violet-400/5 flex items-start gap-3">
-          <Lock size={16} className="text-violet-400 shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <div className="text-sm font-medium text-text-primary mb-1">Whitelist required</div>
-            <p className="text-xs text-text-muted leading-relaxed mb-2">
-              Adding liquidity is gated by a one-time 100 AEON payment to the protocol. Once paid, your wallet can add liquidity forever.
-            </p>
-            <Link href="/whitelist" className="text-xs font-mono text-violet-400 hover:underline">Join Whitelist →</Link>
-          </div>
-        </div>
-      )}
-
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4">
         <button onClick={() => { setTab('add'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'add' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
           <Plus size={14} /> Add
@@ -1764,7 +1703,7 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
 
           <button
             onClick={startAdd}
-            disabled={isConnected && (isProcessing || (amount0Wei === 0n && amount1Wei === 0n) || !isWhitelisted)}
+            disabled={isConnected && (isProcessing || (amount0Wei === 0n && amount1Wei === 0n))}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}

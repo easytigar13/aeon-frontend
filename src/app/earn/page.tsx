@@ -7,7 +7,7 @@ import { useAccount, useReadContract, useReadContracts, useWriteContract, useWai
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_ABI, VOTER_ABI, WHITELIST_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI } from '@/config/abis'
+import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -94,11 +94,6 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   const t0 = TOKENS[pool.token0 as keyof typeof TOKENS]
   const t1 = TOKENS[pool.token1 as keyof typeof TOKENS]
 
-  const { data: isWhitelistedRaw } = useReadContract({
-    address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'isWhitelisted', args: [wallet],
-  })
-  const isWhitelisted = !!isWhitelistedRaw
-
   const { data: bal0Raw,    refetch: refBal0   } = useReadContract({ address: t0?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t0, refetchInterval: 15000 } })
   const { data: bal1Raw,    refetch: refBal1   } = useReadContract({ address: t1?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t1, refetchInterval: 15000 } })
   const { data: lpBalRaw,   refetch: refLpBal  } = useReadContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { refetchInterval: 15000 } })
@@ -159,7 +154,7 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   }
 
   function handleAdd() {
-    if (!amt0 || !amt1 || !t0 || !t1 || parseFloat(amt0) <= 0 || parseFloat(amt1) <= 0 || !isWhitelisted) return
+    if (!amt0 || !amt1 || !t0 || !t1 || parseFloat(amt0) <= 0 || parseFloat(amt1) <= 0) return
     if (allow0 < parseUnits(amt0, t0.decimals)) { setLiqStep('app0'); return }
     if (allow1 < parseUnits(amt1, t1.decimals)) { setLiqStep('app1'); return }
     setLiqStep('adding')
@@ -168,7 +163,6 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   const addBusy = ['app0', 'app0_wait', 'app1', 'app1_wait', 'adding', 'adding_wait'].includes(liqStep)
 
   function addLabel() {
-    if (!isWhitelisted) return 'Join Whitelist First'
     if (liqStep === 'app0' || liqStep === 'app0_wait') return `Approving ${t0?.symbol}…`
     if (liqStep === 'app1' || liqStep === 'app1_wait') return `Approving ${t1?.symbol}…`
     if (liqStep === 'adding' || liqStep === 'adding_wait') return 'Adding…'
@@ -180,11 +174,6 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
 
   return (
     <div className="space-y-3">
-      {!isWhitelisted && (
-        <div className="text-2xs text-violet-400 font-mono px-1">
-          Whitelist required to add liquidity — <a href="/whitelist" className="underline">join here</a> (100 AEON, one-time)
-        </div>
-      )}
       <div>
         <div className="flex justify-between text-2xs text-text-muted mb-1">
           <span>{t0?.symbol ?? pool.token0}</span>
@@ -203,7 +192,7 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
         <div className="text-2xs text-yellow-400 font-mono px-1">No price feed yet — enter both amounts manually to set the initial ratio</div>
       )}
       <button
-        disabled={!amt0 || !amt1 || parseFloat(amt0 || '0') <= 0 || parseFloat(amt1 || '0') <= 0 || addBusy || !isWhitelisted}
+        disabled={!amt0 || !amt1 || parseFloat(amt0 || '0') <= 0 || parseFloat(amt1 || '0') <= 0 || addBusy}
         onClick={handleAdd}
         className="btn-primary w-full text-sm py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40"
       >

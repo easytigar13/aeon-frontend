@@ -19,7 +19,11 @@ export const CONTRACTS = {
   ConstantUsdFeed:     '0x182e8039659F8110D47a87BEad1FAAaEf981781d' as `0x${string}`,
   AeonFactory:         '0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6' as `0x${string}`,
   AeonRouter:          '0x4d188106175De919a971B0cB6F8A0e3E885a3410' as `0x${string}`,
-  LiquidityHelper:     '0x8e33182d3271e2902Ed36aCA77A79e28c8F22d4e' as `0x${string}`,
+  // Redeployed 2026-07-03: the original LiquidityHelperRH gated addLiquidity()
+  // behind a 100 AEON whitelist payment. Removed entirely per product decision
+  // (there should be no paywall to add liquidity to the protocol) — this is a
+  // fresh contract with no whitelist check at all.
+  LiquidityHelper:     '0xbCE7C45dDB6387BCeF217B923E4E1a76ad5B9037' as `0x${string}`,
   Whitelist:           '0x0337333fdCf79D08f4ac10321796A91f300b5a80' as `0x${string}`,
 } as const
 
