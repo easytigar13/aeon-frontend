@@ -185,24 +185,28 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
           byPool[poolAddr] = (byPool[poolAddr] ?? 0) + swapUsd
         }
 
-        // Execution price from a real trade, only when one side is USDG
-        // (~$1) — no oracle needed, the trade itself prices the other side.
-        if (t0 && t1 && (key0 === 'USDG' || key1 === 'USDG')) {
+        // Execution price from a real trade, priced off whichever side
+        // already has a KNOWN price (from usePrices() — AEON, WETH/ETH,
+        // USDG, anything resolved) rather than only when one side is
+        // literally USDG. A USDG-only check meant any token without a
+        // *direct* USDG pool (VIRTUAL, ROBINFUN, CASHCAT — only ever paired
+        // against AEON) could never get a chart no matter how much it
+        // actually traded, even though the same p0/p1 map above already
+        // knows AEON's price and could price the other side just fine.
+        if (t0 && t1) {
           if (amount0In > 0n && amount1Out > 0n) {
             const amtIn  = Number(formatUnits(amount0In,  t0.decimals))
             const amtOut = Number(formatUnits(amount1Out, t1.decimals))
             if (amtIn > 0 && amtOut > 0) {
-              const usdPrice = key1 === 'USDG' ? amtOut / amtIn : amtIn / amtOut
-              const tokenKey = key1 === 'USDG' ? key0 : key1
-              ;(priceHistory[tokenKey] ??= []).push(usdPrice)
+              if (p0 !== null) (priceHistory[key1] ??= []).push((amtIn * p0) / amtOut)
+              else if (p1 !== null) (priceHistory[key0] ??= []).push((amtOut * p1) / amtIn)
             }
           } else if (amount1In > 0n && amount0Out > 0n) {
             const amtIn  = Number(formatUnits(amount1In,  t1.decimals))
             const amtOut = Number(formatUnits(amount0Out, t0.decimals))
             if (amtIn > 0 && amtOut > 0) {
-              const usdPrice = key0 === 'USDG' ? amtOut / amtIn : amtIn / amtOut
-              const tokenKey = key0 === 'USDG' ? key1 : key0
-              ;(priceHistory[tokenKey] ??= []).push(usdPrice)
+              if (p1 !== null) (priceHistory[key0] ??= []).push((amtIn * p1) / amtOut)
+              else if (p0 !== null) (priceHistory[key1] ??= []).push((amtOut * p0) / amtIn)
             }
           }
         }
