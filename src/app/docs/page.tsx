@@ -112,13 +112,13 @@ export default function DocsPage() {
             </div>
             <h1 className="font-display font-bold text-4xl text-text-primary mb-4">AEON Protocol</h1>
             <P>
-              AEON is a ve(3,3) decentralized exchange on <strong className="text-text-primary">Robinhood Chain</strong> built around a simple rule: <strong className="text-text-primary">emissions can never exceed 1/10th of fees</strong>. This anchors token value to real protocol revenue — no phantom yields, no inflation without demand.
+              AEON is a ve(3,3) decentralized exchange on <strong className="text-text-primary">Robinhood Chain</strong> built around a simple rule: <strong className="text-text-primary">the USD value of emissions can never exceed 1/10th of a rolling 3-epoch average of fees</strong>. This anchors token value to real protocol revenue — no phantom yields, no inflation without demand.
             </P>
             <P>
               The protocol combines automated market making with a governance layer where locked AEON holders vote on where emissions go — and earn the fees from the pools they back. AEON launched fresh on Robinhood Chain (chain ID 4663) with a one-time genesis mint and zero allocation to the team.
             </P>
             <Note>
-              <strong className="text-text-primary">Core rule:</strong> Weekly AEON emissions = weekly protocol fees ÷ {EPOCH_CONFIG.emissionRatio}. If the DEX earns $10,000 in fees in a week, a maximum of 1,000 AEON worth of value is emitted. Emissions are self-limiting.
+              <strong className="text-text-primary">Core rule:</strong> Each epoch's emission budget = (3-epoch rolling average of fees) ÷ {EPOCH_CONFIG.emissionRatio}, converted to AEON at the current oracle price and capped at 3× the previous epoch's mint. If the DEX averages $10,000 in fees per week, a maximum of $1,000 worth of AEON is emitted that epoch. Emissions are self-limiting.
             </Note>
           </div>
 
@@ -181,7 +181,7 @@ export default function DocsPage() {
           </P>
           <ol className="space-y-2 mb-4 ml-4 list-decimal text-sm text-text-secondary">
             <li>Protocol tallies all fees collected across every pool</li>
-            <li>New AEON is minted equal to (total fees) ÷ {EPOCH_CONFIG.emissionRatio}</li>
+            <li>New AEON is minted so its USD value equals a rolling 3-epoch average of fees ÷ {EPOCH_CONFIG.emissionRatio}, converted through AEON's oracle price and capped at 3× the previous epoch's mint</li>
             <li>{EPOCH_CONFIG.emissionVoterSplit}% of that mint goes to gauges proportional to vote weight, {EPOCH_CONFIG.emissionFurnaceSplit}% goes to the Furnace as a bonus</li>
             <li>LPs staked in those gauges earn AEON emissions throughout the next epoch</li>
           </ol>
@@ -240,7 +240,7 @@ export default function DocsPage() {
           <H3>Supply Mechanics</H3>
           <ul className="space-y-2 mb-6 ml-4">
             {[
-              ['New supply',     `Emissions only — capped at fees ÷ ${EPOCH_CONFIG.emissionRatio}, forever after genesis`],
+              ['New supply',     `Emissions only — capped at a rolling 3-epoch fee average ÷ ${EPOCH_CONFIG.emissionRatio} (USD terms, oracle-priced), forever after genesis`],
               ['Deflationary',   'Burned AEON is gone forever — supply can only shrink via the Furnace and buyback burns'],
             ].map(([k, v]) => (
               <li key={k} className="flex items-start gap-2 text-sm">
