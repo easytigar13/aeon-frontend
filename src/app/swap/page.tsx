@@ -33,7 +33,9 @@ function safeParseUnits(val: string, decimals: number): bigint {
   }
 }
 
-const TOKEN_LIST = Object.entries(TOKENS).map(([key, val]) => ({ key: key as TokenKey, ...val }))
+// VIRTUAL only has a CL pool (no vAMM pool) and this page's router only knows
+// vAMM routes, so it's excluded here — trade it from the Liquidity page's CL tab.
+const TOKEN_LIST = Object.entries(TOKENS).filter(([key]) => key !== 'VIRTUAL').map(([key, val]) => ({ key: key as TokenKey, ...val }))
 const WETH_ADDR = TOKENS['WETH'].address
 
 function useTokenBalance(tokenKey: TokenKey, address?: `0x${string}`) {

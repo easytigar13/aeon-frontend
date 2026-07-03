@@ -1,19 +1,22 @@
 'use client'
 import { useReadContracts } from 'wagmi'
-import { TOKENS, POOLS } from '@/config/contracts'
-import { PAIR_ABI } from '@/config/abis'
+import { TOKENS, POOLS, CL_POOLS } from '@/config/contracts'
+import { PAIR_ABI, ALGEBRA_POOL_ABI } from '@/config/abis'
 
-const POOL_AEON_USDG = POOLS.find(p => p.name === 'AEON/USDG')!.address
-const POOL_ETH_USDG  = POOLS.find(p => p.name === 'ETH/USDG')!.address
+const POOL_AEON_USDG    = POOLS.find(p => p.name === 'AEON/USDG')!.address
+const POOL_ETH_USDG     = POOLS.find(p => p.name === 'ETH/USDG')!.address
+const POOL_VIRTUAL_AEON = CL_POOLS.find(p => p.name === 'VIRTUAL/AEON')!.address
 
 // Static — defined once at module scope so useReadContracts gets a stable
 // reference across renders instead of a fresh array every time (which
 // wagmi treats as a config change and re-queries for).
 const PRICE_CONTRACTS = [
-  { address: POOL_AEON_USDG, abi: PAIR_ABI, functionName: 'getReserves' },
-  { address: POOL_AEON_USDG, abi: PAIR_ABI, functionName: 'token0' },
-  { address: POOL_ETH_USDG,  abi: PAIR_ABI, functionName: 'getReserves' },
-  { address: POOL_ETH_USDG,  abi: PAIR_ABI, functionName: 'token0' },
+  { address: POOL_AEON_USDG,    abi: PAIR_ABI,         functionName: 'getReserves' },
+  { address: POOL_AEON_USDG,    abi: PAIR_ABI,         functionName: 'token0' },
+  { address: POOL_ETH_USDG,     abi: PAIR_ABI,         functionName: 'getReserves' },
+  { address: POOL_ETH_USDG,     abi: PAIR_ABI,         functionName: 'token0' },
+  { address: POOL_VIRTUAL_AEON, abi: ALGEBRA_POOL_ABI, functionName: 'globalState' },
+  { address: POOL_VIRTUAL_AEON, abi: PAIR_ABI,         functionName: 'token0' },
 ] as const
 
 type Reserves = readonly [bigint, bigint, number]
@@ -35,6 +38,18 @@ function deriveUsdPrice(
   return (rUsdg * 10 ** targetDec) / (rTarget * 1e6)
 }
 
+// Derive USD price of VIRTUAL from its CL pool's sqrtPriceX96 (both legs are
+// 18-decimal tokens so no decimal scaling is needed) cross-multiplied by AEON's
+// own USD price — the CL pool only prices VIRTUAL in AEON terms, not USD.
+function deriveVirtualUsdPrice(sqrtPriceX96: bigint | undefined, token0: string | undefined, aeonUsd: number | null): number | null {
+  if (!sqrtPriceX96 || !token0 || aeonUsd === null || sqrtPriceX96 === 0n) return null
+  const Q96 = 2 ** 96
+  const ratio = (Number(sqrtPriceX96) / Q96) ** 2 // token1 per token0
+  const isVirtual0 = token0.toLowerCase() === TOKENS.VIRTUAL.address.toLowerCase()
+  const aeonPerVirtual = isVirtual0 ? ratio : 1 / ratio
+  return aeonPerVirtual * aeonUsd
+}
+
 export type PriceMap = Record<string, number | null>
 
 export function usePrices(): PriceMap {
@@ -44,6 +59,8 @@ export function usePrices(): PriceMap {
 
   const aeon = deriveUsdPrice(get(0) as Reserves | undefined, get(1) as string | undefined, TOKENS.USDG.address, TOKENS.AEON.decimals)
   const weth = deriveUsdPrice(get(2) as Reserves | undefined, get(3) as string | undefined, TOKENS.USDG.address, TOKENS.WETH.decimals)
+  const virtualGlobalState = get(4) as readonly [bigint, number, number, number, number, boolean] | undefined
+  const virtual = deriveVirtualUsdPrice(virtualGlobalState?.[0], get(5) as string | undefined, aeon)
 
-  return { AEON: aeon, ETH: weth, WETH: weth, USDG: 1 }
+  return { AEON: aeon, ETH: weth, WETH: weth, USDG: 1, VIRTUAL: virtual }
 }

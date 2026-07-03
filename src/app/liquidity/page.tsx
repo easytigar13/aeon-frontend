@@ -984,7 +984,9 @@ function ClLiquidity() {
               <div className="text-xs text-text-muted">Enter an amount to estimate your yearly earnings.</div>
             )}
             <div className="text-2xs text-text-muted leading-relaxed pt-1">
-              Estimated from the paired vAMM {selectedPool.name} pool's trailing volume at this pool's {selectedPool.fee} fee tier, scaled by your share of in-range liquidity. This CL pool is brand new — the real rate will depend on actual trading activity here once it builds up.
+              {sisterVamm
+                ? `Estimated from the paired vAMM ${selectedPool.name} pool's trailing volume at this pool's ${selectedPool.fee} fee tier, scaled by your share of in-range liquidity. This CL pool is brand new — the real rate will depend on actual trading activity here once it builds up.`
+                : `This pool has no vAMM equivalent to estimate volume from yet, so no APR estimate is shown until this CL pool builds up its own trading history.`}
             </div>
           </div>
 

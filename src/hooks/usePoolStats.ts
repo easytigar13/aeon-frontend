@@ -1,8 +1,8 @@
 'use client'
 import { useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
-import { POOLS, TOKENS, CONTRACTS } from '@/config/contracts'
-import { PAIR_ABI, VOTER_ABI } from '@/config/abis'
+import { POOLS, CL_POOLS, TOKENS, CONTRACTS } from '@/config/contracts'
+import { PAIR_ABI, VOTER_ABI, ERC20_ABI } from '@/config/abis'
 import type { PriceMap } from './usePrices'
 
 export interface PoolStat {
@@ -57,6 +57,44 @@ export function usePoolStats(prices: PriceMap): PoolStat[] {
       votesWei: votes,
       votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : '0',
     }
+  })
+}
+
+// CL pools don't have vAMM-style getReserves() — every deposited token just
+// sits in the pool contract regardless of tick range, so token0/token1
+// balanceOf(pool) gives an exact TVL directly (no gauge/vote weight yet;
+// CL pools aren't wired into AeonVoterV2).
+const CL_POOL_STAT_CONTRACTS = CL_POOLS.flatMap(p => ([
+  { address: p.address, abi: PAIR_ABI, functionName: 'token0' } as const,
+  { address: TOKENS[p.token0 as keyof typeof TOKENS]?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [p.address] } as const,
+  { address: TOKENS[p.token1 as keyof typeof TOKENS]?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [p.address] } as const,
+]))
+
+export function useClPoolStats(prices: PriceMap): PoolStat[] {
+  const { data } = useReadContracts({ contracts: CL_POOL_STAT_CONTRACTS, query: { refetchInterval: 30000 } })
+
+  return CL_POOLS.map((pool, i) => {
+    const base = i * 3
+    const onChainToken0 = data?.[base]?.status === 'success' ? data[base].result as string : undefined
+    const balA = data?.[base + 1]?.status === 'success' ? data[base + 1].result as bigint : undefined
+    const balB = data?.[base + 2]?.status === 'success' ? data[base + 2].result as bigint : undefined
+
+    let tvlUsd: number | null = null
+    if (onChainToken0 && balA !== undefined && balB !== undefined) {
+      const priceA = prices[pool.token0] ?? null
+      const priceB = prices[pool.token1] ?? null
+      const decA = TOKENS[pool.token0 as keyof typeof TOKENS]?.decimals ?? 18
+      const decB = TOKENS[pool.token1 as keyof typeof TOKENS]?.decimals ?? 18
+
+      const valA = priceA !== null ? Number(formatUnits(balA, decA)) * priceA : null
+      const valB = priceB !== null ? Number(formatUnits(balB, decB)) * priceB : null
+
+      if (valA !== null && valB !== null) tvlUsd = valA + valB
+      else if (valA !== null) tvlUsd = valA * 2
+      else if (valB !== null) tvlUsd = valB * 2
+    }
+
+    return { address: pool.address, tvlUsd, votesWei: 0n, votesFormatted: '0' }
   })
 }
 

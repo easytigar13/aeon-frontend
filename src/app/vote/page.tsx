@@ -1,15 +1,44 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { Vote, Plus, X } from 'lucide-react'
+import { Vote, Plus, X, Flame, Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { formatUnits } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CONTRACTS } from '@/config/contracts'
-import { VOTING_ESCROW_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI } from '@/config/abis'
+import { VOTING_ESCROW_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
+
+// AeonVotingEscrow is a plain (non-Enumerable) ERC721 — the only way to find
+// which tokenIds a wallet owns is to walk every minted id and check ownerOf.
+// `tokenId()` is the mint counter (highest id ever minted), and this is a
+// genesis-scale deployment (a handful of veNFTs total), so a direct multicall
+// scan is cheap — no event-log fallback needed at this scale.
+function useOwnedVeNFTs(owner: `0x${string}` | undefined) {
+  const { data: maxIdRaw } = useReadContract({
+    address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'tokenId',
+  })
+  const maxId = Math.min(Number(maxIdRaw ?? 0n), 500)
+
+  const { data } = useReadContracts({
+    contracts: Array.from({ length: maxId }, (_, i) => ({
+      address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'ownerOf' as const,
+      args: [BigInt(i + 1)] as const,
+    })),
+    query: { enabled: !!owner && maxId > 0 },
+  })
+
+  if (!owner) return { owned: [] as bigint[], loading: false }
+  if (maxId > 0 && !data) return { owned: [] as bigint[], loading: true }
+
+  const owned = (data ?? [])
+    .map((r, i) => (r.status === 'success' && (r.result as string).toLowerCase() === owner.toLowerCase() ? BigInt(i + 1) : null))
+    .filter((id): id is bigint => id !== null)
+
+  return { owned, loading: false }
+}
 
 function parseFeeRate(fee: string): number {
   return parseFloat(fee.replace('%', '')) / 100
@@ -54,6 +83,29 @@ export default function VotePage() {
     args: address ? [address] : undefined,
     query: { enabled: !!address },
   })
+
+  // AeonVoterV2.vote() adds furnace.votingPowerOf(owner) on top of the veNFT's
+  // own balance for whichever tokenId is used to vote — but it requires an
+  // owned tokenId to call at all, so a Furnace-only burner (no veNFT) has no
+  // way to vote until they hold at least one, even a dust-sized one.
+  const { data: furnaceWeightRaw, refetch: refetchFurnaceWeight } = useReadContract({
+    address: CONTRACTS.TheFurnace,
+    abi: FURNACE_ABI,
+    functionName: 'votingPowerOf',
+    args: address ? [address] : undefined,
+    query: { enabled: !!address, refetchInterval: 15000 },
+  })
+  const furnaceWeight = (furnaceWeightRaw as bigint | undefined) ?? 0n
+
+  const { owned: ownedTokenIds, loading: loadingOwned } = useOwnedVeNFTs(address)
+
+  // Auto-select the wallet's only veNFT so users don't have to look up their
+  // own tokenId; leave the field alone if they own several (picker below) or
+  // have already typed something themselves.
+  useEffect(() => {
+    if (tokenIdInput || loadingOwned) return
+    if (ownedTokenIds.length === 1) setTokenIdInput(ownedTokenIds[0].toString())
+  }, [ownedTokenIds, loadingOwned, tokenIdInput])
 
   const { data: nftOwner } = useReadContract({
     address: CONTRACTS.AeonVotingEscrow,
@@ -107,6 +159,54 @@ export default function VotePage() {
 
   const { writeContract: writeReset, data: resetHash, isPending: resetPending } = useWriteContract()
   const { isLoading: resetConfirming, isSuccess: resetSuccess } = useWaitForTransactionReceipt({ hash: resetHash })
+
+  // Quick-activate: a minimal 1-AEON / 1-week lock, just to mint a tokenId so
+  // a Furnace-only burner's votingPowerOf() bonus becomes usable via vote().
+  const ACTIVATE_AMOUNT = parseUnits('1', 18)
+  const ACTIVATE_WEEK   = 604800n
+  const [activateStep, setActivateStep] = useState<'idle' | 'approve' | 'approve_wait' | 'lock' | 'lock_wait'>('idle')
+  const [activateErr,  setActivateErr]  = useState('')
+
+  const { data: aeonAllowance } = useReadContract({
+    address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'allowance',
+    args: address ? [address, CONTRACTS.AeonVotingEscrow] : undefined,
+    query: { enabled: !!address },
+  })
+
+  const { writeContract: writeActivate, data: activateHash, error: activateWriteErr } = useWriteContract()
+  const { isSuccess: activateTxSuccess } = useWaitForTransactionReceipt({ hash: activateHash, query: { enabled: !!activateHash } })
+
+  useEffect(() => {
+    if (!activateTxSuccess) return
+    if (activateStep === 'approve_wait') { setActivateStep('lock'); return }
+    if (activateStep === 'lock_wait')    { setActivateStep('idle'); refetchFurnaceWeight(); return }
+  }, [activateTxSuccess])
+
+  useEffect(() => {
+    if (!address) return
+    setActivateErr('')
+    if (activateStep === 'approve') {
+      writeActivate({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonVotingEscrow, ACTIVATE_AMOUNT] })
+      setActivateStep('approve_wait')
+    }
+    if (activateStep === 'lock') {
+      writeActivate({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'createLock', args: [ACTIVATE_AMOUNT, ACTIVATE_WEEK] })
+      setActivateStep('lock_wait')
+    }
+  }, [activateStep])
+
+  useEffect(() => {
+    if (activateWriteErr) { setActivateErr(activateWriteErr.message.slice(0, 150)); setActivateStep('idle') }
+  }, [activateWriteErr])
+
+  function handleActivateFurnaceVoting() {
+    if (!address) { openConnectModal?.(); return }
+    setActivateErr('')
+    if ((aeonAllowance as bigint | undefined ?? 0n) < ACTIVATE_AMOUNT) { setActivateStep('approve'); return }
+    setActivateStep('lock')
+  }
+
+  const isActivating = activateStep !== 'idle'
 
   useEffect(() => {
     if (txSuccess) { refetchHasVoted() }
@@ -199,16 +299,33 @@ export default function VotePage() {
                   <span className="text-text-muted">veNFTs owned</span>
                   <span className="font-mono text-violet-400 font-bold">{veNFTCount?.toString() ?? '—'}</span>
                 </div>
-                <div>
-                  <label className="text-xs text-text-muted mb-1 block">Enter veNFT Token ID</label>
-                  <input
-                    type="number"
-                    value={tokenIdInput}
-                    onChange={e => setTokenIdInput(e.target.value)}
-                    placeholder="e.g. 1"
-                    className="input-base w-full text-sm py-2"
-                  />
-                </div>
+
+                {ownedTokenIds.length > 1 ? (
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">Your veNFTs</label>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {ownedTokenIds.map(id => (
+                        <button key={id.toString()} onClick={() => setTokenIdInput(id.toString())}
+                          className={clsx('px-3 py-1.5 rounded-lg text-xs font-mono border transition-all',
+                            tokenIdInput === id.toString() ? 'bg-aeon-400/15 border-aeon-400/30 text-aeon-400' : 'bg-bg-raised border-bg-border text-text-muted hover:border-bg-hover')}>
+                          #{id.toString()}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">Enter veNFT Token ID</label>
+                    <input
+                      type="number"
+                      value={tokenIdInput}
+                      onChange={e => setTokenIdInput(e.target.value)}
+                      placeholder="e.g. 1"
+                      className="input-base w-full text-sm py-2"
+                    />
+                  </div>
+                )}
+
                 {tokenId && (
                   <div className="space-y-1.5 p-3 bg-bg-raised rounded-xl">
                     <div className="flex justify-between text-xs">
@@ -218,9 +335,23 @@ export default function VotePage() {
                       </span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-text-muted">Voting Power</span>
-                      <span className="font-mono text-aeon-400">
+                      <span className="text-text-muted">veNFT Lock Weight</span>
+                      <span className="font-mono text-text-secondary">
                         {votingPower !== undefined ? parseFloat(formatUnits(votingPower, 18)).toFixed(4) : '—'} veAEON
+                      </span>
+                    </div>
+                    {furnaceWeight > 0n && (
+                      <div className="flex justify-between text-xs">
+                        <span className="text-text-muted flex items-center gap-1"><Flame size={11} className="text-orange-400" /> Furnace Bonus</span>
+                        <span className="font-mono text-orange-400">
+                          +{parseFloat(formatUnits(furnaceWeight, 18)).toFixed(4)} veAEON
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-xs pt-1.5 border-t border-bg-border">
+                      <span className="text-text-primary font-medium">Total Voting Power</span>
+                      <span className="font-mono text-aeon-400 font-bold">
+                        {votingPower !== undefined ? parseFloat(formatUnits(votingPower + furnaceWeight, 18)).toFixed(4) : '—'} veAEON
                       </span>
                     </div>
                     <div className="flex justify-between text-xs">
@@ -240,6 +371,28 @@ export default function VotePage() {
                         )}
                       </div>
                     )}
+                  </div>
+                )}
+
+                {!loadingOwned && ownedTokenIds.length === 0 && furnaceWeight > 0n && (
+                  <div className="p-3 rounded-xl bg-orange-400/5 border border-orange-400/20 space-y-2">
+                    <div className="flex items-center gap-1.5 text-xs font-medium text-orange-400">
+                      <Flame size={13} /> Furnace weight not yet active
+                    </div>
+                    <p className="text-2xs text-text-muted leading-relaxed">
+                      You've burned {parseFloat(formatUnits(furnaceWeight, 18)).toFixed(2)} AEON in the Furnace, but AeonVoterV2 only counts that weight toward whichever veNFT you vote with — it needs at least one, even a tiny one. Lock 1 AEON for 1 week to mint a veNFT and unlock your full Furnace voting power.
+                    </p>
+                    <button
+                      onClick={handleActivateFurnaceVoting}
+                      disabled={isActivating}
+                      className="btn-primary w-full text-xs py-2 flex items-center justify-center gap-1.5 disabled:opacity-40"
+                    >
+                      {isActivating && <Loader2 size={12} className="animate-spin" />}
+                      {activateStep === 'approve' || activateStep === 'approve_wait' ? 'Approving 1 AEON…'
+                        : activateStep === 'lock' || activateStep === 'lock_wait' ? 'Creating veNFT…'
+                        : 'Activate Furnace Voting (lock 1 AEON)'}
+                    </button>
+                    {activateErr && <div className="text-2xs text-red-400 font-mono break-all">{activateErr}</div>}
                   </div>
                 )}
               </div>

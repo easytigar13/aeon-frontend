@@ -4,11 +4,11 @@ import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useReadContract } from 'wagmi'
 import { formatUnits } from 'viem'
-import { POOLS, CONTRACTS } from '@/config/contracts'
+import { POOLS, CL_POOLS, CONTRACTS } from '@/config/contracts'
 import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI, FEE_DISTRIBUTOR_ABI } from '@/config/abis'
 import { clsx } from 'clsx'
 import { usePrices } from '@/hooks/usePrices'
-import { usePoolStats, useTotalTVL } from '@/hooks/usePoolStats'
+import { usePoolStats, useClPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 
 function fmtUsd(n: number | null, compact = false): string {
@@ -30,10 +30,11 @@ function tokenIcon(symbol: string) {
 export default function DashboardPage() {
   const [chartTab, setChartTab] = useState<'tvl' | 'volume'>('tvl')
 
-  const prices    = usePrices()
-  const poolStats = usePoolStats(prices)
-  const totalTVL  = useTotalTVL(poolStats)
-  const volResult = useVolume24h(prices)
+  const prices      = usePrices()
+  const poolStats   = usePoolStats(prices)
+  const clPoolStats = useClPoolStats(prices)
+  const totalTVL    = useTotalTVL([...poolStats, ...clPoolStats])
+  const volResult   = useVolume24h(prices)
   const volume24h = volResult.total
   const volByAddr = volResult.byPool
   const statByAddr = Object.fromEntries(poolStats.map(s => [s.address, s]))
@@ -117,7 +118,7 @@ export default function DashboardPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {[
-          { label: 'Total Value Locked', value: fmtUsd(totalTVL || null, true),   icon: <TrendingUp size={16} className="text-aeon-400" />,    delta: `${POOLS.length} pools` },
+          { label: 'Total Value Locked', value: fmtUsd(totalTVL || null, true),   icon: <TrendingUp size={16} className="text-aeon-400" />,    delta: `${POOLS.length + CL_POOLS.length} pools` },
           { label: 'Volume 24h',         value: fmtUsd(volume24h, true),          icon: <BarChart3  size={16} className="text-violet-400" />,  delta: 'from on-chain swap events' },
           { label: 'AEON Supply',        value: `${fmt18(aeonSupply)} AEON`,      icon: <Vote       size={16} className="text-emerald-400" />, delta: 'genesis: 90,000' },
           { label: 'AEON Burned',        value: `${fmt18(totalBurned)} AEON`,     icon: <Flame      size={16} className="text-red-400" />,     delta: `${burnedPct}% of supply` },

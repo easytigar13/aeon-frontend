@@ -28,10 +28,14 @@ export const CONTRACTS = {
 export const NATIVE_SENTINEL = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `0x${string}`
 
 export const TOKENS = {
-  AEON:  { address: CONTRACTS.AeonToken,                                       symbol: 'AEON', decimals: 18, name: 'Aeon' },
-  ETH:   { address: NATIVE_SENTINEL,                                           symbol: 'ETH',  decimals: 18, name: 'Ether (Native)' },
-  WETH:  { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73' as `0x${string}`, symbol: 'WETH', decimals: 18, name: 'Wrapped Ether' },
-  USDG:  { address: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168' as `0x${string}`, symbol: 'USDG', decimals: 6,  name: 'USDG' },
+  AEON:    { address: CONTRACTS.AeonToken,                                       symbol: 'AEON',    decimals: 18, name: 'Aeon' },
+  ETH:     { address: NATIVE_SENTINEL,                                           symbol: 'ETH',     decimals: 18, name: 'Ether (Native)' },
+  WETH:    { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73' as `0x${string}`, symbol: 'WETH',    decimals: 18, name: 'Wrapped Ether' },
+  USDG:    { address: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168' as `0x${string}`, symbol: 'USDG',    decimals: 6,  name: 'USDG' },
+  // real, independently-deployed Virtuals Protocol token on Robinhood Chain (not
+  // ours) — verified via Blockscout (582 holders) and cross-checked against its
+  // own live WETH/VIRTUAL and USDG/VIRTUAL pools before wiring in a CL pool for it
+  VIRTUAL: { address: '0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31' as `0x${string}`, symbol: 'VIRTUAL', decimals: 18, name: 'Virtuals Protocol' },
 } as const
 
 export const POOLS = [
@@ -52,9 +56,10 @@ export const ALGEBRA_CONTRACTS = {
 } as const
 
 export const CL_POOLS = [
-  { name: 'AEON/ETH',  token0: 'AEON', token1: 'WETH', type: 'CL', fee: '0.25%', address: '0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e' as `0x${string}` },
-  { name: 'AEON/USDG', token0: 'AEON', token1: 'USDG', type: 'CL', fee: '0.25%', address: '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6' as `0x${string}` },
-  { name: 'ETH/USDG',  token0: 'WETH', token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3' as `0x${string}` },
+  { name: 'AEON/ETH',     token0: 'AEON', token1: 'WETH',    type: 'CL', fee: '0.25%', address: '0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e' as `0x${string}` },
+  { name: 'AEON/USDG',    token0: 'AEON', token1: 'USDG',    type: 'CL', fee: '0.25%', address: '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6' as `0x${string}` },
+  { name: 'ETH/USDG',     token0: 'WETH', token1: 'USDG',    type: 'CL', fee: '0.25%', address: '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3' as `0x${string}` },
+  { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
 ]
 
 export const CL_RANGE_PRESETS = [
