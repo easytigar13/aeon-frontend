@@ -68,13 +68,26 @@ export function liquidityForAmounts(sqrtPriceX96: bigint, tickLower: number, tic
   const L1 = liquidityForAmount1(a, sqrtPriceX96, amount1)
   return L0 < L1 ? L0 : L1
 }
-function amount0ForLiquidity(sqrtA: bigint, sqrtB: bigint, L: bigint): bigint {
+export function amount0ForLiquidity(sqrtA: bigint, sqrtB: bigint, L: bigint): bigint {
   const [a, b] = sortAB(sqrtA, sqrtB)
   return ((L << 96n) * (b - a)) / b / a
 }
-function amount1ForLiquidity(sqrtA: bigint, sqrtB: bigint, L: bigint): bigint {
+export function amount1ForLiquidity(sqrtA: bigint, sqrtB: bigint, L: bigint): bigint {
   const [a, b] = sortAB(sqrtA, sqrtB)
   return (L * (b - a)) / Q96
+}
+
+// Mirrors LiquidityAmounts.getAmountsForLiquidity — the current token0/token1
+// amounts a live position's liquidity represents at the pool's current price.
+// Used to value existing positions (e.g. in Portfolio), not just new mints.
+export function amountsForLiquidity(sqrtPriceX96: bigint, tickLower: number, tickUpper: number, liquidity: bigint): { amount0: bigint; amount1: bigint } {
+  const [a, b] = sortAB(tickToSqrtPriceX96(tickLower), tickToSqrtPriceX96(tickUpper))
+  if (sqrtPriceX96 <= a) return { amount0: amount0ForLiquidity(a, b, liquidity), amount1: 0n }
+  if (sqrtPriceX96 >= b) return { amount0: 0n, amount1: amount1ForLiquidity(a, b, liquidity) }
+  return {
+    amount0: amount0ForLiquidity(sqrtPriceX96, b, liquidity),
+    amount1: amount1ForLiquidity(a, sqrtPriceX96, liquidity),
+  }
 }
 
 export type RangeSide = 'token0' | 'token1' | 'both'

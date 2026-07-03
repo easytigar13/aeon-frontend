@@ -1,16 +1,21 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, BarChart3 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
-import { POOLS, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_ABI, VOTER_ABI, WHITELIST_ABI } from '@/config/abis'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
+import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_ABI, VOTER_ABI, WHITELIST_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
+import { useClPositions, type ClPosition } from '@/hooks/useClPositions'
+import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { TokenIcon } from '@/components/TokenIcon'
+import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
+import { binIdToPrice } from '@/lib/dlmmMath'
 
 type PriceMap = Record<string, number | null>
 
@@ -19,6 +24,17 @@ function fmtUsd(n: number | null): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
   if (n >= 1_000)     return `$${(n / 1_000).toFixed(2)}K`
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+// Formats a single price POINT (one end of a range) — unlike fmtUsd, never
+// collapses a real sub-cent price down to "$0.00".
+function fmtPricePoint(n: number | null): string {
+  if (n === null || !isFinite(n) || n <= 0) return '—'
+  if (n >= 1_000_000_000 || n < 1e-9) return '$' + n.toExponential(2)
+  if (n >= 1) return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return '$' + n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
+}
+function symbolFor(addr: string): string {
+  return Object.entries(TOKENS).find(([, t]) => t.address.toLowerCase() === addr.toLowerCase())?.[0] ?? '?'
 }
 
 const UNIQUE_POOLS = POOLS
@@ -496,6 +512,159 @@ function useEarnStats(wallet?: `0x${string}`) {
   return { totalStaked, totalLPUnstaked, totalEarned, lpByAddr, stakedByAddr, earnedByAddr, fmtLP, fmtAEON }
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// CL (Algebra Integral) and DLMM positions — invisible in Portfolio before
+// this: only vAMM LP was ever tracked here, so anyone who added CL or DLMM
+// liquidity via /liquidity had no way to see it reflected anywhere else.
+// ─────────────────────────────────────────────────────────────────────────
+
+function ClPositionRow({ pos, prices, onUsd }: { pos: ClPosition; prices: PriceMap; onUsd: (tokenId: bigint, usd: number | null) => void }) {
+  const poolCfg = CL_POOLS.find(cp => {
+    const a0 = TOKENS[cp.token0 as keyof typeof TOKENS].address.toLowerCase()
+    const a1 = TOKENS[cp.token1 as keyof typeof TOKENS].address.toLowerCase()
+    const p0 = pos.token0.toLowerCase(), p1 = pos.token1.toLowerCase()
+    return (a0 === p0 && a1 === p1) || (a0 === p1 && a1 === p0)
+  })
+
+  const { data: globalStateRaw } = useReadContract({
+    address: poolCfg?.address, abi: ALGEBRA_POOL_ABI, functionName: 'globalState',
+    query: { enabled: !!poolCfg, refetchInterval: 20000 },
+  })
+  const globalState = globalStateRaw as readonly [bigint, number, number, number, number, boolean] | undefined
+  const sqrtPriceX96 = globalState?.[0] ?? 0n
+  const currentTick  = globalState?.[1] ?? 0
+  const poolInitialized = sqrtPriceX96 > 0n
+
+  const sym0 = symbolFor(pos.token0)
+  const sym1 = symbolFor(pos.token1)
+  const dec0 = TOKENS[sym0 as keyof typeof TOKENS]?.decimals ?? 18
+  const dec1 = TOKENS[sym1 as keyof typeof TOKENS]?.decimals ?? 18
+
+  const priceLow  = tickToPrice(pos.tickLower, dec0, dec1)
+  const priceHigh = tickToPrice(pos.tickUpper, dec0, dec1)
+  const p1Usd = prices[sym1] ?? null
+  const usdLow  = p1Usd !== null ? priceLow  * p1Usd : null
+  const usdHigh = p1Usd !== null ? priceHigh * p1Usd : null
+
+  const inRange = poolInitialized && currentTick >= pos.tickLower && currentTick < pos.tickUpper
+
+  const { amount0, amount1 } = poolInitialized
+    ? amountsForLiquidity(sqrtPriceX96, pos.tickLower, pos.tickUpper, pos.liquidity)
+    : { amount0: 0n, amount1: 0n }
+  const p0Usd = prices[sym0] ?? null
+  const usdValue = (p0Usd !== null ? parseFloat(formatUnits(amount0, dec0)) * p0Usd : 0)
+    + (p1Usd !== null ? parseFloat(formatUnits(amount1, dec1)) * p1Usd : 0)
+
+  useEffect(() => { onUsd(pos.tokenId, usdValue > 0 ? usdValue : null) }, [usdValue])
+
+  return (
+    <div className="card px-4 py-3 flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <div className="flex -space-x-2">
+          <TokenIcon symbol={sym0} size={36} />
+          <TokenIcon symbol={sym1} size={36} />
+        </div>
+        <div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-text-primary">{sym0}/{sym1}</span>
+            <span className={clsx('text-2xs px-1.5 py-0.5 rounded-full font-mono font-bold', inRange ? 'bg-emerald-500/15 text-emerald-400' : 'bg-yellow-500/15 text-yellow-400')}>
+              {inRange ? '● In Range' : '○ Out of Range'}
+            </span>
+          </div>
+          <div className="flex gap-2 mt-0.5 items-center">
+            <span className="text-2xs font-mono font-bold text-violet-400">CL</span>
+            <span className="text-2xs text-text-muted font-mono">
+              {usdLow !== null && usdHigh !== null ? `${fmtPricePoint(usdLow)} → ${fmtPricePoint(usdHigh)}` : `${priceLow.toPrecision(4)} → ${priceHigh.toPrecision(4)} ${sym1}`}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="text-right">
+        <div className="text-xs font-mono text-text-primary">{fmtUsd(usdValue || null)}</div>
+        <Link href="/liquidity" className="text-2xs text-aeon-400 hover:underline">Manage →</Link>
+      </div>
+    </div>
+  )
+}
+
+function DlmmPoolPositions({ pool, wallet, prices, onUsd }: { pool: typeof DLMM_POOLS[number]; wallet: `0x${string}`; prices: PriceMap; onUsd: (poolAddr: string, usd: number | null) => void }) {
+  const { data: activeIdRaw } = useReadContract({
+    address: pool.address, abi: LB_PAIR_ABI, functionName: 'getActiveId', query: { refetchInterval: 20000 },
+  })
+  const activeId = activeIdRaw !== undefined ? Number(activeIdRaw) : undefined
+  const { positions } = useDlmmPositions(pool, wallet, activeId)
+
+  const dec0 = TOKENS[pool.token0 as keyof typeof TOKENS].decimals
+  const dec1 = TOKENS[pool.token1 as keyof typeof TOKENS].decimals
+
+  const { data: binData } = useReadContracts({
+    contracts: positions.flatMap(p => ([
+      { address: pool.address, abi: LB_PAIR_ABI, functionName: 'getBin' as const, args: [BigInt(p.id)] as const },
+      { address: pool.address, abi: LB_PAIR_ABI, functionName: 'totalSupply' as const, args: [BigInt(p.id)] as const },
+    ])),
+    query: { enabled: positions.length > 0, refetchInterval: 20000 },
+  })
+
+  const p0Usd = prices[pool.token0] ?? null
+  const p1Usd = prices[pool.token1] ?? null
+
+  let totalUsd = 0
+  let minId = Infinity, maxId = -Infinity
+  positions.forEach((p, i) => {
+    minId = Math.min(minId, p.id); maxId = Math.max(maxId, p.id)
+    const binR = binData?.[i * 2]
+    const supplyR = binData?.[i * 2 + 1]
+    if (binR?.status !== 'success' || supplyR?.status !== 'success') return
+    const [reserveX, reserveY] = binR.result as readonly [bigint, bigint]
+    const supply = supplyR.result as bigint
+    if (supply === 0n) return
+    const myX = (reserveX * p.balance) / supply
+    const myY = (reserveY * p.balance) / supply
+    if (p0Usd !== null) totalUsd += parseFloat(formatUnits(myX, dec0)) * p0Usd
+    if (p1Usd !== null) totalUsd += parseFloat(formatUnits(myY, dec1)) * p1Usd
+  })
+
+  useEffect(() => { onUsd(pool.address.toLowerCase(), totalUsd > 0 ? totalUsd : null) }, [totalUsd])
+
+  if (positions.length === 0 || activeId === undefined) return null
+
+  const priceLow  = binIdToPrice(minId, pool.binStep, dec0, dec1)
+  const priceHigh = binIdToPrice(maxId, pool.binStep, dec0, dec1)
+  const usdLow  = p1Usd !== null ? priceLow  * p1Usd : null
+  const usdHigh = p1Usd !== null ? priceHigh * p1Usd : null
+  const inRange = activeId >= minId && activeId <= maxId
+
+  return (
+    <div className="card px-4 py-3 flex items-center justify-between">
+      <div className="flex items-center gap-3">
+        <div className="flex -space-x-2">
+          <TokenIcon symbol={pool.token0} size={36} />
+          <TokenIcon symbol={pool.token1} size={36} />
+        </div>
+        <div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm font-semibold text-text-primary">{pool.name}</span>
+            <span className={clsx('text-2xs px-1.5 py-0.5 rounded-full font-mono font-bold', inRange ? 'bg-emerald-500/15 text-emerald-400' : 'bg-yellow-500/15 text-yellow-400')}>
+              {inRange ? '● In Range' : '○ Out of Range'}
+            </span>
+          </div>
+          <div className="flex gap-2 mt-0.5 items-center">
+            <span className="text-2xs font-mono font-bold text-amber-400">DLMM</span>
+            <span className="text-2xs text-text-muted font-mono">
+              {usdLow !== null && usdHigh !== null ? `${fmtPricePoint(usdLow)} → ${fmtPricePoint(usdHigh)}` : `${priceLow.toPrecision(4)} → ${priceHigh.toPrecision(4)} ${pool.token1}`}
+              {' · '}{positions.length} bin{positions.length === 1 ? '' : 's'}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div className="text-right">
+        <div className="text-xs font-mono text-text-primary">{fmtUsd(totalUsd || null)}</div>
+        <Link href="/liquidity" className="text-2xs text-aeon-400 hover:underline">Manage →</Link>
+      </div>
+    </div>
+  )
+}
+
 function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
   wallet?: `0x${string}`
   prices: PriceMap
@@ -558,9 +727,24 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
     return sum
   }, 0)
 
-  const totalTokenUsd = tokenOnlyUsd + totalLpUsd
-
   const hasTokens = tokens.some(t => t.balance && t.balance > 0.000001)
+
+  // CL positions span all CL pools at once; DLMM is tracked per-pool (each
+  // pool's bin scan needs that pool's own active bin id).
+  const { positions: clPositions } = useClPositions(wallet)
+  const [clUsdByTokenId, setClUsdByTokenId] = useState<Record<string, number | null>>({})
+  const onClUsd = useCallback((tokenId: bigint, usd: number | null) => {
+    setClUsdByTokenId(prev => ({ ...prev, [tokenId.toString()]: usd }))
+  }, [])
+  const totalClUsd = Object.values(clUsdByTokenId).reduce((s: number, v) => s + (v ?? 0), 0)
+
+  const [dlmmUsdByPool, setDlmmUsdByPool] = useState<Record<string, number | null>>({})
+  const onDlmmUsd = useCallback((poolAddr: string, usd: number | null) => {
+    setDlmmUsdByPool(prev => ({ ...prev, [poolAddr]: usd }))
+  }, [])
+  const totalDlmmUsd = Object.values(dlmmUsdByPool).reduce((s: number, v) => s + (v ?? 0), 0)
+
+  const totalTokenUsd = tokenOnlyUsd + totalLpUsd + totalClUsd + totalDlmmUsd
 
   return (
     <div className="space-y-8">
@@ -571,16 +755,26 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
         </div>
         <div className="text-4xl font-display font-bold text-text-primary mb-4">{wallet ? fmtUsd(totalTokenUsd || null) : '$—'}</div>
         {wallet && (
-          <div className="grid grid-cols-2 gap-3 pt-3 border-t border-bg-border">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-bg-border">
             <div>
               <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">Token Balances</div>
               <div className="text-lg font-display font-semibold text-text-primary">{fmtUsd(tokenOnlyUsd || null)}</div>
             </div>
             <div>
               <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">
-                LP Positions{lpPositions.length > 0 ? ` · ${lpPositions.length}` : ''}
+                vAMM LP{lpPositions.length > 0 ? ` · ${lpPositions.length}` : ''}
               </div>
-              <div className="text-lg font-display font-semibold text-aeon-400">{totalLpUsd > 0 ? fmtUsd(totalLpUsd) : '$—'}</div>
+              <div className="text-lg font-display font-semibold text-blue-400">{totalLpUsd > 0 ? fmtUsd(totalLpUsd) : '$—'}</div>
+            </div>
+            <div>
+              <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">
+                CL Positions{clPositions.length > 0 ? ` · ${clPositions.length}` : ''}
+              </div>
+              <div className="text-lg font-display font-semibold text-violet-400">{totalClUsd > 0 ? fmtUsd(totalClUsd) : '$—'}</div>
+            </div>
+            <div>
+              <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">DLMM Positions</div>
+              <div className="text-lg font-display font-semibold text-amber-400">{totalDlmmUsd > 0 ? fmtUsd(totalDlmmUsd) : '$—'}</div>
             </div>
           </div>
         )}
@@ -650,6 +844,28 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
                   )}
                 </div>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {wallet && clPositions.length > 0 && (
+        <div>
+          <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Concentrated Liquidity (CL) Positions</div>
+          <div className="space-y-2">
+            {clPositions.map(pos => (
+              <ClPositionRow key={pos.tokenId.toString()} pos={pos} prices={prices} onUsd={onClUsd} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {wallet && (
+        <div className={Object.values(dlmmUsdByPool).some(v => v !== null && v !== undefined) ? '' : 'hidden'}>
+          <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">DLMM Positions</div>
+          <div className="space-y-2">
+            {DLMM_POOLS.map(pool => (
+              <DlmmPoolPositions key={pool.address} pool={pool} wallet={wallet} prices={prices} onUsd={onDlmmUsd} />
             ))}
           </div>
         </div>

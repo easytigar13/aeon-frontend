@@ -11,6 +11,8 @@ import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, WHITELIST_ABI, ALGEBRA_POOL_
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
+import { useClPositions } from '@/hooks/useClPositions'
+import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { TokenIcon } from '@/components/TokenIcon'
 import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
 import { binIdToPrice, dlmmRangeSide, computeSpotDistribution } from '@/lib/dlmmMath'
@@ -37,6 +39,14 @@ function fmtUsd(n: number | null): string {
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
   if (n >= 1_000) return `$${(n / 1_000).toFixed(2)}K`
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+// Formats a single price POINT (e.g. one end of a range), not a total value —
+// unlike fmtUsd, never collapses a real sub-cent price down to "$0.00".
+function fmtPricePoint(n: number | null): string {
+  if (n === null || !isFinite(n) || n <= 0) return '—'
+  if (n >= 1_000_000_000 || n < 1e-9) return '$' + n.toExponential(2)
+  if (n >= 1) return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return '$' + n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
 }
 
 function useTokenBal(tokenAddr: `0x${string}` | undefined, wallet: `0x${string}` | undefined) {
@@ -751,36 +761,6 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
 // CL — Algebra Integral concentrated liquidity
 // ─────────────────────────────────────────────────────────────────────────
 
-function useClPositions(owner: `0x${string}` | undefined) {
-  const MAX_SLOTS = 15
-  const { data: balData } = useReadContract({
-    address: PM, abi: ALGEBRA_PM_ENUMERABLE_ABI, functionName: 'balanceOf',
-    args: owner ? [owner] : undefined, query: { enabled: !!owner, refetchInterval: 20000 },
-  })
-  const balance = Math.min(Number((balData as bigint | undefined) ?? 0n), MAX_SLOTS)
-
-  const idxContracts = Array.from({ length: MAX_SLOTS }, (_, i) => ({
-    address: PM, abi: ALGEBRA_PM_ENUMERABLE_ABI, functionName: 'tokenOfOwnerByIndex' as const,
-    args: owner ? [owner, BigInt(i)] as const : undefined,
-  }))
-  const { data: tokenIdData } = useReadContracts({ contracts: idxContracts, query: { enabled: !!owner && balance > 0 } })
-  const tokenIds = (tokenIdData ?? []).slice(0, balance).filter(r => r.status === 'success').map(r => r.result as bigint)
-
-  const posContracts = tokenIds.map(id => ({
-    address: PM, abi: ALGEBRA_PM_ENUMERABLE_ABI, functionName: 'positions' as const, args: [id] as const,
-  }))
-  const { data: posData, refetch } = useReadContracts({ contracts: posContracts, query: { enabled: tokenIds.length > 0, refetchInterval: 20000 } })
-
-  const positions = tokenIds.map((id, i) => {
-    const r = posData?.[i]
-    if (!r || r.status !== 'success') return null
-    const result = r.result as readonly [bigint, string, string, string, string, number, number, bigint, bigint, bigint, bigint, bigint]
-    const [, , token0, token1, , tickLower, tickUpper, liquidity] = result
-    return { tokenId: id, token0, token1, tickLower, tickUpper, liquidity }
-  }).filter((p): p is NonNullable<typeof p> => p !== null && p.liquidity > 0n)
-
-  return { positions, refetch }
-}
 
 function PositionCard({ pos, onDone }: { pos: { tokenId: bigint, token0: string, token1: string, tickLower: number, tickUpper: number, liquidity: bigint }, onDone: () => void }) {
   const { address } = useAccount()
@@ -945,6 +925,19 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
   const displaySide: 'display0' | 'display1' | 'both' =
     side === 'both' ? 'both' :
     (side === 'token0') === isDisp0First ? 'display0' : 'display1'
+
+  // Same tick->price conversion as displayCurrentPrice, applied to the range
+  // bounds — then to a real USD price by multiplying by token1's own USD
+  // price (e.g. for ETH/USDC, this ratio already IS ETH's USD price; for any
+  // other pair it's token0's price implied at that point in the range).
+  function tickToDisplayPrice(tick: number): number {
+    return isDisp0First ? tickToPrice(tick, token0Dec, token1Dec) : 1 / tickToPrice(tick, token1Dec, token0Dec)
+  }
+  const rangeDisplayLow  = tickLower !== undefined && tickUpper !== undefined ? Math.min(tickToDisplayPrice(tickLower), tickToDisplayPrice(tickUpper)) : null
+  const rangeDisplayHigh = tickLower !== undefined && tickUpper !== undefined ? Math.max(tickToDisplayPrice(tickLower), tickToDisplayPrice(tickUpper)) : null
+  const token1UsdPrice = prices[selectedPool.token1] ?? null
+  const rangeUsdLow  = rangeDisplayLow  !== null && token1UsdPrice !== null ? rangeDisplayLow  * token1UsdPrice : null
+  const rangeUsdHigh = rangeDisplayHigh !== null && token1UsdPrice !== null ? rangeDisplayHigh * token1UsdPrice : null
 
   useEffect(() => { setAmount0(''); setAmount1(''); setErrMsg('') }, [selectedPool.address, rangeKey, customMin, customMax])
   useEffect(() => { setCustomMin(''); setCustomMax('') }, [selectedPool.address])
@@ -1182,7 +1175,18 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
             )}
 
             {tickLower !== undefined && tickUpper !== undefined ? (
-              <div className="text-2xs text-text-muted text-center font-mono">tick range [{tickLower}, {tickUpper}] · current tick {currentTick}</div>
+              <div className="text-center">
+                {rangeUsdLow !== null && rangeUsdHigh !== null ? (
+                  <div className="text-sm font-mono font-semibold text-text-primary">
+                    {fmtPricePoint(rangeUsdLow)} <span className="text-text-muted">→</span> {fmtPricePoint(rangeUsdHigh)}
+                  </div>
+                ) : rangeDisplayLow !== null && rangeDisplayHigh !== null ? (
+                  <div className="text-sm font-mono font-semibold text-text-primary">
+                    {rangeDisplayLow.toPrecision(6)} <span className="text-text-muted">→</span> {rangeDisplayHigh.toPrecision(6)} {selectedPool.token1}
+                  </div>
+                ) : null}
+                <div className="text-2xs text-text-muted font-mono mt-0.5">tick [{tickLower}, {tickUpper}] · current tick {currentTick}</div>
+              </div>
             ) : isCustomRange && poolInitialized ? (
               <div className="text-2xs text-text-muted text-center">Enter both a min and max price to set your range</div>
             ) : null}
@@ -1312,31 +1316,6 @@ const DLMM_RANGE_PRESETS = [
   { key: 'normal', label: 'Normal',     desc: '±10 bins', lower: -10, upper: 10  },
   { key: 'wide',   label: 'Wide',       desc: '±20 bins', lower: -20, upper: 20  },
 ]
-const DLMM_BIN_SCAN_RADIUS = 60
-
-function useDlmmPositions(pool: typeof DLMM_POOLS[number], owner: `0x${string}` | undefined, activeId: number | undefined) {
-  const ids = activeId !== undefined
-    ? Array.from({ length: DLMM_BIN_SCAN_RADIUS * 2 + 1 }, (_, i) => activeId - DLMM_BIN_SCAN_RADIUS + i)
-    : []
-
-  const { data, refetch } = useReadContracts({
-    contracts: ids.map(id => ({
-      address: pool.address, abi: LB_PAIR_ABI, functionName: 'balanceOf' as const,
-      args: owner ? [owner, BigInt(id)] as const : undefined,
-    })),
-    query: { enabled: !!owner && ids.length > 0, refetchInterval: 20000 },
-  })
-
-  const positions = ids
-    .map((id, i) => {
-      const r = data?.[i]
-      const bal = r?.status === 'success' ? r.result as bigint : 0n
-      return bal > 0n ? { id, balance: bal } : null
-    })
-    .filter((p): p is { id: number, balance: bigint } => p !== null)
-
-  return { positions, refetch }
-}
 
 function DlmmPositionCard({ pool, pos, owner, onDone }: { pool: typeof DLMM_POOLS[number], pos: { id: number, balance: bigint }, owner: `0x${string}`, onDone: () => void }) {
   const [step, setStep] = useState<'idle' | 'approve' | 'approve_wait' | 'remove' | 'remove_wait' | 'done'>('idle')
@@ -1423,6 +1402,10 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
   const isCustomRange = rangeKey === 'custom'
   const preset = DLMM_RANGE_PRESETS.find(p => p.key === rangeKey)
 
+  const prices        = usePrices()
+  const volResult     = useVolume24h(prices)
+  const dlmmPoolStats = useDlmmPoolStats(prices)
+
   const { data: isWhitelistedRaw } = useReadContract({
     address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'isWhitelisted',
     args: address ? [address] : undefined, query: { enabled: !!address },
@@ -1458,6 +1441,32 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
   const binOffsetUpperRaw = isCustomRange ? (parseInt(customUpper, 10) || 0) : preset!.upper
   const binOffsetUpper = Math.max(binOffsetLower, binOffsetUpperRaw) // guard against an inverted custom range
   const side = dlmmRangeSide(binOffsetLower, binOffsetUpper)
+
+  // Same "1 token0 = X token1" conversion as currentPrice, applied to the
+  // range's bin bounds, then to a real USD price via token1's own price.
+  const rangeLowPrice  = activeId !== undefined ? binIdToPrice(activeId + binOffsetLower, selectedPool.binStep, token0Dec, token1Dec) : null
+  const rangeHighPrice = activeId !== undefined ? binIdToPrice(activeId + binOffsetUpper, selectedPool.binStep, token0Dec, token1Dec) : null
+  const token1UsdPrice = prices[selectedPool.token1] ?? null
+  const rangeUsdLow  = rangeLowPrice  !== null && token1UsdPrice !== null ? rangeLowPrice  * token1UsdPrice : null
+  const rangeUsdHigh = rangeHighPrice !== null && token1UsdPrice !== null ? rangeHighPrice * token1UsdPrice : null
+
+  // ── APR estimate — modeled off the paired vAMM pool's trading volume, same
+  // approach as the CL panel. Uses a plain your-deposit-vs-pool-TVL share
+  // rather than a bin-concentration multiplier — honest simplification since
+  // we don't pull enough per-bin reserve data here to model concentration
+  // precisely the way CL's tick-based liquidity math does.
+  const sisterVamm = POOLS.find(p => p.name === selectedPool.name)
+  const sisterVol  = sisterVamm ? volResult.byPool[sisterVamm.address.toLowerCase()] ?? null : null
+  const dlmmFeeRate = parseFeeRate(selectedPool.fee)
+  const estDailyFeesUsd = sisterVol !== null ? sisterVol * dlmmFeeRate : null
+
+  const p0 = prices[selectedPool.token0] ?? null
+  const p1 = prices[selectedPool.token1] ?? null
+  const depositUsd = (p0 !== null && amount0 ? parseFloat(amount0 || '0') * p0 : 0) + (p1 !== null && amount1 ? parseFloat(amount1 || '0') * p1 : 0)
+  const poolTvlUsd = dlmmPoolStats.find(s => s.address === selectedPool.address)?.tvlUsd ?? null
+  const yourShare = poolTvlUsd !== null && poolTvlUsd > 0 ? depositUsd / (depositUsd + poolTvlUsd) : (depositUsd > 0 ? 1 : 0)
+  const yourYearlyFeesUsd = estDailyFeesUsd !== null ? estDailyFeesUsd * 365 * yourShare : null
+  const dlmmApr = yourYearlyFeesUsd !== null && depositUsd > 0 ? (yourYearlyFeesUsd / depositUsd) * 100 : null
 
   useEffect(() => { setAmount0(''); setAmount1(''); setErrMsg('') }, [selectedPool.address, rangeKey, customLower, customUpper])
 
@@ -1640,8 +1649,19 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
             )}
 
             {activeId !== undefined && (
-              <div className="text-2xs text-text-muted text-center font-mono">
-                bin range [{activeId + binOffsetLower}, {activeId + binOffsetUpper}] · {binOffsetUpper - binOffsetLower + 1} bin{binOffsetUpper - binOffsetLower === 0 ? '' : 's'}
+              <div className="text-center">
+                {rangeUsdLow !== null && rangeUsdHigh !== null ? (
+                  <div className="text-sm font-mono font-semibold text-text-primary">
+                    {fmtPricePoint(rangeUsdLow)} <span className="text-text-muted">→</span> {fmtPricePoint(rangeUsdHigh)}
+                  </div>
+                ) : rangeLowPrice !== null && rangeHighPrice !== null ? (
+                  <div className="text-sm font-mono font-semibold text-text-primary">
+                    {rangeLowPrice.toPrecision(6)} <span className="text-text-muted">→</span> {rangeHighPrice.toPrecision(6)} {selectedPool.token1}
+                  </div>
+                ) : null}
+                <div className="text-2xs text-text-muted font-mono mt-0.5">
+                  bin [{activeId + binOffsetLower}, {activeId + binOffsetUpper}] · {binOffsetUpper - binOffsetLower + 1} bin{binOffsetUpper - binOffsetLower === 0 ? '' : 's'}
+                </div>
               </div>
             )}
             {side !== 'both' && (
@@ -1680,6 +1700,31 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
             </div>
             <div className="text-2xs text-text-muted leading-relaxed pt-1">
               Spread evenly (uniform "spot" shape) across the bins in your chosen range. Amounts don't need to match a fixed ratio; unused tokens are refunded.
+            </div>
+          </div>
+
+          <div className="card p-4 space-y-2.5">
+            <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Estimated Returns</div>
+            {side !== 'both' ? (
+              <div className="text-xs text-text-muted">Range doesn't include the current price — no fee estimate until it does.</div>
+            ) : depositUsd > 0 ? (
+              <>
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-text-muted">Your Est. APR <span className="text-2xs text-text-muted">(while in range)</span></span>
+                  <span className="font-mono text-sm font-bold text-emerald-400">{fmtApr(dlmmApr)}</span>
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-bg-border">
+                  <span className="text-sm text-text-muted">Est. Yearly Earnings</span>
+                  <span className="font-mono text-sm text-aeon-400">{fmtUsd(yourYearlyFeesUsd)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="text-xs text-text-muted">Enter an amount to estimate your yearly earnings.</div>
+            )}
+            <div className="text-2xs text-text-muted leading-relaxed pt-1">
+              {sisterVamm
+                ? `Estimated from the paired vAMM ${selectedPool.name} pool's trailing volume at this pool's ${selectedPool.fee} base fee, scaled by your deposit's share of pool TVL. Doesn't model the extra boost from concentrating into fewer bins — actual APR for a tight range will be higher than this. This DLMM pool is brand new — the real rate will depend on actual trading activity here once it builds up.`
+                : `This pool has no vAMM equivalent to estimate volume from yet, so no APR estimate is shown until this DLMM pool builds up its own trading history.`}
             </div>
           </div>
 
