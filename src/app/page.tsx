@@ -84,36 +84,8 @@ export default function HomePage() {
 
         {/* The flip */}
         <div className="grid md:grid-cols-2 gap-6 mb-16">
-          {/* Before / broken model */}
-          <Reveal className="card p-8 border-bg-border bg-bg-raised relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
-            <div className="absolute top-4 right-4 text-xs font-mono text-text-muted/50 font-bold uppercase tracking-widest">Every other ve(3,3)</div>
-            <div className="w-10 h-10 rounded-xl bg-bg-base flex items-center justify-center mb-5">
-              <AlertTriangle size={20} className="text-text-muted" />
-            </div>
-            <h3 className="font-display font-bold text-xl text-text-primary mb-4">The broken loop</h3>
-            <div className="space-y-3">
-              {[
-                'Farmer arrives for the highest APR',
-                'Farmer votes for their own pool',
-                'Farmer earns emissions → sells',
-                'Token price collapses',
-                'APR collapses. Everyone leaves.',
-              ].map((step, i) => (
-                <div key={i} className="flex items-start gap-3">
-                  <div className="w-5 h-5 rounded-full bg-bg-base border border-bg-border flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="text-2xs font-mono text-text-muted">{i + 1}</span>
-                  </div>
-                  <span className="text-sm text-text-secondary">{step}</span>
-                </div>
-              ))}
-            </div>
-            <div className="mt-6 p-3 rounded-xl bg-bg-base border border-bg-border">
-              <span className="text-xs font-mono text-text-muted">Typical outcome: token collapses, protocol dies.</span>
-            </div>
-          </Reveal>
-
-          {/* AEON model */}
-          <Reveal delay={120} className="card p-8 border-emerald-400/20 bg-emerald-400/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
+          {/* AEON model — left side */}
+          <Reveal className="card p-8 border-emerald-400/20 bg-emerald-400/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
             <div className="absolute top-4 right-4 text-xs font-mono text-emerald-400/40 font-bold uppercase tracking-widest">AEON</div>
             <div className="w-10 h-10 rounded-xl bg-emerald-400/10 flex items-center justify-center mb-5">
               <Crown size={20} className="text-emerald-400" />
@@ -137,6 +109,34 @@ export default function HomePage() {
             </div>
             <div className="mt-6 p-3 rounded-xl bg-emerald-400/10 border border-emerald-400/20">
               <span className="text-xs font-mono text-emerald-400">By contract, token holders get paid first — every time.</span>
+            </div>
+          </Reveal>
+
+          {/* Before / broken model — right side */}
+          <Reveal delay={120} className="card p-8 border-yellow-500/20 bg-yellow-500/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
+            <div className="absolute top-4 right-4 text-xs font-mono text-yellow-400/50 font-bold uppercase tracking-widest">Every other ve(3,3)</div>
+            <div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center mb-5">
+              <AlertTriangle size={20} className="text-yellow-400" />
+            </div>
+            <h3 className="font-display font-bold text-xl text-text-primary mb-4">The broken loop</h3>
+            <div className="space-y-3">
+              {[
+                'Farmer arrives for the highest APR',
+                'Farmer votes for their own pool',
+                'Farmer earns emissions → sells',
+                'Token price collapses',
+                'APR collapses. Everyone leaves.',
+              ].map((step, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-yellow-500/20 border border-yellow-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-2xs font-mono text-yellow-400">{i + 1}</span>
+                  </div>
+                  <span className="text-sm text-text-secondary">{step}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-6 p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20">
+              <span className="text-xs font-mono text-yellow-400">Typical outcome: token collapses, protocol dies.</span>
             </div>
           </Reveal>
         </div>

@@ -5,6 +5,7 @@ import { Search, Copy, Check, TrendingUp, TrendingDown } from 'lucide-react'
 import { TOKENS, POOLS } from '@/config/contracts'
 import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
+import { useVolume24h } from '@/hooks/useVolume24h'
 import { TokenIcon, ChainBadge } from '@/components/TokenIcon'
 import { Sparkline } from '@/components/Sparkline'
 import { AddToWalletButton } from '@/components/AddToWalletButton'
@@ -29,6 +30,7 @@ function shortAddr(addr: string): string {
 export default function TokensPage() {
   const prices = usePrices()
   const dexInfo = useDexTokenInfo()
+  const volResult = useVolume24h(prices)
   const [query, setQuery] = useState('')
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -97,9 +99,20 @@ export default function TokensPage() {
             const pools = poolCountBySymbol[key] ?? 0
             const info = dexInfo[key]
             const change = info?.priceChange24h ?? null
-            const positive = change === null || change >= 0
-            const sparkline = info?.sparkline ?? []
-            const hasChart = sparkline.length >= 2
+
+            // GeckoTerminal doesn't index this chain (confirmed: 404s on every
+            // lookup), so its sparkline is always empty here in practice —
+            // fall back to a real on-chain price history built from this
+            // token's own recent Swap events, same as the Swap page's cards.
+            const geckoSparkline = info?.sparkline ?? []
+            const chainSparkline = volResult.priceHistory[key] ?? []
+            const usingGecko = geckoSparkline.length >= 2
+            const usingChain = !usingGecko && chainSparkline.length >= 2
+            const sparkline  = usingGecko ? geckoSparkline : chainSparkline
+            const hasChart   = sparkline.length >= 2
+            const positive   = usingChain
+              ? (sparkline.length < 2 || sparkline[sparkline.length - 1] >= sparkline[0])
+              : (change === null || change >= 0)
 
             return (
               <div
@@ -136,10 +149,13 @@ export default function TokensPage() {
                 </div>
 
                 {/* Sparkline chart */}
-                {hasChart && (
+                {hasChart ? (
                   <div className="px-4 pb-2">
                     <Sparkline prices={sparkline} positive={positive} width={280} height={44} />
+                    <div className="text-2xs text-text-muted mt-0.5">{usingGecko ? '24h · hourly' : 'Recent trades · on-chain'}</div>
                   </div>
+                ) : (
+                  <div className="px-4 pb-3 text-2xs text-text-muted">No chart data yet — shows once this token trades</div>
                 )}
 
                 {/* Footer: address + actions */}
