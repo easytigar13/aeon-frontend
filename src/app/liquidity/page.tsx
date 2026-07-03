@@ -13,7 +13,7 @@ import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { TokenIcon } from '@/components/TokenIcon'
 import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
-import { binIdToPrice } from '@/lib/dlmmMath'
+import { binIdToPrice, dlmmRangeSide, computeSpotDistribution } from '@/lib/dlmmMath'
 
 type PoolMode = 'vAMM' | 'CL' | 'DLMM'
 type Tab = 'add' | 'remove'
@@ -1120,12 +1120,16 @@ function ClLiquidity() {
 // DLMM — Trader Joe / LFJ Liquidity Book (joe-v2)
 // ─────────────────────────────────────────────────────────────────────────
 
-// The exact symmetric 3-bin "spot" shape used to seed these pools at launch:
-// bin-1 gets Y only, the active bin gets both, bin+1 gets X only.
-const DLMM_DELTA_IDS = [-1, 0, 1] as const
-const DLMM_DIST_X = [0n, 500000000000000000n, 500000000000000000n] as const
-const DLMM_DIST_Y = [500000000000000000n, 500000000000000000n, 0n] as const
-const DLMM_BIN_SCAN_RADIUS = 20
+// Bin-range presets — how many bins on each side of the active bin to spread
+// a "spot" (uniform) deposit across. "Single Bin" concentrates everything in
+// exactly the active bin, like a limit order at the current price.
+const DLMM_RANGE_PRESETS = [
+  { key: 'single', label: 'Single Bin', desc: '1 bin',   lower: 0,   upper: 0   },
+  { key: 'narrow', label: 'Narrow',     desc: '±5 bins',  lower: -5,  upper: 5   },
+  { key: 'normal', label: 'Normal',     desc: '±10 bins', lower: -10, upper: 10  },
+  { key: 'wide',   label: 'Wide',       desc: '±20 bins', lower: -20, upper: 20  },
+]
+const DLMM_BIN_SCAN_RADIUS = 60
 
 function useDlmmPositions(pool: typeof DLMM_POOLS[number], owner: `0x${string}` | undefined, activeId: number | undefined) {
   const ids = activeId !== undefined
@@ -1224,11 +1228,17 @@ function DlmmLiquidity() {
 
   const [tab,            setTab]            = useState<Tab>('add')
   const [selectedPool,   setSelectedPool]   = useState(DLMM_POOLS[0])
+  const [rangeKey,       setRangeKey]       = useState<string>(DLMM_RANGE_PRESETS[2].key)
+  const [customLower,    setCustomLower]    = useState('-10')
+  const [customUpper,    setCustomUpper]    = useState('10')
   const [amount0,        setAmount0]        = useState('')
   const [amount1,        setAmount1]        = useState('')
   const [showPoolPicker, setShowPoolPicker] = useState(false)
   const [step,           setStep]           = useState<DlmmStep>('idle')
   const [errMsg,         setErrMsg]         = useState('')
+
+  const isCustomRange = rangeKey === 'custom'
+  const preset = DLMM_RANGE_PRESETS.find(p => p.key === rangeKey)
 
   const { data: isWhitelistedRaw } = useReadContract({
     address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'isWhitelisted',
@@ -1261,7 +1271,12 @@ function DlmmLiquidity() {
 
   const currentPrice = activeId !== undefined ? binIdToPrice(activeId, selectedPool.binStep, token0Dec, token1Dec) : null
 
-  useEffect(() => { setAmount0(''); setAmount1(''); setErrMsg('') }, [selectedPool.address])
+  const binOffsetLower = isCustomRange ? (parseInt(customLower, 10) || 0) : preset!.lower
+  const binOffsetUpperRaw = isCustomRange ? (parseInt(customUpper, 10) || 0) : preset!.upper
+  const binOffsetUpper = Math.max(binOffsetLower, binOffsetUpperRaw) // guard against an inverted custom range
+  const side = dlmmRangeSide(binOffsetLower, binOffsetUpper)
+
+  useEffect(() => { setAmount0(''); setAmount1(''); setErrMsg('') }, [selectedPool.address, rangeKey, customLower, customUpper])
 
   function safeParseUnits(val: string, dec: number): bigint {
     if (!val || parseFloat(val) <= 0) return 0n
@@ -1298,6 +1313,7 @@ function DlmmLiquidity() {
       setStep('approve1_wait')
     }
     if (step === 'addliq') {
+      const { deltaIds, distributionX, distributionY } = computeSpotDistribution(binOffsetLower, binOffsetUpper)
       writeContract({
         address: DLMM_ROUTER, abi: LB_ROUTER_ABI, functionName: 'addLiquidity',
         args: [{
@@ -1305,8 +1321,8 @@ function DlmmLiquidity() {
           amountX: amount0Wei, amountY: amount1Wei,
           amountXMin: 0n, amountYMin: 0n,
           activeIdDesired: BigInt(activeId), idSlippage: 5n,
-          deltaIds: DLMM_DELTA_IDS.map(BigInt),
-          distributionX: [...DLMM_DIST_X], distributionY: [...DLMM_DIST_Y],
+          deltaIds: deltaIds.map(BigInt),
+          distributionX, distributionY,
           to: address, refundTo: address,
           deadline: BigInt(Math.floor(Date.now() / 1000) + 1200),
         }],
@@ -1402,8 +1418,56 @@ function DlmmLiquidity() {
       {tab === 'add' ? (
         <div className="space-y-4">
           <div className="card p-4 space-y-3">
+            <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Bin Range</div>
+            {currentPrice !== null && (
+              <div className="text-2xs text-text-muted text-center font-mono">
+                Current Price: 1 {selectedPool.token0} = {currentPrice < 0.001 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} {selectedPool.token1} · active bin #{activeId}
+              </div>
+            )}
+            <div className="grid grid-cols-5 gap-2">
+              {DLMM_RANGE_PRESETS.map(p => (
+                <button key={p.key} onClick={() => setRangeKey(p.key)} className={clsx('py-2.5 rounded-xl text-center transition-all border', rangeKey === p.key ? 'bg-aeon-400/15 border-aeon-400/30 text-aeon-400' : 'bg-bg-raised border-bg-border text-text-muted hover:border-bg-hover')}>
+                  <div className="text-xs font-semibold">{p.label}</div>
+                  <div className="text-2xs font-mono mt-0.5">{p.desc}</div>
+                </button>
+              ))}
+              <button onClick={() => setRangeKey('custom')} className={clsx('py-2.5 rounded-xl text-center transition-all border', isCustomRange ? 'bg-aeon-400/15 border-aeon-400/30 text-aeon-400' : 'bg-bg-raised border-bg-border text-text-muted hover:border-bg-hover')}>
+                <div className="text-xs font-semibold">Custom</div>
+                <div className="text-2xs font-mono mt-0.5">pick bins</div>
+              </button>
+            </div>
+
+            {isCustomRange && (
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div>
+                  <label className="text-2xs text-text-muted mb-1 block">Bins Below Active</label>
+                  <input type="number" value={customLower} onChange={e => setCustomLower(e.target.value)} placeholder="-10" className="input-base w-full text-sm py-2 font-mono" />
+                </div>
+                <div>
+                  <label className="text-2xs text-text-muted mb-1 block">Bins Above Active</label>
+                  <input type="number" value={customUpper} onChange={e => setCustomUpper(e.target.value)} placeholder="10" className="input-base w-full text-sm py-2 font-mono" />
+                </div>
+                <div className="col-span-2 text-2xs text-text-muted leading-relaxed">
+                  Positive = above the active bin (more expensive), negative = below (cheaper). Use e.g. 5 / 15 to place a range entirely above the current price, or 0 / 0 for a single bin.
+                </div>
+              </div>
+            )}
+
+            {activeId !== undefined && (
+              <div className="text-2xs text-text-muted text-center font-mono">
+                bin range [{activeId + binOffsetLower}, {activeId + binOffsetUpper}] · {binOffsetUpper - binOffsetLower + 1} bin{binOffsetUpper - binOffsetLower === 0 ? '' : 's'}
+              </div>
+            )}
+            {side !== 'both' && (
+              <div className="p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-2xs text-yellow-400">
+                This range is entirely {side === 'x' ? selectedPool.token0 : selectedPool.token1} at the current price — only one side is needed. You won't earn fees until the price moves into range.
+              </div>
+            )}
+          </div>
+
+          <div className="card p-4 space-y-3">
             <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Deposit Amounts</div>
-            <div className="bg-bg-raised rounded-xl p-3">
+            <div className={clsx('bg-bg-raised rounded-xl p-3', side === 'y' && 'opacity-40')}>
               <div className="flex justify-between mb-1">
                 <span className="text-xs text-text-muted">{selectedPool.token0}</span>
                 <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal0.formatted !== '—' && setAmount0(bal0.formatted.replace(',', ''))}>
@@ -1411,12 +1475,12 @@ function DlmmLiquidity() {
                 </button>
               </div>
               <div className="flex items-center gap-2">
-                <input type="number" value={amount0} onChange={e => setAmount0(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
+                <input disabled={side === 'y'} type="number" value={amount0} onChange={e => setAmount0(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:cursor-not-allowed" />
                 <span className="text-sm font-bold text-text-secondary">{selectedPool.token0}</span>
               </div>
             </div>
             <div className="flex justify-center"><span className="text-text-muted text-sm">+</span></div>
-            <div className="bg-bg-raised rounded-xl p-3">
+            <div className={clsx('bg-bg-raised rounded-xl p-3', side === 'x' && 'opacity-40')}>
               <div className="flex justify-between mb-1">
                 <span className="text-xs text-text-muted">{selectedPool.token1}</span>
                 <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal1.formatted !== '—' && setAmount1(bal1.formatted.replace(',', ''))}>
@@ -1424,17 +1488,12 @@ function DlmmLiquidity() {
                 </button>
               </div>
               <div className="flex items-center gap-2">
-                <input type="number" value={amount1} onChange={e => setAmount1(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
+                <input disabled={side === 'x'} type="number" value={amount1} onChange={e => setAmount1(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:cursor-not-allowed" />
                 <span className="text-sm font-bold text-text-secondary">{selectedPool.token1}</span>
               </div>
             </div>
-            {currentPrice !== null && (
-              <div className="text-2xs text-text-muted text-center font-mono">
-                Current Price: 1 {selectedPool.token0} = {currentPrice < 0.001 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} {selectedPool.token1} · active bin #{activeId}
-              </div>
-            )}
             <div className="text-2xs text-text-muted leading-relaxed pt-1">
-              Deposits spread across 3 bins around the current price (below = {selectedPool.token1} only, current = both, above = {selectedPool.token0} only) — the same shape this pool was seeded with. Amounts don't need to match a fixed ratio; unused tokens are refunded.
+              Spread evenly (uniform "spot" shape) across the bins in your chosen range. Amounts don't need to match a fixed ratio; unused tokens are refunded.
             </div>
           </div>
 
