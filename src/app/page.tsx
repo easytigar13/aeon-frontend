@@ -68,26 +68,27 @@ export default function HomePage() {
       {/* Why AEON is Different — The Core Pitch */}
       <section className="max-w-7xl mx-auto px-4 py-16">
         <Reveal className="text-center mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 mb-6">
-            <AlertTriangle size={12} className="text-red-400" />
-            <span className="text-xs font-mono text-red-400 font-bold tracking-wider uppercase">Why most ve(3,3) fail</span>
+          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-bg-raised border border-bg-border mb-6">
+            <AlertTriangle size={12} className="text-text-muted" />
+            <span className="text-xs font-mono text-text-muted font-bold tracking-wider uppercase">A known failure mode</span>
           </div>
           <h2 className="font-display font-bold text-4xl md:text-5xl text-text-primary mb-6 leading-tight">
-            Farmers killed every<br />protocol before this one.
+            Most ve(3,3) protocols don't<br />survive their own farmers.
           </h2>
           <p className="text-text-secondary text-lg max-w-2xl mx-auto leading-relaxed">
             Mercenary capital arrives, chases the highest APR, dumps the token, and leaves.
-            The protocol bleeds to zero. It's happened every single time — until now.
+            It's the most common failure pattern in ve(3,3) design — AEON's fee-before-emission
+            structure exists specifically to break that loop.
           </p>
         </Reveal>
 
         {/* The flip */}
         <div className="grid md:grid-cols-2 gap-6 mb-16">
           {/* Before / broken model */}
-          <Reveal className="card p-8 border-red-500/20 bg-red-500/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
-            <div className="absolute top-4 right-4 text-xs font-mono text-red-400/40 font-bold uppercase tracking-widest">Every other ve(3,3)</div>
-            <div className="w-10 h-10 rounded-xl bg-red-500/10 flex items-center justify-center mb-5">
-              <AlertTriangle size={20} className="text-red-400" />
+          <Reveal className="card p-8 border-bg-border bg-bg-raised relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
+            <div className="absolute top-4 right-4 text-xs font-mono text-text-muted/50 font-bold uppercase tracking-widest">Every other ve(3,3)</div>
+            <div className="w-10 h-10 rounded-xl bg-bg-base flex items-center justify-center mb-5">
+              <AlertTriangle size={20} className="text-text-muted" />
             </div>
             <h3 className="font-display font-bold text-xl text-text-primary mb-4">The broken loop</h3>
             <div className="space-y-3">
@@ -99,23 +100,23 @@ export default function HomePage() {
                 'APR collapses. Everyone leaves.',
               ].map((step, i) => (
                 <div key={i} className="flex items-start gap-3">
-                  <div className="w-5 h-5 rounded-full bg-red-500/20 border border-red-500/30 flex items-center justify-center shrink-0 mt-0.5">
-                    <span className="text-2xs font-mono text-red-400">{i + 1}</span>
+                  <div className="w-5 h-5 rounded-full bg-bg-base border border-bg-border flex items-center justify-center shrink-0 mt-0.5">
+                    <span className="text-2xs font-mono text-text-muted">{i + 1}</span>
                   </div>
                   <span className="text-sm text-text-secondary">{step}</span>
                 </div>
               ))}
             </div>
-            <div className="mt-6 p-3 rounded-xl bg-red-500/10 border border-red-500/20">
-              <span className="text-xs font-mono text-red-400">Result: −99% in 3 months. Every time.</span>
+            <div className="mt-6 p-3 rounded-xl bg-bg-base border border-bg-border">
+              <span className="text-xs font-mono text-text-muted">Typical outcome: token collapses, protocol dies.</span>
             </div>
           </Reveal>
 
           {/* AEON model */}
-          <Reveal delay={120} className="card p-8 border-aeon-400/20 bg-aeon-400/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
-            <div className="absolute top-4 right-4 text-xs font-mono text-aeon-400/40 font-bold uppercase tracking-widest">AEON</div>
-            <div className="w-10 h-10 rounded-xl bg-aeon-400/10 flex items-center justify-center mb-5">
-              <Crown size={20} className="text-aeon-400" />
+          <Reveal delay={120} className="card p-8 border-emerald-400/20 bg-emerald-400/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
+            <div className="absolute top-4 right-4 text-xs font-mono text-emerald-400/40 font-bold uppercase tracking-widest">AEON</div>
+            <div className="w-10 h-10 rounded-xl bg-emerald-400/10 flex items-center justify-center mb-5">
+              <Crown size={20} className="text-emerald-400" />
             </div>
             <h3 className="font-display font-bold text-xl text-text-primary mb-4">Farmers serve token holders</h3>
             <div className="space-y-3">
@@ -127,15 +128,15 @@ export default function HomePage() {
                 'Farmers who serve holders get rewarded',
               ].map((step, i) => (
                 <div key={i} className="flex items-start gap-3">
-                  <div className="w-5 h-5 rounded-full bg-aeon-400/20 border border-aeon-400/30 flex items-center justify-center shrink-0 mt-0.5">
-                    <CheckCircle2 size={10} className="text-aeon-400" />
+                  <div className="w-5 h-5 rounded-full bg-emerald-400/20 border border-emerald-400/30 flex items-center justify-center shrink-0 mt-0.5">
+                    <CheckCircle2 size={10} className="text-emerald-400" />
                   </div>
                   <span className="text-sm text-text-secondary">{step}</span>
                 </div>
               ))}
             </div>
-            <div className="mt-6 p-3 rounded-xl bg-aeon-400/10 border border-aeon-400/20">
-              <span className="text-xs font-mono text-aeon-400">Token holders are the bosses. Always.</span>
+            <div className="mt-6 p-3 rounded-xl bg-emerald-400/10 border border-emerald-400/20">
+              <span className="text-xs font-mono text-emerald-400">By contract, token holders get paid first — every time.</span>
             </div>
           </Reveal>
         </div>
