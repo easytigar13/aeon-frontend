@@ -40,7 +40,6 @@ export default function DashboardPage() {
 
   const { data: aeonSupply }    = useReadContract({ address: CONTRACTS.AeonToken,        abi: ERC20_ABI,          functionName: 'totalSupply' })
   const { data: totalBurned }   = useReadContract({ address: CONTRACTS.TheFurnace,       abi: FURNACE_ABI,        functionName: 'totalBurned' })
-  const { data: veTotalSupply } = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'totalSupply' })
   const { data: veTokenCount }  = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId' })
   const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight' })
   const { data: weeklyEmissions } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount' })
@@ -57,7 +56,7 @@ export default function DashboardPage() {
   const fmtDate       = (ms: number) => new Date(ms).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
   const epochLabel    = `${fmtDate(epochStartMs)} – ${fmtDate(epochEndMs)}`
   const GENESIS_S     = 1782950400 // Robinhood Chain genesis epoch, 2026-07-02
-  const protocolEpoch = Math.floor((now / 1000 - GENESIS_S) / WEEK_S) + 1
+  const protocolEpoch = Math.floor((now / 1000 - GENESIS_S) / WEEK_S)
 
   // Epoch timing
   const elapsedMs      = now - epochStartMs
@@ -83,8 +82,8 @@ export default function DashboardPage() {
     ? ((Number(totalBurned) / Number(aeonSupply)) * 100).toFixed(2)
     : '—'
 
-  const lockRate = aeonSupply && veTotalSupply && aeonSupply > 0n
-    ? ((Number(veTotalSupply) / Number(aeonSupply)) * 100).toFixed(1)
+  const lockRate = aeonSupply && totalVotes && aeonSupply > 0n
+    ? ((Number(totalVotes) / Number(aeonSupply)) * 100).toFixed(1)
     : '—'
 
   const seenAddrs = new Set<string>()
@@ -203,7 +202,7 @@ export default function DashboardPage() {
               { label: 'Total Supply', value: aeonSupply !== undefined ? `${fmt18(aeonSupply)} AEON` : '—' },
               { label: 'Total Burned', value: totalBurned !== undefined ? `${fmt18(totalBurned)} AEON` : '—' },
               { label: '% Burned',     value: `${burnedPct}%` },
-              { label: 'Total Locked', value: veTotalSupply !== undefined ? `${fmt18(veTotalSupply)} veAEON` : '—' },
+              { label: 'Total Voting Power', value: totalVotes !== undefined ? `${fmt18(totalVotes)} veAEON` : '—' },
             ].map(item => (
               <div key={item.label} className="flex justify-between items-center">
                 <span className="text-sm text-text-muted">{item.label}</span>
@@ -220,10 +219,9 @@ export default function DashboardPage() {
           </div>
           <div className="space-y-3">
             {[
-              { label: 'Total veAEON',  value: veTotalSupply !== undefined ? `${fmt18(veTotalSupply)}` : '—' },
               { label: 'veNFTs Minted', value: veTokenCount !== undefined ? veTokenCount.toString() : '—' },
               { label: 'Total Votes',   value: totalVotes !== undefined ? `${fmt18(totalVotes)}` : '—' },
-              { label: 'Lock Rate',     value: lockRate !== '—' ? `${lockRate}% of supply` : '—' },
+              { label: 'Voting Power Rate', value: lockRate !== '—' ? `${lockRate}% of supply` : '—' },
             ].map(item => (
               <div key={item.label} className="flex justify-between items-center">
                 <span className="text-sm text-text-muted">{item.label}</span>

@@ -1,6 +1,10 @@
 // ABI fragments — only what the frontend needs
 
 // Algebra Integral NonfungiblePositionManager — mint a concentrated-liquidity position
+// Matches the REAL deployed INonfungiblePositionManager.MintParams (note the
+// `deployer` field for custom-pool deployers — address(0) for standard pools —
+// which sits between token1 and tickLower; earlier drafts of this ABI omitted
+// it and would have silently mis-encoded every mint() call).
 export const ALGEBRA_POSITION_MANAGER_ABI = [
   {
     name: 'mint',
@@ -11,6 +15,7 @@ export const ALGEBRA_POSITION_MANAGER_ABI = [
       components: [
         { name: 'token0',          type: 'address' },
         { name: 'token1',          type: 'address' },
+        { name: 'deployer',        type: 'address' },
         { name: 'tickLower',       type: 'int24'   },
         { name: 'tickUpper',       type: 'int24'   },
         { name: 'amount0Desired',  type: 'uint256' },
@@ -27,6 +32,50 @@ export const ALGEBRA_POSITION_MANAGER_ABI = [
       { name: 'amount0',   type: 'uint256' },
       { name: 'amount1',   type: 'uint256' },
     ],
+  },
+  {
+    name: 'decreaseLiquidity',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [{
+      name: 'params', type: 'tuple',
+      components: [
+        { name: 'tokenId',      type: 'uint256' },
+        { name: 'liquidity',    type: 'uint128' },
+        { name: 'amount0Min',   type: 'uint256' },
+        { name: 'amount1Min',   type: 'uint256' },
+        { name: 'deadline',     type: 'uint256' },
+      ],
+    }],
+    outputs: [
+      { name: 'amount0', type: 'uint256' },
+      { name: 'amount1', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'collect',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [{
+      name: 'params', type: 'tuple',
+      components: [
+        { name: 'tokenId',     type: 'uint256' },
+        { name: 'recipient',   type: 'address' },
+        { name: 'amount0Max',  type: 'uint128' },
+        { name: 'amount1Max',  type: 'uint128' },
+      ],
+    }],
+    outputs: [
+      { name: 'amount0', type: 'uint256' },
+      { name: 'amount1', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'burn',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [],
   },
 ] as const
 
@@ -55,10 +104,11 @@ export const ALGEBRA_PM_ENUMERABLE_ABI = [
     stateMutability: 'view',
     inputs: [{ name: 'tokenId', type: 'uint256' }],
     outputs: [
-      { name: 'nonce',                  type: 'uint96'  },
+      { name: 'nonce',                  type: 'uint88'  },
       { name: 'operator',               type: 'address' },
       { name: 'token0',                 type: 'address' },
       { name: 'token1',                 type: 'address' },
+      { name: 'deployer',               type: 'address' },
       { name: 'tickLower',              type: 'int24'   },
       { name: 'tickUpper',              type: 'int24'   },
       { name: 'liquidity',              type: 'uint128' },
@@ -117,6 +167,13 @@ export const ALGEBRA_POOL_ABI = [
       { name: 'communityFee', type: 'uint16'  },
       { name: 'unlocked',     type: 'bool'    },
     ],
+  },
+  {
+    name: 'liquidity',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint128' }],
   },
 ] as const
 
@@ -647,6 +704,23 @@ export const VOTER_ABI = [
   },
   {
     name: 'lastVoted',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'getVotes',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'tokenId', type: 'uint256' },
+      { name: 'pool',    type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'usedWeights',
     type: 'function',
     stateMutability: 'view',
     inputs: [{ name: 'tokenId', type: 'uint256' }],

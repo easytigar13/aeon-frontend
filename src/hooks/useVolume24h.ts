@@ -5,19 +5,25 @@ import { decodeEventLog, formatUnits } from 'viem'
 import { POOLS, TOKENS } from '@/config/contracts'
 import type { PriceMap } from './usePrices'
 
-// Solidly/Velodrome vAMM Swap event — different from UniswapV2 ('to' is 2nd indexed, not last)
-// keccak256("Swap(address,address,uint256,uint256,uint256,uint256)")
-const SWAP_TOPIC = '0xb3e2773606abfd36b5bd91394b3a54d1398336c65005baf7bf7a05efeffaf75b' as `0x${string}`
+// AeonPoolRH.sol's real Swap event — UniswapV2-canonical ordering, 'to' is
+// LAST and indexed (not right after sender like the old Solidly/Velodrome
+// pools this hook was originally written against). Getting this wrong means
+// getLogs() filters for a topic0 that never matches any real log — silently
+// zero volume forever, no error. Verified against src/robinhood/AeonPoolRH.sol:
+//   event Swap(address indexed sender, uint256 amount0In, uint256 amount1In,
+//              uint256 amount0Out, uint256 amount1Out, address indexed to)
+// keccak256("Swap(address,uint256,uint256,uint256,uint256,address)")
+const SWAP_TOPIC = '0xd78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822' as `0x${string}`
 
 const SWAP_ABI = [{
   name: 'Swap', type: 'event',
   inputs: [
     { name: 'sender',     type: 'address', indexed: true  },
-    { name: 'to',         type: 'address', indexed: true  },
     { name: 'amount0In',  type: 'uint256', indexed: false },
     { name: 'amount1In',  type: 'uint256', indexed: false },
     { name: 'amount0Out', type: 'uint256', indexed: false },
     { name: 'amount1Out', type: 'uint256', indexed: false },
+    { name: 'to',         type: 'address', indexed: true  },
   ],
 }] as const
 

@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { Vote, Plus, X } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits } from 'viem'
 import { POOLS, CONTRACTS } from '@/config/contracts'
@@ -229,6 +229,7 @@ export default function VotePage() {
                         {hasVoted === undefined ? '—' : hasVoted ? 'Yes (reset first)' : 'No'}
                       </span>
                     </div>
+                    {hasVoted && <CurrentVotes tokenId={tokenId} />}
                     {hasVoted && (
                       <div className="space-y-1 mt-1">
                         <button onClick={handleReset} disabled={isResetting || !canReset} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -362,6 +363,43 @@ export default function VotePage() {
           <p className="text-xs text-text-muted mt-3 text-center font-mono">{filteredPools.length} pools · Max 6 pools per vote</p>
         </div>
       </div>
+    </div>
+  )
+}
+
+// The unique pools this tokenId could possibly have voted for — de-duped by
+// address, matching how AeonVoterV2 tracks votes per pool (not per fee tier).
+const UNIQUE_VOTE_POOLS = POOLS.filter((p, i, arr) => arr.findIndex(x => x.address === p.address) === i)
+
+function CurrentVotes({ tokenId }: { tokenId: bigint | undefined }) {
+  const { data } = useReadContracts({
+    contracts: UNIQUE_VOTE_POOLS.map(p => ({
+      address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'getVotes' as const,
+      args: tokenId !== undefined ? [tokenId, p.address] as const : undefined,
+    })),
+    query: { enabled: tokenId !== undefined, refetchInterval: 15000 },
+  })
+
+  const rows = UNIQUE_VOTE_POOLS
+    .map((pool, i) => ({ pool, weight: data?.[i]?.status === 'success' ? data[i].result as bigint : 0n }))
+    .filter(r => r.weight > 0n)
+
+  const total = rows.reduce((s, r) => s + r.weight, 0n)
+
+  if (!data) return <div className="text-2xs text-text-muted text-center py-1">Loading your votes…</div>
+  if (rows.length === 0) return <div className="text-2xs text-text-muted text-center py-1">No pool allocation found for this veNFT</div>
+
+  return (
+    <div className="space-y-1 pt-1 border-t border-bg-border mt-1">
+      <div className="text-2xs text-text-muted uppercase tracking-wider pt-1">Your Current Votes</div>
+      {rows.map(({ pool, weight }) => (
+        <div key={pool.address} className="flex justify-between text-xs">
+          <span className="text-text-secondary">{pool.name}</span>
+          <span className="font-mono text-aeon-400">
+            {total > 0n ? `${(Number(weight * 10000n / total) / 100).toFixed(1)}%` : '—'}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }

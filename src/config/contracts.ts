@@ -1,7 +1,7 @@
 // src/config/contracts.ts
 // AEON Protocol on Robinhood Chain (chain id 4663) — deployed 2026-07-02.
-// Fresh deployment: no v1/v2 legacy state, no CL/DLMM pools yet (vAMM only
-// at genesis; Algebra CL pools for the same pairs are planned as a follow-up).
+// vAMM pools at genesis, plus a forked Algebra Integral (algebra.finance)
+// concentrated-liquidity deployment for the same 3 pairs, added 2026-07-03.
 
 export const CHAIN_ID = 4663
 
@@ -34,12 +34,27 @@ export const TOKENS = {
   USDG:  { address: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168' as `0x${string}`, symbol: 'USDG', decimals: 6,  name: 'USDG' },
 } as const
 
-// vAMM only at genesis. CL pools for the same pairs are planned as a
-// follow-up once Algebra Integral is deployed to Robinhood Chain.
 export const POOLS = [
   { name: 'AEON/ETH',  token0: 'AEON', token1: 'WETH', type: 'vAMM', fee: '1%',   address: '0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3' as `0x${string}` },
   { name: 'AEON/USDG', token0: 'AEON', token1: 'USDG', type: 'vAMM', fee: '1%',   address: '0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434' as `0x${string}` },
   { name: 'ETH/USDG',  token0: 'WETH', token1: 'USDG', type: 'vAMM', fee: '0.3%', address: '0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2' as `0x${string}` },
+]
+
+// Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3
+// genesis pairs as the vAMM pools above, deployed 2026-07-03 by forking the
+// official cryptoalgebra/Algebra core+periphery+farming contracts.
+export const ALGEBRA_CONTRACTS = {
+  factory:                    '0x28A57A4000049cCb5a2F272DCb5483Bc692f304E' as `0x${string}`,
+  poolDeployer:                '0x7B041a9133bce876434908b1438F2F1f187c215b' as `0x${string}`,
+  nonfungiblePositionManager: '0x7eB725C9EA96dAB6bf0E734e8D7A54474eb713BB' as `0x${string}`,
+  swapRouter:                  '0x2B440b6759d37CA4F5a21f190d2BfdBE4eb9B533' as `0x${string}`,
+  quoterV2:                    '0x0fC2Ac0217FC9dF2577Be3519be07e6612775Eab' as `0x${string}`,
+} as const
+
+export const CL_POOLS = [
+  { name: 'AEON/ETH',  token0: 'AEON', token1: 'WETH', type: 'CL', fee: '0.25%', address: '0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e' as `0x${string}` },
+  { name: 'AEON/USDG', token0: 'AEON', token1: 'USDG', type: 'CL', fee: '0.25%', address: '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6' as `0x${string}` },
+  { name: 'ETH/USDG',  token0: 'WETH', token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3' as `0x${string}` },
 ]
 
 export const CL_RANGE_PRESETS = [
