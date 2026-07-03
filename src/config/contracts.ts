@@ -38,10 +38,16 @@ export const TOKENS = {
   VIRTUAL: { address: '0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31' as `0x${string}`, symbol: 'VIRTUAL', decimals: 18, name: 'Virtuals Protocol' },
 } as const
 
+// Migrated 2026-07-03: the genesis vAMM pools had no way to ever claim swap
+// fees (AeonPoolRH.claimFees() didn't exist in that bytecode, so 100% of
+// every swap fee sat compounding into LP value forever instead of flowing to
+// voters). Replaced with 3 fresh pools whose fee accounting is a direct port
+// of Aerodrome's real Pool.sol — same seed liquidity, same fee tiers, same
+// token pairs, new addresses.
 export const POOLS = [
-  { name: 'AEON/ETH',  token0: 'AEON', token1: 'WETH', type: 'vAMM', fee: '1%',   address: '0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3' as `0x${string}` },
-  { name: 'AEON/USDG', token0: 'AEON', token1: 'USDG', type: 'vAMM', fee: '1%',   address: '0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434' as `0x${string}` },
-  { name: 'ETH/USDG',  token0: 'WETH', token1: 'USDG', type: 'vAMM', fee: '0.3%', address: '0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2' as `0x${string}` },
+  { name: 'AEON/ETH',  token0: 'AEON', token1: 'WETH', type: 'vAMM', fee: '1%',   address: '0xD215650cb628113A64D938164Ee5CD72293F9ea6' as `0x${string}` },
+  { name: 'AEON/USDG', token0: 'AEON', token1: 'USDG', type: 'vAMM', fee: '1%',   address: '0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288' as `0x${string}` },
+  { name: 'ETH/USDG',  token0: 'WETH', token1: 'USDG', type: 'vAMM', fee: '0.3%', address: '0x2732E1312e5Bba5729534E9d94D44c090b200F14' as `0x${string}` },
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3
