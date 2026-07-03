@@ -30,6 +30,21 @@ export function priceOffsetToTick(currentTick: number, pct: number, tickSpacing:
   return Math.max(MIN_TICK, Math.min(MAX_TICK, tick))
 }
 
+// Convert a raw on-chain tick to a human-readable price (token1 per 1 token0,
+// decimal-adjusted) and back — used for custom min/max price range inputs.
+export function tickToPrice(tick: number, decimals0: number, decimals1: number): number {
+  const rawPrice = Math.pow(1.0001, tick)
+  return rawPrice * Math.pow(10, decimals0 - decimals1)
+}
+export function priceToTick(price: number, decimals0: number, decimals1: number, tickSpacing: number, roundUp: boolean): number {
+  if (!(price > 0)) return roundUp ? MAX_TICK : MIN_TICK
+  const rawPrice = price * Math.pow(10, decimals1 - decimals0)
+  const rawTick = Math.log(rawPrice) / Math.log(1.0001)
+  const spacingFn = roundUp ? Math.ceil : Math.floor
+  const tick = spacingFn(rawTick / tickSpacing) * tickSpacing
+  return Math.max(MIN_TICK, Math.min(MAX_TICK, tick))
+}
+
 function sortAB(sqrtA: bigint, sqrtB: bigint): [bigint, bigint] {
   return sqrtA > sqrtB ? [sqrtB, sqrtA] : [sqrtA, sqrtB]
 }

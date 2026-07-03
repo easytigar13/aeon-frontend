@@ -69,6 +69,23 @@ export const CL_RANGE_PRESETS = [
   { key: 'full',   label: 'Full Range', desc: '0 → ∞',   pctLow: -99.9,  pctHigh: 99999  },
 ]
 
+// Trader Joe / LFJ Liquidity Book (joe-v2, MIT-licensed — the same open-source
+// engine Pharaoh Exchange's own DLMM on Avalanche is built on) — deployed to
+// Robinhood Chain 2026-07-04 for the same 4 genesis-era pairs. token0/token1
+// below match on-chain tokenX/tokenY exactly (LB doesn't sort by address).
+export const DLMM_CONTRACTS = {
+  factory: '0xd60Cf7876a1E7B8fcf963722A05039849fde5387' as `0x${string}`,
+  router:  '0xFDdF3bb9e0f90881f9931104D97844f66b7E3873' as `0x${string}`,
+  quoter:  '0x7757e07Ff0D82f03E65a7DD4da0150378Bd12806' as `0x${string}`,
+} as const
+
+export const DLMM_POOLS = [
+  { name: 'AEON/ETH',     token0: 'AEON',    token1: 'WETH', type: 'DLMM', binStep: 25, address: '0x736d8E418673253b2CDE1ef3Df6205Fc9780816b' as `0x${string}` },
+  { name: 'AEON/USDG',    token0: 'AEON',    token1: 'USDG', type: 'DLMM', binStep: 25, address: '0x8bCCec714f42eeb73954172C253F84f649599E3B' as `0x${string}` },
+  { name: 'ETH/USDG',     token0: 'WETH',    token1: 'USDG', type: 'DLMM', binStep: 10, address: '0x6E3772afbef845Ef4a3aD23a6eEEf65776375bC6' as `0x${string}` },
+  { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'DLMM', binStep: 25, address: '0xcC62C85794F652ee257cf00c87530fF860755892' as `0x${string}` },
+]
+
 // Genesis + ongoing tokenomics — mirrors EmissionsEngineRH.sol / FeeDistributorV3.sol / BuybackEngineV3.sol
 export const EPOCH_CONFIG = {
   epochLength:            604800,

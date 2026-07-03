@@ -1,10 +1,10 @@
 'use client'
 import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
-import { CONTRACTS, POOLS, CL_POOLS, TOKENS } from '@/config/contracts'
+import { CONTRACTS, POOLS, CL_POOLS, DLMM_POOLS, TOKENS } from '@/config/contracts'
 import { FURNACE_ABI, ERC20_ABI, PAIR_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
-import { usePoolStats, useClPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
+import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { CountUp } from '@/components/CountUp'
 
@@ -16,12 +16,13 @@ function fmtUsd(n: number): string {
 }
 
 export function LiveHomepageStats() {
-  const prices      = usePrices()
-  const poolStats   = usePoolStats(prices)
-  const clPoolStats = useClPoolStats(prices)
-  const volResult   = useVolume24h(prices)
+  const prices        = usePrices()
+  const poolStats     = usePoolStats(prices)
+  const clPoolStats   = useClPoolStats(prices)
+  const dlmmPoolStats = useDlmmPoolStats(prices)
+  const volResult     = useVolume24h(prices)
 
-  const totalTvl  = useTotalTVL([...poolStats, ...clPoolStats])
+  const totalTvl  = useTotalTVL([...poolStats, ...clPoolStats, ...dlmmPoolStats])
   const aeonPrice = prices['AEON'] ?? null
 
   const { data: totalBurnedRaw } = useReadContract({
@@ -51,7 +52,7 @@ export function LiveHomepageStats() {
     {
       label: 'Total Value Locked',
       node: <CountUp value={totalTvl || null} format={fmtUsd} nullText="$—" />,
-      sub: `across ${UNIQUE_POOLS.length + CL_POOLS.length} pools`,
+      sub: `across ${UNIQUE_POOLS.length + CL_POOLS.length + DLMM_POOLS.length} pools`,
     },
     {
       label: 'AEON Price',

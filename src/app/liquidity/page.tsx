@@ -1,27 +1,30 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Lock, Layers, Waves } from 'lucide-react'
+import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Lock, Layers, Waves, Grid3x3 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
-import { POOLS, CL_POOLS, CL_RANGE_PRESETS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, WHITELIST_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI } from '@/config/abis'
+import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
+import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, WHITELIST_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { TokenIcon } from '@/components/TokenIcon'
-import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, tickToSqrtPriceX96 } from '@/lib/clMath'
+import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
+import { binIdToPrice } from '@/lib/dlmmMath'
 
-type PoolMode = 'vAMM' | 'CL'
+type PoolMode = 'vAMM' | 'CL' | 'DLMM'
 type Tab = 'add' | 'remove'
 type Step = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done' | 'approve_lp' | 'approve_lp_wait' | 'remove' | 'remove_wait' | 'remove_done'
 type ClStep = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'mint' | 'mint_wait' | 'done'
+type DlmmStep = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done'
 
 const HELPER = CONTRACTS.LiquidityHelper
 const PM = ALGEBRA_CONTRACTS.nonfungiblePositionManager
 const MAX_UINT128 = 2n ** 128n - 1n
+const DLMM_ROUTER = DLMM_CONTRACTS.router
 
 function parseFeeRate(fee: string): number { return parseFloat(fee.replace('%', '')) / 100 }
 function fmtApr(apr: number | null): string {
@@ -67,7 +70,7 @@ export default function LiquidityPage() {
         <div>
           <h1 className="font-display font-bold text-2xl text-text-primary">Liquidity</h1>
           <p className="text-sm text-text-muted mt-0.5">
-            {mode === 'vAMM' ? "Provide liquidity to AEON's vAMM pools" : 'Provide concentrated liquidity via Algebra Integral'}
+            {mode === 'vAMM' ? "Provide liquidity to AEON's vAMM pools" : mode === 'CL' ? 'Provide concentrated liquidity via Algebra Integral' : 'Provide bin-based liquidity via Liquidity Book (DLMM)'}
           </p>
         </div>
       </div>
@@ -77,11 +80,14 @@ export default function LiquidityPage() {
           <Waves size={14} /> vAMM
         </button>
         <button onClick={() => setMode('CL')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', mode === 'CL' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
-          <Layers size={14} /> Concentrated (CL)
+          <Layers size={14} /> Concentrated
+        </button>
+        <button onClick={() => setMode('DLMM')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', mode === 'DLMM' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
+          <Grid3x3 size={14} /> DLMM
         </button>
       </div>
 
-      {mode === 'vAMM' ? <VammLiquidity /> : <ClLiquidity />}
+      {mode === 'vAMM' ? <VammLiquidity /> : mode === 'CL' ? <ClLiquidity /> : <DlmmLiquidity />}
     </div>
   )
 }
@@ -666,14 +672,17 @@ function ClLiquidity() {
 
   const [tab,            setTab]            = useState<Tab>('add')
   const [selectedPool,   setSelectedPool]   = useState(CL_POOLS[0])
-  const [rangeKey,       setRangeKey]       = useState(CL_RANGE_PRESETS[1].key)
+  const [rangeKey,       setRangeKey]       = useState<string>(CL_RANGE_PRESETS[1].key)
+  const [customMin,      setCustomMin]      = useState('')
+  const [customMax,      setCustomMax]      = useState('')
   const [amount0,        setAmount0]        = useState('')
   const [amount1,        setAmount1]        = useState('')
   const [showPoolPicker, setShowPoolPicker] = useState(false)
   const [step,           setStep]           = useState<ClStep>('idle')
   const [errMsg,         setErrMsg]         = useState('')
 
-  const preset = CL_RANGE_PRESETS.find(p => p.key === rangeKey)!
+  const isCustomRange = rangeKey === 'custom'
+  const preset = CL_RANGE_PRESETS.find(p => p.key === rangeKey)
 
   const prices    = usePrices()
   const poolStats = usePoolStats(prices)
@@ -717,15 +726,45 @@ function ClLiquidity() {
 
   const isDisp0First = !onChainToken0 || onChainToken0.toLowerCase() === token0Addr.toLowerCase()
 
-  const tickLower = poolInitialized ? priceOffsetToTick(currentTick, preset.pctLow, tickSpacing, false) : undefined
-  const tickUpper = poolInitialized ? priceOffsetToTick(currentTick, preset.pctHigh, tickSpacing, true) : undefined
+  // display price = display-token1 per 1 display-token0 — what the custom
+  // min/max inputs are expressed in, and what "Current Price" below shows.
+  const displayCurrentPrice = poolInitialized
+    ? (isDisp0First ? tickToPrice(currentTick, token0Dec, token1Dec) : 1 / tickToPrice(currentTick, token1Dec, token0Dec))
+    : null
+
+  // Converts a display-terms price into an on-chain tick, accounting for the
+  // possible token0/token1 flip between display order and on-chain order.
+  function displayPriceToTick(price: number, roundUp: boolean): number {
+    return isDisp0First
+      ? priceToTick(price, token0Dec, token1Dec, tickSpacing, roundUp)
+      : priceToTick(1 / price, token1Dec, token0Dec, tickSpacing, !roundUp)
+  }
+
+  let tickLower: number | undefined
+  let tickUpper: number | undefined
+  if (poolInitialized) {
+    if (isCustomRange) {
+      const minP = parseFloat(customMin)
+      const maxP = parseFloat(customMax)
+      if (minP > 0 && maxP > 0) {
+        const tA = displayPriceToTick(minP, false)
+        const tB = displayPriceToTick(maxP, true)
+        tickLower = Math.min(tA, tB)
+        tickUpper = Math.max(tA, tB)
+      }
+    } else if (preset) {
+      tickLower = priceOffsetToTick(currentTick, preset.pctLow, tickSpacing, false)
+      tickUpper = priceOffsetToTick(currentTick, preset.pctHigh, tickSpacing, true)
+    }
+  }
 
   const side = (tickLower !== undefined && tickUpper !== undefined) ? rangeSide(tickLower, currentTick, tickUpper) : 'both'
   const displaySide: 'display0' | 'display1' | 'both' =
     side === 'both' ? 'both' :
     (side === 'token0') === isDisp0First ? 'display0' : 'display1'
 
-  useEffect(() => { setAmount0(''); setAmount1(''); setErrMsg('') }, [selectedPool.address, rangeKey])
+  useEffect(() => { setAmount0(''); setAmount1(''); setErrMsg('') }, [selectedPool.address, rangeKey, customMin, customMax])
+  useEffect(() => { setCustomMin(''); setCustomMax('') }, [selectedPool.address])
 
   function safeParseUnits(val: string, dec: number): bigint {
     if (!val || parseFloat(val) <= 0) return 0n
@@ -918,17 +957,52 @@ function ClLiquidity() {
         <div className="space-y-4">
           <div className="card p-4 space-y-3">
             <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Price Range</div>
-            <div className="grid grid-cols-4 gap-2">
+            {displayCurrentPrice !== null && (
+              <div className="text-2xs text-text-muted text-center font-mono">
+                Current Price: 1 {selectedPool.token0} = {displayCurrentPrice < 0.001 ? displayCurrentPrice.toExponential(2) : displayCurrentPrice.toFixed(6)} {selectedPool.token1}
+              </div>
+            )}
+            <div className="grid grid-cols-5 gap-2">
               {CL_RANGE_PRESETS.map(p => (
                 <button key={p.key} onClick={() => setRangeKey(p.key)} className={clsx('py-2.5 rounded-xl text-center transition-all border', rangeKey === p.key ? 'bg-aeon-400/15 border-aeon-400/30 text-aeon-400' : 'bg-bg-raised border-bg-border text-text-muted hover:border-bg-hover')}>
                   <div className="text-xs font-semibold">{p.label}</div>
                   <div className="text-2xs font-mono mt-0.5">{p.desc}</div>
                 </button>
               ))}
+              <button onClick={() => setRangeKey('custom')} className={clsx('py-2.5 rounded-xl text-center transition-all border', isCustomRange ? 'bg-aeon-400/15 border-aeon-400/30 text-aeon-400' : 'bg-bg-raised border-bg-border text-text-muted hover:border-bg-hover')}>
+                <div className="text-xs font-semibold">Custom</div>
+                <div className="text-2xs font-mono mt-0.5">min/max</div>
+              </button>
             </div>
-            {tickLower !== undefined && tickUpper !== undefined && (
-              <div className="text-2xs text-text-muted text-center font-mono">tick range [{tickLower}, {tickUpper}] · current tick {currentTick}</div>
+
+            {isCustomRange && (
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <div>
+                  <label className="text-2xs text-text-muted mb-1 block">Min Price ({selectedPool.token1} per {selectedPool.token0})</label>
+                  <div className="flex items-center gap-1.5">
+                    <input type="number" value={customMin} onChange={e => setCustomMin(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2 font-mono" />
+                    {displayCurrentPrice !== null && (
+                      <button onClick={() => setCustomMin((displayCurrentPrice * 0.9).toPrecision(6))} className="text-2xs text-aeon-400 font-mono hover:underline shrink-0">-10%</button>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-2xs text-text-muted mb-1 block">Max Price ({selectedPool.token1} per {selectedPool.token0})</label>
+                  <div className="flex items-center gap-1.5">
+                    <input type="number" value={customMax} onChange={e => setCustomMax(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2 font-mono" />
+                    {displayCurrentPrice !== null && (
+                      <button onClick={() => setCustomMax((displayCurrentPrice * 1.1).toPrecision(6))} className="text-2xs text-aeon-400 font-mono hover:underline shrink-0">+10%</button>
+                    )}
+                  </div>
+                </div>
+              </div>
             )}
+
+            {tickLower !== undefined && tickUpper !== undefined ? (
+              <div className="text-2xs text-text-muted text-center font-mono">tick range [{tickLower}, {tickUpper}] · current tick {currentTick}</div>
+            ) : isCustomRange && poolInitialized ? (
+              <div className="text-2xs text-text-muted text-center">Enter both a min and max price to set your range</div>
+            ) : null}
             {displaySide !== 'both' && poolInitialized && (
               <div className="p-2.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-2xs text-yellow-400">
                 This range is entirely {displaySide === 'display0' ? selectedPool.token0 : selectedPool.token1} at the current price — only one side is needed. You won't earn fees until the price moves into range.
@@ -1035,6 +1109,386 @@ function ClLiquidity() {
             <div className="card p-8 text-center text-sm text-text-muted">No open {selectedPool.name} CL positions found in this wallet.</div>
           ) : (
             poolPositions.map(pos => <PositionCard key={pos.tokenId.toString()} pos={pos} onDone={refetchPositions} />)
+          )}
+        </div>
+      )}
+    </>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// DLMM — Trader Joe / LFJ Liquidity Book (joe-v2)
+// ─────────────────────────────────────────────────────────────────────────
+
+// The exact symmetric 3-bin "spot" shape used to seed these pools at launch:
+// bin-1 gets Y only, the active bin gets both, bin+1 gets X only.
+const DLMM_DELTA_IDS = [-1, 0, 1] as const
+const DLMM_DIST_X = [0n, 500000000000000000n, 500000000000000000n] as const
+const DLMM_DIST_Y = [500000000000000000n, 500000000000000000n, 0n] as const
+const DLMM_BIN_SCAN_RADIUS = 20
+
+function useDlmmPositions(pool: typeof DLMM_POOLS[number], owner: `0x${string}` | undefined, activeId: number | undefined) {
+  const ids = activeId !== undefined
+    ? Array.from({ length: DLMM_BIN_SCAN_RADIUS * 2 + 1 }, (_, i) => activeId - DLMM_BIN_SCAN_RADIUS + i)
+    : []
+
+  const { data, refetch } = useReadContracts({
+    contracts: ids.map(id => ({
+      address: pool.address, abi: LB_PAIR_ABI, functionName: 'balanceOf' as const,
+      args: owner ? [owner, BigInt(id)] as const : undefined,
+    })),
+    query: { enabled: !!owner && ids.length > 0, refetchInterval: 20000 },
+  })
+
+  const positions = ids
+    .map((id, i) => {
+      const r = data?.[i]
+      const bal = r?.status === 'success' ? r.result as bigint : 0n
+      return bal > 0n ? { id, balance: bal } : null
+    })
+    .filter((p): p is { id: number, balance: bigint } => p !== null)
+
+  return { positions, refetch }
+}
+
+function DlmmPositionCard({ pool, pos, owner, onDone }: { pool: typeof DLMM_POOLS[number], pos: { id: number, balance: bigint }, owner: `0x${string}`, onDone: () => void }) {
+  const [step, setStep] = useState<'idle' | 'approve' | 'approve_wait' | 'remove' | 'remove_wait' | 'done'>('idle')
+  const [errMsg, setErrMsg] = useState('')
+
+  const token0Addr = TOKENS[pool.token0 as keyof typeof TOKENS].address
+  const token1Addr = TOKENS[pool.token1 as keyof typeof TOKENS].address
+
+  const { data: isApproved } = useReadContract({
+    address: pool.address, abi: LB_PAIR_ABI, functionName: 'isApprovedForAll',
+    args: [owner, DLMM_ROUTER], query: { enabled: !!owner },
+  })
+
+  const { writeContract, data: txHash, error: writeError } = useWriteContract()
+  const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
+
+  useEffect(() => {
+    if (!txSuccess) return
+    if (step === 'approve_wait') { setStep('remove'); return }
+    if (step === 'remove_wait')  { setStep('done'); onDone(); return }
+  }, [txSuccess])
+
+  useEffect(() => {
+    setErrMsg('')
+    if (step === 'approve') {
+      writeContract({ address: pool.address, abi: LB_PAIR_ABI, functionName: 'approveForAll', args: [DLMM_ROUTER, true] })
+      setStep('approve_wait')
+    }
+    if (step === 'remove') {
+      writeContract({
+        address: DLMM_ROUTER, abi: LB_ROUTER_ABI, functionName: 'removeLiquidity',
+        args: [token0Addr, token1Addr, pool.binStep, 0n, 0n, [BigInt(pos.id)], [pos.balance], owner, BigInt(Math.floor(Date.now() / 1000) + 1200)],
+      })
+      setStep('remove_wait')
+    }
+  }, [step])
+
+  useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
+
+  const busy = step !== 'idle' && step !== 'done'
+
+  return (
+    <div className="card p-3 space-y-2">
+      <div className="flex items-center justify-between text-xs">
+        <span className="font-mono text-text-secondary">bin #{pos.id}</span>
+        <span className="text-text-muted font-mono">shares {pos.balance.toString()}</span>
+      </div>
+      {step === 'done' ? (
+        <div className="text-xs text-emerald-400 flex items-center gap-1.5"><CheckCircle2 size={13} /> Removed — tokens returned to your wallet</div>
+      ) : (
+        <button
+          disabled={busy}
+          onClick={() => setStep(isApproved ? 'remove' : 'approve')}
+          className="btn-ghost w-full text-xs py-2 border border-bg-border flex items-center justify-center gap-1.5 disabled:opacity-40"
+        >
+          {busy && <Loader2 size={12} className="animate-spin" />}
+          {step === 'approve' || step === 'approve_wait' ? 'Approving…' : step === 'remove' || step === 'remove_wait' ? 'Removing…' : 'Remove Liquidity'}
+        </button>
+      )}
+      {errMsg && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{errMsg}</div>}
+    </div>
+  )
+}
+
+function DlmmLiquidity() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
+  const { address, isConnected: _isConnected } = useAccount()
+  const isConnected = mounted && _isConnected
+  const { openConnectModal } = useConnectModal()
+
+  const [tab,            setTab]            = useState<Tab>('add')
+  const [selectedPool,   setSelectedPool]   = useState(DLMM_POOLS[0])
+  const [amount0,        setAmount0]        = useState('')
+  const [amount1,        setAmount1]        = useState('')
+  const [showPoolPicker, setShowPoolPicker] = useState(false)
+  const [step,           setStep]           = useState<DlmmStep>('idle')
+  const [errMsg,         setErrMsg]         = useState('')
+
+  const { data: isWhitelistedRaw } = useReadContract({
+    address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'isWhitelisted',
+    args: address ? [address] : undefined, query: { enabled: !!address },
+  })
+  const isWhitelisted = !!isWhitelistedRaw
+
+  const token0Key = selectedPool.token0 as keyof typeof TOKENS
+  const token1Key = selectedPool.token1 as keyof typeof TOKENS
+  const token0Addr = TOKENS[token0Key].address
+  const token1Addr = TOKENS[token1Key].address
+  const token0Dec = TOKENS[token0Key].decimals
+  const token1Dec = TOKENS[token1Key].decimals
+
+  const bal0 = useTokenBal(token0Addr, address)
+  const bal1 = useTokenBal(token1Addr, address)
+  const allowance0 = useAllowance(token0Addr, address, DLMM_ROUTER)
+  const allowance1 = useAllowance(token1Addr, address, DLMM_ROUTER)
+
+  const { data: poolData } = useReadContracts({
+    contracts: [
+      { address: selectedPool.address, abi: LB_PAIR_ABI, functionName: 'getActiveId' },
+      { address: selectedPool.address, abi: LB_PAIR_ABI, functionName: 'getReserves' },
+    ],
+    query: { refetchInterval: 15000 },
+  })
+  const activeId = poolData?.[0]?.status === 'success' ? Number(poolData[0].result) : undefined
+  const reserves = poolData?.[1]?.status === 'success' ? poolData[1].result as readonly [bigint, bigint] : undefined
+  const hasLiquidity = !!reserves && (reserves[0] > 0n || reserves[1] > 0n)
+
+  const currentPrice = activeId !== undefined ? binIdToPrice(activeId, selectedPool.binStep, token0Dec, token1Dec) : null
+
+  useEffect(() => { setAmount0(''); setAmount1(''); setErrMsg('') }, [selectedPool.address])
+
+  function safeParseUnits(val: string, dec: number): bigint {
+    if (!val || parseFloat(val) <= 0) return 0n
+    try { return parseUnits(val, dec) } catch {
+      const [int, frac = ''] = val.split('.')
+      return parseUnits(`${int}.${frac.slice(0, dec)}`, dec)
+    }
+  }
+  const amount0Wei = safeParseUnits(amount0, token0Dec)
+  const amount1Wei = safeParseUnits(amount1, token1Dec)
+
+  const needApprove0 = amount0Wei > 0n && allowance0 < amount0Wei
+  const needApprove1 = amount1Wei > 0n && allowance1 < amount1Wei
+
+  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
+  const { isLoading: txWaiting, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
+
+  useEffect(() => {
+    if (!txSuccess) return
+    if (step === 'approve0_wait') { setStep('approve1'); return }
+    if (step === 'approve1_wait') { setStep('addliq');   return }
+    if (step === 'addliq_wait')   { setStep('done'); setAmount0(''); setAmount1(''); refetchPositions(); return }
+  }, [txSuccess])
+
+  useEffect(() => {
+    if (!address || activeId === undefined) return
+    setErrMsg('')
+    if (step === 'approve0') {
+      writeContract({ address: token0Addr, abi: ERC20_ABI, functionName: 'approve', args: [DLMM_ROUTER, amount0Wei] })
+      setStep('approve0_wait')
+    }
+    if (step === 'approve1') {
+      writeContract({ address: token1Addr, abi: ERC20_ABI, functionName: 'approve', args: [DLMM_ROUTER, amount1Wei] })
+      setStep('approve1_wait')
+    }
+    if (step === 'addliq') {
+      writeContract({
+        address: DLMM_ROUTER, abi: LB_ROUTER_ABI, functionName: 'addLiquidity',
+        args: [{
+          tokenX: token0Addr, tokenY: token1Addr, binStep: BigInt(selectedPool.binStep),
+          amountX: amount0Wei, amountY: amount1Wei,
+          amountXMin: 0n, amountYMin: 0n,
+          activeIdDesired: BigInt(activeId), idSlippage: 5n,
+          deltaIds: DLMM_DELTA_IDS.map(BigInt),
+          distributionX: [...DLMM_DIST_X], distributionY: [...DLMM_DIST_Y],
+          to: address, refundTo: address,
+          deadline: BigInt(Math.floor(Date.now() / 1000) + 1200),
+        }],
+      })
+      setStep('addliq_wait')
+    }
+  }, [step])
+
+  useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
+
+  function startAdd() {
+    if (!isConnected) { openConnectModal?.(); return }
+    if (!isWhitelisted || (amount0Wei === 0n && amount1Wei === 0n)) return
+    setErrMsg('')
+    if (needApprove0) { setStep('approve0'); return }
+    if (needApprove1) { setStep('approve1'); return }
+    setStep('addliq')
+  }
+
+  const isProcessing = ['approve0', 'approve0_wait', 'approve1', 'approve1_wait', 'addliq', 'addliq_wait'].includes(step)
+
+  function stepLabel() {
+    if (!isConnected) return 'Connect Wallet'
+    if (!isWhitelisted) return 'Join Whitelist to Add Liquidity'
+    if (amount0Wei === 0n && amount1Wei === 0n) return 'Enter amounts'
+    if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
+    if (step === 'approve1' || step === 'approve1_wait') return `Approving ${selectedPool.token1}…`
+    if (step === 'addliq' || step === 'addliq_wait') return 'Adding Liquidity…'
+    if (step === 'done') return '✓ Liquidity Added!'
+    if (needApprove0) return `1. Approve ${selectedPool.token0}`
+    if (needApprove1) return `2. Approve ${selectedPool.token1}`
+    return 'Add Liquidity'
+  }
+
+  const { positions, refetch: refetchPositions } = useDlmmPositions(selectedPool, isConnected ? address : undefined, activeId)
+
+  return (
+    <>
+      {isConnected && !isWhitelisted && (
+        <div className="card p-4 mb-4 border-violet-400/20 bg-violet-400/5 flex items-start gap-3">
+          <Lock size={16} className="text-violet-400 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="text-sm font-medium text-text-primary mb-1">Whitelist required</div>
+            <p className="text-xs text-text-muted leading-relaxed mb-2">
+              Adding liquidity is gated by a one-time 100 AEON payment to the protocol. Once paid, your wallet can add liquidity forever.
+            </p>
+            <Link href="/whitelist" className="text-xs font-mono text-violet-400 hover:underline">Join Whitelist →</Link>
+          </div>
+        </div>
+      )}
+
+      <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4">
+        <button onClick={() => { setTab('add'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'add' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
+          <Plus size={14} /> Add
+        </button>
+        <button onClick={() => { setTab('remove'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'remove' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
+          <Minus size={14} /> Remove
+        </button>
+      </div>
+
+      <div className="card p-4 mb-4">
+        <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-2">Pool</div>
+        <button onClick={() => setShowPoolPicker(!showPoolPicker)} className="w-full flex items-center justify-between p-3 bg-bg-raised rounded-xl border border-bg-border hover:border-bg-hover transition-all">
+          <div className="flex items-center gap-3">
+            <div className="flex -space-x-1">
+              <TokenIcon symbol={selectedPool.token0} size={28} />
+              <TokenIcon symbol={selectedPool.token1} size={28} />
+            </div>
+            <div>
+              <div className="text-sm font-medium text-text-primary">{selectedPool.name}</div>
+              <div className="text-2xs text-text-muted font-mono">DLMM · bin step {selectedPool.binStep}</div>
+            </div>
+          </div>
+          <ChevronDown size={16} className={clsx('text-text-muted transition-transform', showPoolPicker && 'rotate-180')} />
+        </button>
+
+        {showPoolPicker && (
+          <div className="mt-2 space-y-1">
+            {DLMM_POOLS.map(pool => (
+              <button key={pool.address} onClick={() => { setSelectedPool(pool); setShowPoolPicker(false); setStep('idle') }} className={clsx('w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-bg-raised transition-colors text-left', selectedPool.address === pool.address && 'bg-aeon-400/5 border border-aeon-400/20')}>
+                <div className="flex -space-x-1">
+                  <TokenIcon symbol={pool.token0} size={24} />
+                  <TokenIcon symbol={pool.token1} size={24} />
+                </div>
+                <span className="text-sm text-text-primary">{pool.name}</span>
+                <span className="text-xs text-text-muted font-mono ml-auto">bin step {pool.binStep}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {tab === 'add' ? (
+        <div className="space-y-4">
+          <div className="card p-4 space-y-3">
+            <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Deposit Amounts</div>
+            <div className="bg-bg-raised rounded-xl p-3">
+              <div className="flex justify-between mb-1">
+                <span className="text-xs text-text-muted">{selectedPool.token0}</span>
+                <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal0.formatted !== '—' && setAmount0(bal0.formatted.replace(',', ''))}>
+                  Balance: {bal0.formatted}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input type="number" value={amount0} onChange={e => setAmount0(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
+                <span className="text-sm font-bold text-text-secondary">{selectedPool.token0}</span>
+              </div>
+            </div>
+            <div className="flex justify-center"><span className="text-text-muted text-sm">+</span></div>
+            <div className="bg-bg-raised rounded-xl p-3">
+              <div className="flex justify-between mb-1">
+                <span className="text-xs text-text-muted">{selectedPool.token1}</span>
+                <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal1.formatted !== '—' && setAmount1(bal1.formatted.replace(',', ''))}>
+                  Balance: {bal1.formatted}
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <input type="number" value={amount1} onChange={e => setAmount1(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
+                <span className="text-sm font-bold text-text-secondary">{selectedPool.token1}</span>
+              </div>
+            </div>
+            {currentPrice !== null && (
+              <div className="text-2xs text-text-muted text-center font-mono">
+                Current Price: 1 {selectedPool.token0} = {currentPrice < 0.001 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} {selectedPool.token1} · active bin #{activeId}
+              </div>
+            )}
+            <div className="text-2xs text-text-muted leading-relaxed pt-1">
+              Deposits spread across 3 bins around the current price (below = {selectedPool.token1} only, current = both, above = {selectedPool.token0} only) — the same shape this pool was seeded with. Amounts don't need to match a fixed ratio; unused tokens are refunded.
+            </div>
+          </div>
+
+          {!hasLiquidity && (
+            <div className="p-3 rounded-xl bg-aeon-400/10 border border-aeon-400/20 text-xs text-aeon-400">
+              New pool — no existing liquidity. Enter both token amounts manually.
+            </div>
+          )}
+
+          {isProcessing && (
+            <div className="card p-4">
+              <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Transaction Progress</div>
+              <div className="space-y-2">
+                {needApprove0 && (
+                  <div className="flex items-center gap-3">
+                    {['approve1', 'approve1_wait', 'addliq', 'addliq_wait'].includes(step) ? <CheckCircle2 size={16} className="text-emerald-400 shrink-0" /> : <Loader2 size={16} className="text-aeon-400 animate-spin shrink-0" />}
+                    <span className="text-sm text-text-secondary">Approve {selectedPool.token0}</span>
+                  </div>
+                )}
+                {needApprove1 && (
+                  <div className="flex items-center gap-3">
+                    {['addliq', 'addliq_wait'].includes(step) ? <CheckCircle2 size={16} className="text-emerald-400 shrink-0" /> : (step === 'approve1' || step === 'approve1_wait') ? <Loader2 size={16} className="text-aeon-400 animate-spin shrink-0" /> : <div className="w-4 h-4 rounded-full border border-bg-border shrink-0" />}
+                    <span className="text-sm text-text-secondary">Approve {selectedPool.token1}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-3">
+                  {(step === 'addliq' || step === 'addliq_wait') ? <Loader2 size={16} className="text-aeon-400 animate-spin shrink-0" /> : <div className="w-4 h-4 rounded-full border border-bg-border shrink-0" />}
+                  <span className="text-sm text-text-muted">Add Liquidity</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {errMsg && (
+            <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">{errMsg}</div>
+          )}
+
+          <button
+            onClick={startAdd}
+            disabled={isConnected && (isProcessing || (amount0Wei === 0n && amount1Wei === 0n) || !isWhitelisted)}
+            className="btn-primary w-full py-4 flex items-center justify-center gap-2"
+          >
+            {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}
+            {stepLabel()}
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {!isConnected ? (
+            <div className="card p-8 text-center text-sm text-text-muted">Connect your wallet to view positions</div>
+          ) : positions.length === 0 ? (
+            <div className="card p-8 text-center text-sm text-text-muted">No open {selectedPool.name} DLMM positions found in this wallet.</div>
+          ) : (
+            positions.map(pos => <DlmmPositionCard key={pos.id} pool={selectedPool} pos={pos} owner={address!} onDone={refetchPositions} />)
           )}
         </div>
       )}

@@ -1,7 +1,7 @@
 'use client'
 import { useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
-import { POOLS, CL_POOLS, TOKENS, CONTRACTS } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, TOKENS, CONTRACTS } from '@/config/contracts'
 import { PAIR_ABI, VOTER_ABI, ERC20_ABI } from '@/config/abis'
 import type { PriceMap } from './usePrices'
 
@@ -92,6 +92,41 @@ export function useClPoolStats(prices: PriceMap): PoolStat[] {
       if (valA !== null && valB !== null) tvlUsd = valA + valB
       else if (valA !== null) tvlUsd = valA * 2
       else if (valB !== null) tvlUsd = valB * 2
+    }
+
+    return { address: pool.address, tvlUsd, votesWei: 0n, votesFormatted: '0' }
+  })
+}
+
+// DLMM pairs also just hold both tokens directly (spread across bins), and
+// token0/token1 in DLMM_POOLS already match on-chain tokenX/tokenY exactly
+// (Liquidity Book doesn't sort by address), so no ordering flip is needed.
+const DLMM_POOL_STAT_CONTRACTS = DLMM_POOLS.flatMap(p => ([
+  { address: TOKENS[p.token0 as keyof typeof TOKENS]?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [p.address] } as const,
+  { address: TOKENS[p.token1 as keyof typeof TOKENS]?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [p.address] } as const,
+]))
+
+export function useDlmmPoolStats(prices: PriceMap): PoolStat[] {
+  const { data } = useReadContracts({ contracts: DLMM_POOL_STAT_CONTRACTS, query: { refetchInterval: 30000 } })
+
+  return DLMM_POOLS.map((pool, i) => {
+    const base = i * 2
+    const balX = data?.[base]?.status === 'success' ? data[base].result as bigint : undefined
+    const balY = data?.[base + 1]?.status === 'success' ? data[base + 1].result as bigint : undefined
+
+    let tvlUsd: number | null = null
+    if (balX !== undefined && balY !== undefined) {
+      const priceX = prices[pool.token0] ?? null
+      const priceY = prices[pool.token1] ?? null
+      const decX = TOKENS[pool.token0 as keyof typeof TOKENS]?.decimals ?? 18
+      const decY = TOKENS[pool.token1 as keyof typeof TOKENS]?.decimals ?? 18
+
+      const valX = priceX !== null ? Number(formatUnits(balX, decX)) * priceX : null
+      const valY = priceY !== null ? Number(formatUnits(balY, decY)) * priceY : null
+
+      if (valX !== null && valY !== null) tvlUsd = valX + valY
+      else if (valX !== null) tvlUsd = valX * 2
+      else if (valY !== null) tvlUsd = valY * 2
     }
 
     return { address: pool.address, tvlUsd, votesWei: 0n, votesFormatted: '0' }
