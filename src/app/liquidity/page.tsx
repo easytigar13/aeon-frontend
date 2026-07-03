@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Lock, Layers, Waves, Grid3x3 } from 'lucide-react'
+import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Lock, Layers, Waves, Grid3x3, Search, ArrowLeft } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
@@ -9,7 +9,7 @@ import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
 import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, WHITELIST_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
-import { usePoolStats } from '@/hooks/usePoolStats'
+import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { TokenIcon } from '@/components/TokenIcon'
 import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
@@ -62,10 +62,33 @@ function useAllowance(tokenAddr: `0x${string}` | undefined, owner: `0x${string}`
 }
 
 export default function LiquidityPage() {
-  const [mode, setMode] = useState<PoolMode>('vAMM')
+  const [view,        setView]        = useState<'list' | 'detail'>('list')
+  const [mode,        setMode]        = useState<PoolMode>('vAMM')
+  const [initialPool, setInitialPool] = useState<string | undefined>(undefined)
+
+  function handleDeposit(m: PoolMode, address: string) {
+    setMode(m)
+    setInitialPool(address)
+    setView('detail')
+  }
+
+  if (view === 'list') {
+    return (
+      <div className="max-w-6xl mx-auto px-4 py-12">
+        <PoolListView onDeposit={handleDeposit} />
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-12">
+      <button
+        onClick={() => setView('list')}
+        className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors mb-4"
+      >
+        <ArrowLeft size={14} /> Back to All Pools
+      </button>
+
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display font-bold text-2xl text-text-primary">Liquidity</h1>
@@ -87,7 +110,167 @@ export default function LiquidityPage() {
         </button>
       </div>
 
-      {mode === 'vAMM' ? <VammLiquidity /> : mode === 'CL' ? <ClLiquidity /> : <DlmmLiquidity />}
+      {mode === 'vAMM' ? <VammLiquidity initialPool={initialPool} /> : mode === 'CL' ? <ClLiquidity initialPool={initialPool} /> : <DlmmLiquidity initialPool={initialPool} />}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pool discovery table — lists every pool across all three pool types with
+// real on-chain TVL, and (where a volume tracker exists — vAMM only, see
+// useVolume24h.ts) real 24h volume/fees/APR. CL and DLMM rows honestly show
+// "—" for those columns rather than fabricating numbers.
+// ─────────────────────────────────────────────────────────────────────────
+
+interface UnifiedPool {
+  type: PoolMode
+  name: string
+  token0: string
+  token1: string
+  address: `0x${string}`
+  feeLabel: string
+  tvlUsd: number | null
+  volUsd: number | null
+  feesUsd: number | null
+  aprPct: number | null
+}
+
+type ListFilter = 'ALL' | PoolMode
+
+function usePoolListData(): UnifiedPool[] {
+  const prices        = usePrices()
+  const poolStats      = usePoolStats(prices)
+  const clPoolStats    = useClPoolStats(prices)
+  const dlmmPoolStats  = useDlmmPoolStats(prices)
+  const volResult      = useVolume24h(prices)
+
+  const vamm: UnifiedPool[] = POOLS.map(p => {
+    const tvlUsd = poolStats.find(s => s.address === p.address)?.tvlUsd ?? null
+    const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
+    const feeRate = parseFeeRate(p.fee)
+    const feesUsd = volUsd !== null ? volUsd * feeRate : null
+    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsd !== null)
+      ? (volUsd * feeRate * 365 / tvlUsd) * 100
+      : null
+    return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, aprPct }
+  })
+
+  const cl: UnifiedPool[] = CL_POOLS.map(p => {
+    const tvlUsd = clPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
+    return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd: null, feesUsd: null, aprPct: null }
+  })
+
+  const dlmm: UnifiedPool[] = DLMM_POOLS.map(p => {
+    const tvlUsd = dlmmPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
+    return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd: null, feesUsd: null, aprPct: null }
+  })
+
+  return [...vamm, ...cl, ...dlmm]
+}
+
+const TYPE_BADGE: Record<PoolMode, string> = {
+  vAMM: 'bg-sky-400/10 text-sky-400 border-sky-400/20',
+  CL:   'bg-violet-400/10 text-violet-400 border-violet-400/20',
+  DLMM: 'bg-amber-400/10 text-amber-400 border-amber-400/20',
+}
+
+function PoolListView({ onDeposit }: { onDeposit: (mode: PoolMode, address: string) => void }) {
+  const [filter, setFilter] = useState<ListFilter>('ALL')
+  const [search, setSearch] = useState('')
+
+  const pools = usePoolListData()
+
+  const filtered = pools.filter(p => {
+    if (filter !== 'ALL' && p.type !== filter) return false
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      if (!p.name.toLowerCase().includes(q) && !p.token0.toLowerCase().includes(q) && !p.token1.toLowerCase().includes(q)) return false
+    }
+    return true
+  })
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div>
+          <h1 className="font-display font-bold text-2xl text-text-primary">Liquidity Pools</h1>
+          <p className="text-sm text-text-muted mt-0.5">There are {POOLS.length + CL_POOLS.length + DLMM_POOLS.length} pools listed currently</p>
+        </div>
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Search pools or tokens…"
+            className="bg-bg-raised border border-bg-border rounded-xl pl-9 pr-3 py-2 text-sm w-full sm:w-64 text-text-primary placeholder-text-muted focus:outline-none focus:border-aeon-400/40"
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4 w-fit">
+        {(['ALL', 'vAMM', 'CL', 'DLMM'] as ListFilter[]).map(f => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={clsx('px-4 py-2 rounded-lg text-sm font-medium transition-all', filter === f ? 'bg-bg-base text-text-primary' : 'text-text-muted hover:text-text-primary')}
+          >
+            {f === 'ALL' ? 'All' : f === 'CL' ? 'Concentrated' : f}
+          </button>
+        ))}
+      </div>
+
+      <div className="card overflow-x-auto">
+        <table className="w-full text-sm min-w-[760px]">
+          <thead>
+            <tr className="border-b border-bg-border text-left text-xs font-mono text-text-muted uppercase tracking-wider">
+              <th className="px-4 py-3 font-medium">Liquidity Pool</th>
+              <th className="px-4 py-3 font-medium text-right">APR</th>
+              <th className="px-4 py-3 font-medium text-right">TVL</th>
+              <th className="px-4 py-3 font-medium text-right">Volume (24h)</th>
+              <th className="px-4 py-3 font-medium text-right">Fees (24h)</th>
+              <th className="px-4 py-3 font-medium text-right"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(p => (
+              <tr key={`${p.type}-${p.address}`} className="border-b border-bg-border last:border-0 hover:bg-bg-raised/50 transition-colors">
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="flex -space-x-2">
+                      <TokenIcon symbol={p.token0} size={26} />
+                      <TokenIcon symbol={p.token1} size={26} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-text-primary">{p.name}</span>
+                        <span className="text-2xs font-mono text-text-muted">{p.feeLabel}</span>
+                      </div>
+                      <span className={clsx('inline-block mt-0.5 text-2xs font-mono px-1.5 py-0.5 rounded border', TYPE_BADGE[p.type])}>{p.type}</span>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3 text-right font-mono text-emerald-400">{fmtApr(p.aprPct)}</td>
+                <td className="px-4 py-3 text-right font-mono text-text-primary">{fmtUsd(p.tvlUsd)}</td>
+                <td className="px-4 py-3 text-right font-mono text-text-muted">{fmtUsd(p.volUsd)}</td>
+                <td className="px-4 py-3 text-right font-mono text-text-muted">{fmtUsd(p.feesUsd)}</td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => onDeposit(p.type, p.address)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-aeon-400 text-bg-base hover:bg-aeon-300 transition-colors"
+                  >
+                    DEPOSIT
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-text-muted text-sm">No pools match your search.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
@@ -96,7 +279,7 @@ export default function LiquidityPage() {
 // vAMM — full-range constant-product pools
 // ─────────────────────────────────────────────────────────────────────────
 
-function VammLiquidity() {
+function VammLiquidity({ initialPool }: { initialPool?: string }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
@@ -105,7 +288,7 @@ function VammLiquidity() {
   const { openConnectModal } = useConnectModal()
 
   const [tab,            setTab]            = useState<Tab>('add')
-  const [selectedPool,   setSelectedPool]   = useState(POOLS[0])
+  const [selectedPool,   setSelectedPool]   = useState(() => POOLS.find(p => p.address === initialPool) ?? POOLS[0])
   const [amount0,        setAmount0]        = useState('')
   const [amount1,        setAmount1]        = useState('')
   const [removeAmount,   setRemoveAmount]   = useState(50)
@@ -662,7 +845,7 @@ function PositionCard({ pos, onDone }: { pos: { tokenId: bigint, token0: string,
   )
 }
 
-function ClLiquidity() {
+function ClLiquidity({ initialPool }: { initialPool?: string }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
@@ -671,7 +854,7 @@ function ClLiquidity() {
   const { openConnectModal } = useConnectModal()
 
   const [tab,            setTab]            = useState<Tab>('add')
-  const [selectedPool,   setSelectedPool]   = useState(CL_POOLS[0])
+  const [selectedPool,   setSelectedPool]   = useState(() => CL_POOLS.find(p => p.address === initialPool) ?? CL_POOLS[0])
   const [rangeKey,       setRangeKey]       = useState<string>(CL_RANGE_PRESETS[1].key)
   const [customMin,      setCustomMin]      = useState('')
   const [customMax,      setCustomMax]      = useState('')
@@ -1218,7 +1401,7 @@ function DlmmPositionCard({ pool, pos, owner, onDone }: { pool: typeof DLMM_POOL
   )
 }
 
-function DlmmLiquidity() {
+function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
 
@@ -1227,7 +1410,7 @@ function DlmmLiquidity() {
   const { openConnectModal } = useConnectModal()
 
   const [tab,            setTab]            = useState<Tab>('add')
-  const [selectedPool,   setSelectedPool]   = useState(DLMM_POOLS[0])
+  const [selectedPool,   setSelectedPool]   = useState(() => DLMM_POOLS.find(p => p.address === initialPool) ?? DLMM_POOLS[0])
   const [rangeKey,       setRangeKey]       = useState<string>(DLMM_RANGE_PRESETS[2].key)
   const [customLower,    setCustomLower]    = useState('-10')
   const [customUpper,    setCustomUpper]    = useState('10')
@@ -1421,7 +1604,10 @@ function DlmmLiquidity() {
             <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Bin Range</div>
             {currentPrice !== null && (
               <div className="text-2xs text-text-muted text-center font-mono">
-                Current Price: 1 {selectedPool.token0} = {currentPrice < 0.001 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} {selectedPool.token1} · active bin #{activeId}
+                Current Price: 1 {selectedPool.token0} = {currentPrice < 0.001 || currentPrice >= 1_000_000_000 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} {selectedPool.token1} · active bin #{activeId}
+                {(currentPrice < 1e-9 || currentPrice >= 1e9) && (
+                  <span className="block mt-1 text-amber-400">⚠ This pool's active bin looks far from a realistic price — it may have been seeded incorrectly. Deposits here may not behave as expected.</span>
+                )}
               </div>
             )}
             <div className="grid grid-cols-5 gap-2">

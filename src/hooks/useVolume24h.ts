@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { usePublicClient } from 'wagmi'
+import { usePublicClient, useReadContracts } from 'wagmi'
 import { decodeEventLog, formatUnits } from 'viem'
 import { POOLS, TOKENS } from '@/config/contracts'
+import { PAIR_ABI } from '@/config/abis'
 import type { PriceMap } from './usePrices'
 
 // AeonPoolRH.sol's real Swap event — UniswapV2-canonical ordering, 'to' is
@@ -35,6 +36,15 @@ for (const p of POOLS) {
 }
 const POOL_ADDRESSES = [...new Set(POOLS.map(p => p.address))] as `0x${string}`[]
 
+// The factory sorts a pool's real on-chain token0/token1 by address, which
+// does NOT always match the token0/token1 declared in POOLS above (e.g.
+// AEON/USDG's real token0 is USDG, not AEON) — decoding amount0In/amount1In
+// against the config's declared order instead of the real one silently
+// mixes up both decimals and price, producing wildly wrong USD volume. Read
+// the real on-chain token0() per pool so amounts are matched to the right
+// token regardless of how POOLS happens to be ordered.
+const POOL_TOKEN0_CONTRACTS = POOL_ADDRESSES.map(addr => ({ address: addr, abi: PAIR_ABI, functionName: 'token0' } as const))
+
 // Try progressively smaller block ranges until one succeeds
 const RANGES = [43200n, 10000n, 2048n, 512n]
 
@@ -47,6 +57,16 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
   const client     = usePublicClient()
   const pricesRef  = useRef(prices)
   pricesRef.current = prices  // always fresh without triggering effect re-runs
+
+  // real on-chain token0 per pool (lowercase pool address → lowercase token0 address)
+  const { data: token0Data } = useReadContracts({ contracts: POOL_TOKEN0_CONTRACTS, query: { staleTime: Infinity } })
+  const onChainToken0Ref = useRef<Map<string, string>>(new Map())
+  const token0Map = new Map<string, string>()
+  POOL_ADDRESSES.forEach((addr, i) => {
+    const r = token0Data?.[i]
+    if (r?.status === 'success') token0Map.set(addr.toLowerCase(), (r.result as string).toLowerCase())
+  })
+  onChainToken0Ref.current = token0Map
 
   const [result, setResult] = useState<VolumeResult>({ total: null, byPool: {} })
 
@@ -91,6 +111,18 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
         const meta = POOL_META.get(poolAddr)
         if (!meta) continue
 
+        // amount0In/amount1In are keyed to the pool's REAL on-chain token0 —
+        // resolve which config token key (t0Key/t1Key) that actually is
+        // before decoding decimals/price. Skip if we haven't resolved it yet
+        // rather than guessing (guessing is how the decimals/price mismatch
+        // bug happened in the first place).
+        const onChainToken0 = onChainToken0Ref.current.get(poolAddr)
+        if (!onChainToken0) continue
+        const t0Addr = TOKENS[meta.t0Key as keyof typeof TOKENS]?.address?.toLowerCase()
+        const configMatchesChain = onChainToken0 === t0Addr
+        const key0 = configMatchesChain ? meta.t0Key : meta.t1Key
+        const key1 = configMatchesChain ? meta.t1Key : meta.t0Key
+
         let args: any
         try {
           const decoded = decodeEventLog({ abi: SWAP_ABI, data: log.data, topics: log.topics })
@@ -98,10 +130,10 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
         } catch { continue }
 
         const { amount0In, amount1In } = args as { amount0In: bigint; amount1In: bigint }
-        const t0 = TOKENS[meta.t0Key as keyof typeof TOKENS]
-        const t1 = TOKENS[meta.t1Key as keyof typeof TOKENS]
-        const p0 = p[meta.t0Key] ?? null
-        const p1 = p[meta.t1Key] ?? null
+        const t0 = TOKENS[key0 as keyof typeof TOKENS]
+        const t1 = TOKENS[key1 as keyof typeof TOKENS]
+        const p0 = p[key0] ?? null
+        const p1 = p[key1] ?? null
 
         let swapUsd = 0
         if (amount0In > 0n && p0 !== null && t0) {
