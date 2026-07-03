@@ -39,9 +39,7 @@ function safeParseUnits(val: string, decimals: number): bigint {
   }
 }
 
-// VIRTUAL only has a CL pool (no vAMM pool) and this page's router only knows
-// vAMM routes, so it's excluded here — trade it from the Liquidity page's CL tab.
-const TOKEN_LIST = Object.entries(TOKENS).filter(([key]) => key !== 'VIRTUAL').map(([key, val]) => ({ key: key as TokenKey, ...val }))
+const TOKEN_LIST = Object.entries(TOKENS).map(([key, val]) => ({ key: key as TokenKey, ...val }))
 const WETH_ADDR = TOKENS['WETH'].address
 
 // symbol → number of pools (across all 3 pool types) that hold it

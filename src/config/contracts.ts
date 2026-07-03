@@ -49,9 +49,14 @@ export const TOKENS = {
 // of Aerodrome's real Pool.sol — same seed liquidity, same fee tiers, same
 // token pairs, new addresses.
 export const POOLS = [
-  { name: 'AEON/ETH',  token0: 'AEON', token1: 'WETH', type: 'vAMM', fee: '1%',   address: '0xD215650cb628113A64D938164Ee5CD72293F9ea6' as `0x${string}` },
-  { name: 'AEON/USDG', token0: 'AEON', token1: 'USDG', type: 'vAMM', fee: '1%',   address: '0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288' as `0x${string}` },
-  { name: 'ETH/USDG',  token0: 'WETH', token1: 'USDG', type: 'vAMM', fee: '0.3%', address: '0x2732E1312e5Bba5729534E9d94D44c090b200F14' as `0x${string}` },
+  { name: 'AEON/ETH',     token0: 'AEON',    token1: 'WETH', type: 'vAMM', fee: '1%',   address: '0xD215650cb628113A64D938164Ee5CD72293F9ea6' as `0x${string}` },
+  { name: 'AEON/USDG',    token0: 'AEON',    token1: 'USDG', type: 'vAMM', fee: '1%',   address: '0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288' as `0x${string}` },
+  { name: 'ETH/USDG',     token0: 'WETH',    token1: 'USDG', type: 'vAMM', fee: '0.3%', address: '0x2732E1312e5Bba5729534E9d94D44c090b200F14' as `0x${string}` },
+  // Added 2026-07-05 for parity with VIRTUAL's existing CL and DLMM pools —
+  // deployed via the real AeonFactoryRH.createPool() (no PoolExists conflict,
+  // unlike the fee-fix migration's pools, so its own on-chain registry stays
+  // in sync for this one).
+  { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'vAMM', fee: '1%',   address: '0x50bCeFB28502C8628Bc2564A0BFEB6D5D33EFA25' as `0x${string}` },
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3
