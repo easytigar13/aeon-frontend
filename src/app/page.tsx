@@ -38,7 +38,9 @@ export default function HomePage() {
         <p className="text-text-secondary text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed animate-fade-in" style={{ animationDelay: '160ms', animationFillMode: 'backwards' }}>
           AEON is a ve(3,3) DEX on Robinhood Chain where emissions are anchored to real trading fees.
           <br />
-          <span className="font-mono text-aeon-400">Weekly Emissions = Last Epoch Fees ÷ 10</span>
+          <span className="font-mono text-aeon-400 text-base md:text-lg">Weekly Emissions = (3-Epoch Avg Fees ÷ 10) ÷ AEON Price</span>
+          <br />
+          <span className="text-text-muted text-sm">Capped at 3× the prior epoch's mint — no runaway inflation.</span>
         </p>
 
         <div className="flex flex-wrap justify-center gap-3 mb-4 animate-fade-in" style={{ animationDelay: '240ms', animationFillMode: 'backwards' }}>
