@@ -94,6 +94,15 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   const t0 = TOKENS[pool.token0 as keyof typeof TOKENS]
   const t1 = TOKENS[pool.token1 as keyof typeof TOKENS]
 
+  // Pools sort token0/token1 by address on-chain, which doesn't always match
+  // this config's declared order ("AEON/ETH" doesn't guarantee AEON is
+  // token0) — LiquidityHelperRH.addLiquidity() reverts TokenMismatch() unless
+  // the args exactly match the pool's own token0()/token1().
+  const { data: poolToken0Addr } = useReadContract({
+    address: pool.address as `0x${string}`, abi: PAIR_ABI, functionName: 'token0',
+  })
+  const isToken0First = !poolToken0Addr || !t0 || (poolToken0Addr as string).toLowerCase() === t0.address.toLowerCase()
+
   const { data: bal0Raw,    refetch: refBal0   } = useReadContract({ address: t0?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t0, refetchInterval: 15000 } })
   const { data: bal1Raw,    refetch: refBal1   } = useReadContract({ address: t1?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t1, refetchInterval: 15000 } })
   const { data: lpBalRaw,   refetch: refLpBal  } = useReadContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { refetchInterval: 15000 } })
@@ -135,7 +144,10 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
     if (liqStep === 'adding')  {
       const a0 = parseUnits(amt0 || '0', t0.decimals)
       const a1 = parseUnits(amt1 || '0', t1.decimals)
-      liqWrite({ address: CONTRACTS.LiquidityHelper, abi: LIQUIDITY_HELPER_ABI, functionName: 'addLiquidity', args: [pool.address as `0x${string}`, t0.address, a0, t1.address, a1, wallet] })
+      const [addr0, amt0Wei, addr1, amt1Wei] = isToken0First
+        ? [t0.address, a0, t1.address, a1]
+        : [t1.address, a1, t0.address, a0]
+      liqWrite({ address: CONTRACTS.LiquidityHelper, abi: LIQUIDITY_HELPER_ABI, functionName: 'addLiquidity', args: [pool.address as `0x${string}`, addr0, amt0Wei, addr1, amt1Wei, wallet] })
       setLiqStep('adding_wait')
     }
   }, [liqStep])

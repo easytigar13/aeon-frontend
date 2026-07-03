@@ -400,6 +400,15 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   const needApprove0 = amount0Wei > 0n && allowance0 < amount0Wei
   const needApprove1 = amount1Wei > 0n && allowance1 < amount1Wei
 
+  // on-chain-ordered args for the addLiquidity() call itself — LiquidityHelperRH
+  // reverts TokenMismatch() unless token0/token1 exactly match the pool's own
+  // token0()/token1(), which isn't always this config's declared order (pools
+  // sort by address, "AEON/ETH" doesn't guarantee AEON is token0).
+  const addToken0     = isToken0First ? token0Addr  : token1Addr
+  const addToken1     = isToken0First ? token1Addr  : token0Addr
+  const addAmount0Wei = isToken0First ? amount0Wei  : amount1Wei
+  const addAmount1Wei = isToken0First ? amount1Wei  : amount0Wei
+
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
   const { isLoading: txWaiting, isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
 
@@ -426,7 +435,7 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
     if (step === 'addliq') {
       writeContract({
         address: HELPER, abi: LIQUIDITY_HELPER_ABI, functionName: 'addLiquidity',
-        args: [selectedPool.address, token0Addr, amount0Wei, token1Addr, amount1Wei, address],
+        args: [selectedPool.address, addToken0, addAmount0Wei, addToken1, addAmount1Wei, address],
       })
       setStep('addliq_wait')
     }
