@@ -15,6 +15,7 @@ import { useVolume24h } from '@/hooks/useVolume24h'
 import { useDexScreenerPairs, dexTokenStats } from '@/hooks/useDexScreener'
 import { TokenIcon } from '@/components/TokenIcon'
 import { Sparkline } from '@/components/Sparkline'
+import { AddToWalletButton } from '@/components/AddToWalletButton'
 
 type TokenKey = keyof typeof TOKENS
 
@@ -659,6 +660,11 @@ function TokenInfoCard({ tokenKey, info, price, onChainSparkline, dexStats }: {
             <span className="font-mono text-text-secondary">{token.address.slice(0, 6)}…{token.address.slice(-4)}</span>
           )}
         </div>
+        {!isNative && (
+          <div className="flex justify-end">
+            <AddToWalletButton tokenKey={tokenKey} />
+          </div>
+        )}
       </div>
     </div>
   )

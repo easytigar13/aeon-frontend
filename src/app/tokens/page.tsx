@@ -7,6 +7,7 @@ import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
 import { TokenIcon, ChainBadge } from '@/components/TokenIcon'
 import { Sparkline } from '@/components/Sparkline'
+import { AddToWalletButton } from '@/components/AddToWalletButton'
 
 function fmtPrice(p: number | null): string {
   if (p === null) return '—'
@@ -151,6 +152,7 @@ export default function TokensPage() {
                     {shortAddr(t.address)}
                   </button>
                   <div className="flex items-center gap-2">
+                    <AddToWalletButton tokenKey={key as keyof typeof TOKENS} />
                     <Link
                       href={`/swap?from=${key}`}
                       className="text-2xs font-medium px-2.5 py-1 rounded-lg bg-aeon-400/10 text-aeon-400 hover:bg-aeon-400/20 transition-colors"
