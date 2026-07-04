@@ -200,12 +200,24 @@ function usePoolListData(): UnifiedPool[] {
 
   const cl: UnifiedPool[] = CL_POOLS.map(p => {
     const tvlUsd = clPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
-    return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd: null, feesUsd: null, aprPct: null }
+    const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
+    const feeRate = parseFeeRate(p.fee)
+    const feesUsd = volUsd !== null ? volUsd * feeRate : null
+    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsd !== null)
+      ? (volUsd * feeRate * 365 / tvlUsd) * 100
+      : null
+    return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, aprPct }
   })
 
   const dlmm: UnifiedPool[] = DLMM_POOLS.map(p => {
     const tvlUsd = dlmmPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
-    return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd: null, feesUsd: null, aprPct: null }
+    const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
+    const feeRate = parseFeeRate(p.fee)
+    const feesUsd = volUsd !== null ? volUsd * feeRate : null
+    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsd !== null)
+      ? (volUsd * feeRate * 365 / tvlUsd) * 100
+      : null
+    return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, aprPct }
   })
 
   return [...vamm, ...cl, ...dlmm]
