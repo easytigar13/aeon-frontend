@@ -45,7 +45,35 @@ export const CONTRACTS = {
   // the helper. Wraps AeonRouter unchanged — doesn't touch it, so it can't
   // change behavior for anything already using that router directly.
   SwapUnwrapHelper:    '0x86b6760D84EFfF5FD1894473101bD67744eF9FC2' as `0x${string}`,
+  // Deployed 2026-07-04: safety-guaranteed arbitrage executor (reverts unless
+  // the cycle nets at least the caller's own required profit — never
+  // executes a losing trade). Mixes our own pools with external venues
+  // (e.g. Uniswap's real WETH/USDG pair, also live on Robinhood Chain) via a
+  // generic raw pair-swap hop abstraction. Not run automatically by anything —
+  // see keeper/arb-bot.js in aeon-protocol-v5 for the analysis/execution script.
+  ArbKeeper:           '0xdce1773a806cdf172f76f94d8828971d580cd472' as `0x${string}`,
 } as const
+
+// Deployed 2026-07-05: parallel staking + AEON-rewards contracts for CL and
+// DLMM pools, keyed by pool address. NOT wired into AeonVoterV2's automatic
+// vote-weighted emissions — that voter's gaugeFactory can only ever be set
+// once (already is, permanently, to a factory that only deploys plain
+// ERC20-LP-token gauges), and CL positions are NFTs / DLMM positions are
+// per-bin share tokens, neither of which fit that shape. These gauges take
+// a governor-funded discretionary AEON budget via notifyRewardAmount()
+// instead of the automatic stream vAMM gauges get.
+export const CL_GAUGES: Record<string, `0x${string}`> = {
+  '0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e': '0x54823e28ae34c97f2750f32a331de1af5818d565', // CL AEON/ETH
+  '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6': '0x606dce9f79e22e4794ada29a090d9221c273ff5e', // CL AEON/USDG
+  '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3': '0x3955848ccf2888c6f57ff093d1954f0099e30015', // CL ETH/USDG
+  '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d': '0x1a87875838434db5b0e329e1a9b9d1dbd4c86ba1', // CL VIRTUAL/AEON
+}
+export const DLMM_GAUGES: Record<string, `0x${string}`> = {
+  '0x736d8E418673253b2CDE1ef3Df6205Fc9780816b': '0xb1a12a37b509149aa8a52e8a19a2c76e4b526b07', // DLMM AEON/ETH
+  '0x8bCCec714f42eeb73954172C253F84f649599E3B': '0x693483620f0b69e505aad92900574ff0c63f856a', // DLMM AEON/USDG
+  '0x6E3772afbef845Ef4a3aD23a6eEEf65776375bC6': '0x0d7ecc90b178eeb7a78d0256652e3124ddc59150', // DLMM ETH/USDG
+  '0xcC62C85794F652ee257cf00c87530fF860755892': '0x0e7ec4bb8da7d45b60a38f74d0aa933dd4b3dae7', // DLMM VIRTUAL/AEON
+}
 
 // Native ETH sentinel — convention used across the app for "the chain's
 // native gas token" wherever an ERC20 address is expected.
