@@ -617,6 +617,31 @@ export const PAIR_ABI = [
   },
 ] as const
 
+export const AEON_FACTORY_ABI = [
+  {
+    name: 'createPool',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'tokenA',  type: 'address' },
+      { name: 'tokenB',  type: 'address' },
+      { name: 'feeBps',  type: 'uint24'  },
+    ],
+    outputs: [{ name: 'pool', type: 'address' }],
+  },
+  {
+    name: 'getPoolFor',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'tokenA', type: 'address' },
+      { name: 'tokenB', type: 'address' },
+      { name: 'feeBps', type: 'uint24'  },
+    ],
+    outputs: [{ name: '', type: 'address' }],
+  },
+] as const
+
 export const LIQUIDITY_HELPER_ABI = [
   {
     name: 'addLiquidity',
@@ -844,6 +869,85 @@ export const LB_ROUTER_ABI = [
       { name: 'deadline',  type: 'uint256' },
     ],
     outputs: [{ name: 'amountToken', type: 'uint256' }, { name: 'amountNATIVE', type: 'uint256' }],
+  },
+  // Version enum: V1=0, V2=1, V2_1=2, V2_2=3 -- our deployed router only has
+  // its V2_2 factory slot populated (verified on-chain: getFactory() ==
+  // _factory2_2 == our real DLMM_CONTRACTS.factory; the V1/V2/V2_1 slots all
+  // resolve to the zero address), so every swap path must use version 3 —
+  // any other value makes the router look up a pair via an unset factory and
+  // revert on a call to address(0). Confirmed via a traced fork simulation.
+  { name: 'swapExactTokensForTokens', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'amountIn',    type: 'uint256' },
+      { name: 'amountOutMin',type: 'uint256' },
+      { name: 'path', type: 'tuple', components: [
+        { name: 'pairBinSteps', type: 'uint256[]' },
+        { name: 'versions',     type: 'uint8[]' },
+        { name: 'tokenPath',    type: 'address[]' },
+      ]},
+      { name: 'to',       type: 'address' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+  },
+  // Quote helper lives on the router itself (takes the pair address
+  // directly, no Path/version needed) — real view function, verified on-chain.
+  { name: 'getSwapOut', type: 'function', stateMutability: 'view',
+    inputs: [
+      { name: 'lbPair',    type: 'address' },
+      { name: 'amountIn',  type: 'uint128' },
+      { name: 'swapForY',  type: 'bool' },
+    ],
+    outputs: [
+      { name: 'amountInLeft', type: 'uint128' },
+      { name: 'amountOut',    type: 'uint128' },
+      { name: 'fee',          type: 'uint128' },
+    ],
+  },
+] as const
+
+// Algebra Integral (cryptoalgebra/Algebra) periphery — real ISwapRouter/
+// IQuoterV2 interfaces, verified against a traced fork simulation (the
+// quoter's function isn't `view` on-chain since it reverts internally to
+// compute its result, but it's annotated view here so wagmi's read hooks
+// will call it — the actual eth_call behaves identically either way).
+export const ALGEBRA_SWAP_ROUTER_ABI = [
+  { name: 'exactInputSingle', type: 'function', stateMutability: 'payable',
+    inputs: [{
+      name: 'params', type: 'tuple', components: [
+        { name: 'tokenIn',          type: 'address' },
+        { name: 'tokenOut',         type: 'address' },
+        { name: 'deployer',        type: 'address' },
+        { name: 'recipient',        type: 'address' },
+        { name: 'deadline',         type: 'uint256' },
+        { name: 'amountIn',         type: 'uint256' },
+        { name: 'amountOutMinimum', type: 'uint256' },
+        { name: 'limitSqrtPrice',   type: 'uint160' },
+      ]
+    }],
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+  },
+] as const
+
+export const ALGEBRA_QUOTER_ABI = [
+  { name: 'quoteExactInputSingle', type: 'function', stateMutability: 'view',
+    inputs: [{
+      name: 'params', type: 'tuple', components: [
+        { name: 'tokenIn',        type: 'address' },
+        { name: 'tokenOut',       type: 'address' },
+        { name: 'deployer',      type: 'address' },
+        { name: 'amountIn',       type: 'uint256' },
+        { name: 'limitSqrtPrice', type: 'uint160' },
+      ]
+    }],
+    outputs: [
+      { name: 'amountOut',              type: 'uint256' },
+      { name: 'amountIn',               type: 'uint256' },
+      { name: 'sqrtPriceX96After',      type: 'uint160' },
+      { name: 'initializedTicksCrossed',type: 'uint32'  },
+      { name: 'gasEstimate',            type: 'uint256' },
+      { name: 'fee',                    type: 'uint16'  },
+    ],
   },
 ] as const
 

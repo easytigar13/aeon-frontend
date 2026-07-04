@@ -1,13 +1,13 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Layers, Waves, Grid3x3, Search, ArrowLeft } from 'lucide-react'
+import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Layers, Waves, Grid3x3, Search, ArrowLeft, Repeat } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
+import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -18,7 +18,7 @@ import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, tickTo
 import { binIdToPrice, dlmmRangeSide, computeSpotDistribution } from '@/lib/dlmmMath'
 
 type PoolMode = 'vAMM' | 'CL' | 'DLMM'
-type Tab = 'add' | 'remove'
+type Tab = 'add' | 'remove' | 'swap'
 type Step = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done' | 'approve_lp' | 'approve_lp_wait' | 'remove' | 'remove_wait' | 'remove_done'
 type ClStep = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'mint' | 'mint_wait' | 'done'
 type DlmmStep = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done'
@@ -72,7 +72,7 @@ function useAllowance(tokenAddr: `0x${string}` | undefined, owner: `0x${string}`
 }
 
 export default function LiquidityPage() {
-  const [view,        setView]        = useState<'list' | 'detail'>('list')
+  const [view,        setView]        = useState<'list' | 'detail' | 'create'>('list')
   const [mode,        setMode]        = useState<PoolMode>('vAMM')
   const [initialPool, setInitialPool] = useState<string | undefined>(undefined)
 
@@ -82,10 +82,35 @@ export default function LiquidityPage() {
     setView('detail')
   }
 
+  function handleCreated(address: string) {
+    if (!address) { setView('list'); return }
+    setMode('vAMM')
+    setInitialPool(address)
+    setView('detail')
+  }
+
   if (view === 'list') {
     return (
       <div className="max-w-6xl mx-auto px-4 py-12">
-        <PoolListView onDeposit={handleDeposit} />
+        <PoolListView onDeposit={handleDeposit} onCreatePool={() => setView('create')} />
+      </div>
+    )
+  }
+
+  if (view === 'create') {
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-12">
+        <button
+          onClick={() => setView('list')}
+          className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors mb-4"
+        >
+          <ArrowLeft size={14} /> Back to All Pools
+        </button>
+        <div className="mb-6">
+          <h1 className="font-display font-bold text-2xl text-text-primary">Create Pool</h1>
+          <p className="text-sm text-text-muted mt-0.5">Deploy a new vAMM pool for any pair and seed it, directly from your wallet.</p>
+        </div>
+        <CreatePoolView onCreated={handleCreated} />
       </div>
     )
   }
@@ -184,7 +209,7 @@ const TYPE_BADGE: Record<PoolMode, string> = {
   DLMM: 'bg-amber-400/10 text-amber-400 border-amber-400/20',
 }
 
-function PoolListView({ onDeposit }: { onDeposit: (mode: PoolMode, address: string) => void }) {
+function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode, address: string) => void; onCreatePool: () => void }) {
   const [filter, setFilter] = useState<ListFilter>('ALL')
   const [search, setSearch] = useState('')
 
@@ -206,14 +231,19 @@ function PoolListView({ onDeposit }: { onDeposit: (mode: PoolMode, address: stri
           <h1 className="font-display font-bold text-2xl text-text-primary">Liquidity Pools</h1>
           <p className="text-sm text-text-muted mt-0.5">There are {POOLS.length + CL_POOLS.length + DLMM_POOLS.length} pools listed currently</p>
         </div>
-        <div className="relative">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search pools or tokens…"
-            className="bg-bg-raised border border-bg-border rounded-xl pl-9 pr-3 py-2 text-sm w-full sm:w-64 text-text-primary placeholder-text-muted focus:outline-none focus:border-aeon-400/40"
-          />
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search pools or tokens…"
+              className="bg-bg-raised border border-bg-border rounded-xl pl-9 pr-3 py-2 text-sm w-full sm:w-64 text-text-primary placeholder-text-muted focus:outline-none focus:border-aeon-400/40"
+            />
+          </div>
+          <button onClick={onCreatePool} className="btn-primary text-sm py-2 px-4 flex items-center gap-1.5 whitespace-nowrap">
+            <Plus size={14} /> Create Pool
+          </button>
         </div>
       </div>
 
@@ -280,6 +310,272 @@ function PoolListView({ onDeposit }: { onDeposit: (mode: PoolMode, address: stri
             )}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Create Pool — self-service vAMM pool deployment. AeonFactoryRH.createPool()
+// and LiquidityHelperRH.addLiquidity() are both fully permissionless, so any
+// connected wallet can deploy a brand-new pool and seed it directly, no
+// team/deployer involvement needed. What this CANNOT do: register the pool
+// with AeonVoterV2 or create its gauge — both are governor-only, so a
+// self-created pool trades immediately but earns no emissions until the
+// team registers it separately. CL/DLMM creation isn't offered here (their
+// factories need a starting price/active-bin choice, meaningfully more
+// involved than a vAMM pool's plain constant-product seed ratio).
+// ─────────────────────────────────────────────────────────────────────────
+
+const FEE_TIER_OPTIONS = [
+  { bps: 30,  label: '0.3%' },
+  { bps: 100, label: '1%' },
+  { bps: 200, label: '2%' },
+]
+
+const ZERO_ADDR = '0x0000000000000000000000000000000000000000'
+const KNOWN_TOKENS = Object.entries(TOKENS).filter(([, t]) => t.address !== NATIVE_SENTINEL)
+
+function isAddr(v: string): v is `0x${string}` {
+  return /^0x[a-fA-F0-9]{40}$/.test(v)
+}
+
+function TokenSlot({ label, addr, onAddr, amount, onAmount, wallet, resolvedSymbol, resolvedDecimals, metaLoading }: {
+  label: string
+  addr: string
+  onAddr: (v: string) => void
+  amount: string
+  onAmount: (v: string) => void
+  wallet: `0x${string}` | undefined
+  resolvedSymbol: string | undefined
+  resolvedDecimals: number | undefined
+  metaLoading: boolean
+}) {
+  const valid = isAddr(addr)
+  const bal = useTokenBal(valid ? addr as `0x${string}` : undefined, wallet)
+
+  return (
+    <div className="bg-bg-raised rounded-xl p-4">
+      <div className="text-xs text-text-muted mb-2">{label}</div>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {KNOWN_TOKENS.map(([key, t]) => (
+          <button key={key} onClick={() => onAddr(t.address)} className={clsx('px-2 py-1 rounded-lg text-2xs font-mono border transition-all', addr.toLowerCase() === t.address.toLowerCase() ? 'bg-aeon-400/15 border-aeon-400/30 text-aeon-400' : 'bg-bg-base border-bg-border text-text-muted hover:border-bg-hover')}>
+            {t.symbol}
+          </button>
+        ))}
+      </div>
+      <input
+        value={addr}
+        onChange={e => onAddr(e.target.value.trim())}
+        placeholder="Paste any ERC-20 contract address…"
+        className="input-base w-full text-xs font-mono py-2 mb-1"
+      />
+      {addr && !valid && <div className="text-2xs text-red-400 mb-1">Not a valid address</div>}
+      {valid && metaLoading && <div className="text-2xs text-text-muted mb-1">Reading token…</div>}
+      {valid && !metaLoading && resolvedSymbol === undefined && <div className="text-2xs text-red-400 mb-1">Doesn't look like an ERC-20 (symbol()/decimals() failed)</div>}
+      {valid && resolvedSymbol && (
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-medium text-emerald-400">✓ {resolvedSymbol}</span>
+          <span className="text-2xs font-mono text-text-muted">Balance: {bal.formatted}</span>
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <input type="number" value={amount} onChange={e => onAmount(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-lg font-mono text-text-primary placeholder-text-muted focus:outline-none" />
+        {valid && resolvedSymbol && (
+          <button onClick={() => onAmount(bal.formatted === '—' ? '' : bal.formatted)} className="text-2xs text-aeon-400 hover:underline font-mono">MAX</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function CreatePoolView({ onCreated }: { onCreated: (address: string) => void }) {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  const { address, isConnected: _isConnected } = useAccount()
+  const isConnected = mounted && _isConnected
+  const { openConnectModal } = useConnectModal()
+
+  const [tokenA, setTokenA] = useState<string>(CONTRACTS.AeonToken)
+  const [tokenB, setTokenB] = useState<string>('')
+  const [amountA, setAmountA] = useState('')
+  const [amountB, setAmountB] = useState('')
+  const [feeBps, setFeeBps] = useState(100)
+  const [step, setStep] = useState<'idle' | 'approveA' | 'approveA_wait' | 'approveB' | 'approveB_wait' | 'create' | 'create_wait' | 'addliq' | 'addliq_wait' | 'done'>('idle')
+  const [errMsg, setErrMsg] = useState('')
+  const [createdPool, setCreatedPool] = useState<`0x${string}` | undefined>(undefined)
+
+  const validA = isAddr(tokenA)
+  const validB = isAddr(tokenB)
+  const sameToken = validA && validB && tokenA.toLowerCase() === tokenB.toLowerCase()
+
+  const { data: symA, isLoading: symALoading } = useReadContract({ address: validA ? tokenA as `0x${string}` : undefined, abi: ERC20_ABI, functionName: 'symbol', query: { enabled: validA } })
+  const { data: decARaw } = useReadContract({ address: validA ? tokenA as `0x${string}` : undefined, abi: ERC20_ABI, functionName: 'decimals', query: { enabled: validA } })
+  const { data: symB, isLoading: symBLoading } = useReadContract({ address: validB ? tokenB as `0x${string}` : undefined, abi: ERC20_ABI, functionName: 'symbol', query: { enabled: validB } })
+  const { data: decBRaw } = useReadContract({ address: validB ? tokenB as `0x${string}` : undefined, abi: ERC20_ABI, functionName: 'decimals', query: { enabled: validB } })
+
+  const decimalsA = (decARaw as number | undefined) ?? 18
+  const decimalsB = (decBRaw as number | undefined) ?? 18
+
+  const { data: existingPoolRaw } = useReadContract({
+    address: CONTRACTS.AeonFactory, abi: AEON_FACTORY_ABI, functionName: 'getPoolFor',
+    args: (validA && validB && !sameToken) ? [tokenA as `0x${string}`, tokenB as `0x${string}`, feeBps] : undefined,
+    query: { enabled: validA && validB && !sameToken },
+  })
+  const poolExists = existingPoolRaw && (existingPoolRaw as string) !== ZERO_ADDR
+
+  function safeParseUnits(val: string, dec: number): bigint {
+    if (!val || parseFloat(val) <= 0) return 0n
+    try { return parseUnits(val, dec) } catch {
+      const [int, frac = ''] = val.split('.')
+      return parseUnits(`${int}.${frac.slice(0, dec)}`, dec)
+    }
+  }
+  const amountAWei = safeParseUnits(amountA, decimalsA)
+  const amountBWei = safeParseUnits(amountB, decimalsB)
+
+  const allowA = useAllowance(validA ? tokenA as `0x${string}` : undefined, address, HELPER)
+  const allowB = useAllowance(validB ? tokenB as `0x${string}` : undefined, address, HELPER)
+  const needApproveA = amountAWei > 0n && allowA < amountAWei
+  const needApproveB = amountBWei > 0n && allowB < amountBWei
+
+  const readyToCreate = validA && validB && !sameToken && !poolExists && symA && symB && amountAWei > 0n && amountBWei > 0n
+
+  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
+  const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
+
+  const { data: poolLookup, refetch: refetchPoolLookup } = useReadContract({
+    address: CONTRACTS.AeonFactory, abi: AEON_FACTORY_ABI, functionName: 'getPoolFor',
+    args: (validA && validB) ? [tokenA as `0x${string}`, tokenB as `0x${string}`, feeBps] : undefined,
+    query: { enabled: false },
+  })
+
+  const { data: createdPoolToken0 } = useReadContract({
+    address: createdPool, abi: PAIR_ABI, functionName: 'token0', query: { enabled: !!createdPool },
+  })
+
+  useEffect(() => {
+    if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') }
+  }, [writeError])
+
+  useEffect(() => {
+    if (!txSuccess) return
+    setErrMsg('')
+    if (step === 'approveA_wait') { setStep('approveB'); return }
+    if (step === 'approveB_wait') { setStep('create'); return }
+    if (step === 'create_wait') {
+      refetchPoolLookup().then(res => {
+        const pool = res.data as `0x${string}` | undefined
+        if (pool && pool !== ZERO_ADDR) { setCreatedPool(pool); setStep('addliq') }
+        else { setErrMsg('Pool created but address lookup failed — check the transaction on the explorer.'); setStep('idle') }
+      })
+      return
+    }
+    if (step === 'addliq_wait') { setStep('done'); onCreated(createdPool ?? ''); return }
+  }, [txSuccess])
+
+  useEffect(() => {
+    if (!address) return
+    setErrMsg('')
+    if (step === 'approveA') { writeContract({ address: tokenA as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [HELPER, amountAWei] }); setStep('approveA_wait') }
+    if (step === 'approveB') { writeContract({ address: tokenB as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [HELPER, amountBWei] }); setStep('approveB_wait') }
+    if (step === 'create')   { writeContract({ address: CONTRACTS.AeonFactory, abi: AEON_FACTORY_ABI, functionName: 'createPool', args: [tokenA as `0x${string}`, tokenB as `0x${string}`, feeBps] }); setStep('create_wait') }
+  }, [step])
+
+  // addLiquidity needs the pool's real on-chain token0/token1 order, which
+  // doesn't always match the order tokenA/tokenB were entered in (pools sort
+  // by address) — the same TokenMismatch bug class fixed earlier elsewhere.
+  useEffect(() => {
+    if (step !== 'addliq' || !createdPool || !createdPoolToken0 || !address) return
+    const isAFirst = (createdPoolToken0 as string).toLowerCase() === tokenA.toLowerCase()
+    const [addr0, amt0, addr1, amt1] = isAFirst
+      ? [tokenA, amountAWei, tokenB, amountBWei]
+      : [tokenB, amountBWei, tokenA, amountAWei]
+    writeContract({ address: HELPER, abi: LIQUIDITY_HELPER_ABI, functionName: 'addLiquidity', args: [createdPool, addr0 as `0x${string}`, amt0, addr1 as `0x${string}`, amt1, address] })
+    setStep('addliq_wait')
+  }, [step, createdPool, createdPoolToken0])
+
+  const isBusy = isPending || (step !== 'idle' && step !== 'done')
+
+  function handleSubmit() {
+    if (!isConnected) { openConnectModal?.(); return }
+    if (!readyToCreate) return
+    if (needApproveA) { setStep('approveA'); return }
+    if (needApproveB) { setStep('approveB'); return }
+    setStep('create')
+  }
+
+  function label() {
+    if (!isConnected) return 'Connect Wallet'
+    if (sameToken) return 'Tokens must be different'
+    if (poolExists) return 'Pool already exists'
+    if (step === 'approveA' || step === 'approveA_wait') return `Approving ${symA ?? 'Token A'}…`
+    if (step === 'approveB' || step === 'approveB_wait') return `Approving ${symB ?? 'Token B'}…`
+    if (step === 'create' || step === 'create_wait') return 'Creating pool…'
+    if (step === 'addliq' || step === 'addliq_wait') return 'Seeding liquidity…'
+    if (step === 'done') return '✓ Pool live!'
+    if (!validA || !validB) return 'Enter both token addresses'
+    if (!symA || !symB) return 'Waiting on token metadata…'
+    if (amountAWei === 0n || amountBWei === 0n) return 'Enter seed amounts'
+    if (needApproveA) return `Approve ${symA}`
+    if (needApproveB) return `Approve ${symB}`
+    return 'Create Pool'
+  }
+
+  if (step === 'done' && createdPool) {
+    return (
+      <div className="card p-8 text-center border-emerald-400/20 bg-emerald-400/5">
+        <div className="text-lg font-display font-bold text-text-primary mb-2">Pool is live</div>
+        <p className="text-sm text-text-secondary mb-4">
+          {symA}/{symB} is now trading. It has no gauge yet, so it won't earn AEON emissions until the team registers it —
+          organic trading fees work immediately regardless.
+        </p>
+        <div className="flex items-center justify-center gap-3">
+          <button onClick={() => onCreated(createdPool)} className="btn-primary text-sm">View Pool</button>
+          <button onClick={() => { setStep('idle'); setCreatedPool(undefined); setTokenB(''); setAmountA(''); setAmountB('') }} className="btn-secondary text-sm">Create Another</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card p-1">
+      <div className="p-4 space-y-3">
+        <TokenSlot label="Token A" addr={tokenA} onAddr={setTokenA} amount={amountA} onAmount={setAmountA} wallet={address} resolvedSymbol={symA as string | undefined} resolvedDecimals={decimalsA} metaLoading={symALoading} />
+        <TokenSlot label="Token B" addr={tokenB} onAddr={setTokenB} amount={amountB} onAmount={setAmountB} wallet={address} resolvedSymbol={symB as string | undefined} resolvedDecimals={decimalsB} metaLoading={symBLoading} />
+
+        <div>
+          <div className="text-xs text-text-muted mb-2">Fee Tier</div>
+          <div className="flex gap-2">
+            {FEE_TIER_OPTIONS.map(t => (
+              <button key={t.bps} onClick={() => setFeeBps(t.bps)} className={clsx('flex-1 py-2 rounded-lg text-sm font-mono border transition-all', feeBps === t.bps ? 'bg-aeon-400/15 border-aeon-400/30 text-aeon-400' : 'bg-bg-raised border-bg-border text-text-muted hover:border-bg-hover')}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {sameToken && (
+          <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400">Token A and Token B must be different.</div>
+        )}
+        {poolExists && !sameToken && (
+          <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
+            A pool for this pair and fee tier already exists at {(existingPoolRaw as string).slice(0, 6)}…{(existingPoolRaw as string).slice(-4)} — use Add Liquidity on it instead of creating a duplicate.
+          </div>
+        )}
+        <div className="p-3 rounded-xl bg-bg-base text-2xs text-text-muted leading-relaxed">
+          Anyone can create a pool — it trades immediately once seeded. It won't have a gauge or earn AEON emissions until the team registers it separately. This action is irreversible; double-check both addresses before creating.
+        </div>
+        {errMsg && <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">{errMsg}</div>}
+
+        <button
+          onClick={handleSubmit}
+          disabled={isConnected && (isBusy || sameToken || !!poolExists || !readyToCreate)}
+          className="btn-primary w-full py-3.5 flex items-center justify-center gap-2"
+        >
+          {isBusy && <Loader2 size={16} className="animate-spin" />}
+          {label()}
+        </button>
       </div>
     </div>
   )
@@ -814,6 +1110,146 @@ function PositionCard({ pos, onDone }: { pos: { tokenId: bigint, token0: string,
   )
 }
 
+// Single-pool swap via Algebra's own deployed SwapRouter/QuoterV2 -- our own
+// AeonRouterRH can't execute CL swaps (it only knows AeonPoolRH's constant-
+// product interface), but Algebra's real periphery contracts work directly,
+// no new contract needed. Not part of the main Swap page's route search —
+// single pool only, not combined with vAMM hops.
+function ClSwapPanel({ pool, wallet }: { pool: typeof CL_POOLS[number]; wallet: `0x${string}` | undefined }) {
+  const { openConnectModal } = useConnectModal()
+  const [flipped,  setFlipped]  = useState(false)
+  const [amountIn, setAmountIn] = useState('')
+  const [step,    setStep]    = useState<'idle' | 'approve' | 'approve_wait' | 'swap' | 'swap_wait' | 'done'>('idle')
+  const [errMsg,  setErrMsg]  = useState('')
+
+  const tokenInKey  = (flipped ? pool.token1 : pool.token0) as keyof typeof TOKENS
+  const tokenOutKey = (flipped ? pool.token0 : pool.token1) as keyof typeof TOKENS
+  const tokenIn  = TOKENS[tokenInKey]
+  const tokenOut = TOKENS[tokenOutKey]
+
+  const balIn   = useTokenBal(tokenIn.address, wallet)
+  const allowIn = useAllowance(tokenIn.address, wallet, ALGEBRA_CONTRACTS.swapRouter)
+
+  function safeParseUnits(val: string, dec: number): bigint {
+    if (!val || parseFloat(val) <= 0) return 0n
+    try { return parseUnits(val, dec) } catch {
+      const [int, frac = ''] = val.split('.')
+      return parseUnits(`${int}.${frac.slice(0, dec)}`, dec)
+    }
+  }
+  const amountInWei = safeParseUnits(amountIn, tokenIn.decimals)
+
+  // quoteExactInputSingle isn't `view` on-chain (it reverts internally to
+  // compute its result) but behaves identically via eth_call either way —
+  // verified against a traced fork simulation before relying on it here.
+  const { data: quoteData } = useReadContract({
+    address: ALGEBRA_CONTRACTS.quoterV2, abi: ALGEBRA_QUOTER_ABI, functionName: 'quoteExactInputSingle',
+    args: [{ tokenIn: tokenIn.address, tokenOut: tokenOut.address, deployer: ZERO_ADDR as `0x${string}`, amountIn: amountInWei, limitSqrtPrice: 0n }],
+    query: { enabled: amountInWei > 0n, refetchInterval: 10000 },
+  })
+  const amountOutWei = (quoteData as readonly [bigint, bigint, bigint, number, bigint, number] | undefined)?.[0] ?? 0n
+
+  const needApprove = amountInWei > 0n && allowIn < amountInWei
+
+  const { writeContract, data: txHash, error: writeError } = useWriteContract()
+  const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
+
+  useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
+  useEffect(() => {
+    if (!txSuccess) return
+    if (step === 'approve_wait') { setStep('swap'); return }
+    if (step === 'swap_wait') { setStep('done'); setAmountIn(''); return }
+  }, [txSuccess])
+
+  useEffect(() => {
+    if (!wallet) return
+    setErrMsg('')
+    if (step === 'approve') {
+      writeContract({ address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [ALGEBRA_CONTRACTS.swapRouter, maxUint256] })
+      setStep('approve_wait')
+    }
+    if (step === 'swap') {
+      const minOut = amountOutWei > 0n ? (amountOutWei * 98n) / 100n : 0n
+      writeContract({
+        address: ALGEBRA_CONTRACTS.swapRouter, abi: ALGEBRA_SWAP_ROUTER_ABI, functionName: 'exactInputSingle',
+        args: [{
+          tokenIn: tokenIn.address, tokenOut: tokenOut.address, deployer: ZERO_ADDR as `0x${string}`,
+          recipient: wallet, deadline: BigInt(Math.floor(Date.now() / 1000) + 1200),
+          amountIn: amountInWei, amountOutMinimum: minOut, limitSqrtPrice: 0n,
+        }],
+      })
+      setStep('swap_wait')
+    }
+  }, [step])
+
+  const busy = step !== 'idle' && step !== 'done'
+
+  function handleClick() {
+    if (!wallet) { openConnectModal?.(); return }
+    if (amountInWei === 0n) return
+    if (needApprove) { setStep('approve'); return }
+    setStep('swap')
+  }
+
+  function label() {
+    if (!wallet) return 'Connect Wallet'
+    if (step === 'approve' || step === 'approve_wait') return `Approving ${tokenIn.symbol}…`
+    if (step === 'swap' || step === 'swap_wait') return 'Swapping…'
+    if (step === 'done') return '✓ Swapped!'
+    if (amountInWei === 0n) return 'Enter an amount'
+    if (needApprove) return `Approve ${tokenIn.symbol}`
+    return `Swap ${tokenIn.symbol} → ${tokenOut.symbol}`
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-bg-raised rounded-xl p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-text-muted">You pay</span>
+          <span className="text-xs text-text-muted font-mono">Balance: {balIn.formatted}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <input type="number" value={amountIn} onChange={e => setAmountIn(e.target.value)} disabled={busy} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:opacity-60" />
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border shrink-0">
+            <TokenIcon symbol={tokenInKey} size={22} />
+            <span className="font-medium text-sm">{tokenIn.symbol}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-center -my-1 relative z-10">
+        <button onClick={() => { setFlipped(!flipped); setAmountIn(''); setStep('idle') }} disabled={busy} className="w-8 h-8 rounded-xl bg-bg-base border border-bg-border hover:border-aeon-400/50 hover:text-aeon-400 transition-all flex items-center justify-center text-text-muted disabled:opacity-60">
+          <Repeat size={14} />
+        </button>
+      </div>
+
+      <div className="bg-bg-raised rounded-xl p-4">
+        <div className="text-xs text-text-muted mb-2">You receive</div>
+        <div className="flex items-center gap-3">
+          <div className="flex-1 text-xl font-mono text-text-primary">
+            {amountOutWei > 0n ? parseFloat(formatUnits(amountOutWei, tokenOut.decimals)).toFixed(6) : <span className="text-text-muted">0.0</span>}
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border shrink-0">
+            <TokenIcon symbol={tokenOutKey} size={22} />
+            <span className="font-medium text-sm">{tokenOut.symbol}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="text-2xs text-text-muted px-1 leading-relaxed">
+        Swaps directly through this CL pool via Algebra's own router — single pool only, not combined with other AEON pools in one route.
+      </div>
+
+      {errMsg && <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">{errMsg}</div>}
+
+      <button onClick={handleClick} disabled={!!wallet && (busy || amountInWei === 0n)} className="btn-primary w-full py-3.5 flex items-center justify-center gap-2">
+        {busy && <Loader2 size={16} className="animate-spin" />}
+        {label()}
+      </button>
+    </div>
+  )
+}
+
 function ClLiquidity({ initialPool }: { initialPool?: string }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
@@ -1063,6 +1499,9 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
         <button onClick={() => { setTab('remove'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'remove' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
           <Minus size={14} /> Remove
         </button>
+        <button onClick={() => { setTab('swap'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'swap' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
+          <Repeat size={14} /> Swap
+        </button>
       </div>
 
       <div className="card p-4 mb-4">
@@ -1256,6 +1695,8 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
             {stepLabel()}
           </button>
         </div>
+      ) : tab === 'swap' ? (
+        <ClSwapPanel pool={selectedPool} wallet={address} />
       ) : (
         <div className="space-y-3">
           {!isConnected ? (
@@ -1344,6 +1785,158 @@ function DlmmPositionCard({ pool, pos, owner, onDone }: { pool: typeof DLMM_POOL
         </button>
       )}
       {errMsg && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{errMsg}</div>}
+    </div>
+  )
+}
+
+// Single-pool swap via Trader Joe/LFJ's own deployed LB Router -- verified
+// on-chain that this specific deployment only has its V2_2 factory slot
+// populated (getFactory() matches our real DLMM_CONTRACTS.factory; V1/V2/
+// V2_1 all resolve to the zero address), so the swap Path's version MUST be
+// 3 (V2_2) -- any other value makes the router look up a pair via an unset
+// factory and revert. Confirmed with a traced fork simulation before
+// shipping this. Not part of the main Swap page's route search — single
+// pool only.
+function DlmmSwapPanel({ pool, wallet }: { pool: typeof DLMM_POOLS[number]; wallet: `0x${string}` | undefined }) {
+  const { openConnectModal } = useConnectModal()
+  const [flipped,  setFlipped]  = useState(false)
+  const [amountIn, setAmountIn] = useState('')
+  const [step,    setStep]    = useState<'idle' | 'approve' | 'approve_wait' | 'swap' | 'swap_wait' | 'done'>('idle')
+  const [errMsg,  setErrMsg]  = useState('')
+
+  // contracts.ts: DLMM token0/token1 match on-chain tokenX/tokenY exactly
+  // (LB doesn't sort by address, unlike vAMM/CL) -- no extra on-chain check needed.
+  const tokenInKey  = (flipped ? pool.token1 : pool.token0) as keyof typeof TOKENS
+  const tokenOutKey = (flipped ? pool.token0 : pool.token1) as keyof typeof TOKENS
+  const tokenIn  = TOKENS[tokenInKey]
+  const tokenOut = TOKENS[tokenOutKey]
+  const swapForY = !flipped // token0(X) -> token1(Y) when not flipped
+
+  const balIn   = useTokenBal(tokenIn.address, wallet)
+  const allowIn = useAllowance(tokenIn.address, wallet, DLMM_ROUTER)
+
+  function safeParseUnits(val: string, dec: number): bigint {
+    if (!val || parseFloat(val) <= 0) return 0n
+    try { return parseUnits(val, dec) } catch {
+      const [int, frac = ''] = val.split('.')
+      return parseUnits(`${int}.${frac.slice(0, dec)}`, dec)
+    }
+  }
+  const amountInWei = safeParseUnits(amountIn, tokenIn.decimals)
+
+  const { data: quoteData } = useReadContract({
+    address: DLMM_ROUTER, abi: LB_ROUTER_ABI, functionName: 'getSwapOut',
+    args: [pool.address, amountInWei, swapForY],
+    query: { enabled: amountInWei > 0n, refetchInterval: 10000 },
+  })
+  const quote          = quoteData as readonly [bigint, bigint, bigint] | undefined
+  const amountInLeft   = quote?.[0] ?? 0n
+  const amountOutWei   = quote?.[1] ?? 0n
+  const insufficientDepth = amountInWei > 0n && amountInLeft > 0n
+
+  const needApprove = amountInWei > 0n && allowIn < amountInWei
+
+  const { writeContract, data: txHash, error: writeError } = useWriteContract()
+  const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
+
+  useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
+  useEffect(() => {
+    if (!txSuccess) return
+    if (step === 'approve_wait') { setStep('swap'); return }
+    if (step === 'swap_wait') { setStep('done'); setAmountIn(''); return }
+  }, [txSuccess])
+
+  useEffect(() => {
+    if (!wallet) return
+    setErrMsg('')
+    if (step === 'approve') {
+      writeContract({ address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [DLMM_ROUTER, maxUint256] })
+      setStep('approve_wait')
+    }
+    if (step === 'swap') {
+      const minOut = amountOutWei > 0n ? (amountOutWei * 98n) / 100n : 0n
+      writeContract({
+        address: DLMM_ROUTER, abi: LB_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+        args: [
+          amountInWei, minOut,
+          { pairBinSteps: [BigInt(pool.binStep)], versions: [3], tokenPath: [tokenIn.address, tokenOut.address] },
+          wallet, BigInt(Math.floor(Date.now() / 1000) + 1200),
+        ],
+      })
+      setStep('swap_wait')
+    }
+  }, [step])
+
+  const busy = step !== 'idle' && step !== 'done'
+
+  function handleClick() {
+    if (!wallet) { openConnectModal?.(); return }
+    if (amountInWei === 0n) return
+    if (needApprove) { setStep('approve'); return }
+    setStep('swap')
+  }
+
+  function label() {
+    if (!wallet) return 'Connect Wallet'
+    if (step === 'approve' || step === 'approve_wait') return `Approving ${tokenIn.symbol}…`
+    if (step === 'swap' || step === 'swap_wait') return 'Swapping…'
+    if (step === 'done') return '✓ Swapped!'
+    if (amountInWei === 0n) return 'Enter an amount'
+    if (needApprove) return `Approve ${tokenIn.symbol}`
+    return `Swap ${tokenIn.symbol} → ${tokenOut.symbol}`
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-bg-raised rounded-xl p-4">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs text-text-muted">You pay</span>
+          <span className="text-xs text-text-muted font-mono">Balance: {balIn.formatted}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <input type="number" value={amountIn} onChange={e => setAmountIn(e.target.value)} disabled={busy} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:opacity-60" />
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border shrink-0">
+            <TokenIcon symbol={tokenInKey} size={22} />
+            <span className="font-medium text-sm">{tokenIn.symbol}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex justify-center -my-1 relative z-10">
+        <button onClick={() => { setFlipped(!flipped); setAmountIn(''); setStep('idle') }} disabled={busy} className="w-8 h-8 rounded-xl bg-bg-base border border-bg-border hover:border-aeon-400/50 hover:text-aeon-400 transition-all flex items-center justify-center text-text-muted disabled:opacity-60">
+          <Repeat size={14} />
+        </button>
+      </div>
+
+      <div className="bg-bg-raised rounded-xl p-4">
+        <div className="text-xs text-text-muted mb-2">You receive</div>
+        <div className="flex items-center gap-3">
+          <div className="flex-1 text-xl font-mono text-text-primary">
+            {amountOutWei > 0n ? parseFloat(formatUnits(amountOutWei, tokenOut.decimals)).toFixed(6) : <span className="text-text-muted">0.0</span>}
+          </div>
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-bg-base border border-bg-border shrink-0">
+            <TokenIcon symbol={tokenOutKey} size={22} />
+            <span className="font-medium text-sm">{tokenOut.symbol}</span>
+          </div>
+        </div>
+      </div>
+
+      {insufficientDepth && (
+        <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
+          This pool's nearby bins don't have enough depth to fill your full amount — try a smaller amount for a better rate.
+        </div>
+      )}
+
+      <div className="text-2xs text-text-muted px-1 leading-relaxed">
+        Swaps directly through this DLMM pool via Trader Joe/LFJ's own router — single pool only, not combined with other AEON pools in one route.
+      </div>
+
+      {errMsg && <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">{errMsg}</div>}
+
+      <button onClick={handleClick} disabled={!!wallet && (busy || amountInWei === 0n)} className="btn-primary w-full py-3.5 flex items-center justify-center gap-2">
+        {busy && <Loader2 size={16} className="animate-spin" />}
+        {label()}
+      </button>
     </div>
   )
 }
@@ -1520,6 +2113,9 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
         </button>
         <button onClick={() => { setTab('remove'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'remove' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
           <Minus size={14} /> Remove
+        </button>
+        <button onClick={() => { setTab('swap'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'swap' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
+          <Repeat size={14} /> Swap
         </button>
       </div>
 
@@ -1719,6 +2315,8 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
             {stepLabel()}
           </button>
         </div>
+      ) : tab === 'swap' ? (
+        <DlmmSwapPanel pool={selectedPool} wallet={address} />
       ) : (
         <div className="space-y-3">
           {!isConnected ? (
