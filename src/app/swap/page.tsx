@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { ArrowUpDown, Settings, ChevronDown, Loader2, TrendingUp, TrendingDown, ExternalLink } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useReadContract } from 'wagmi'
@@ -7,7 +7,7 @@ import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { TOKENS, POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
 import { robinhoodChain } from '@/config/chain'
-import { AEON_ROUTER_ABI, ERC20_ABI, WETH_ABI } from '@/config/abis'
+import { AEON_ROUTER_ABI, AEON_SWAP_UNWRAP_HELPER_ABI, ERC20_ABI, WETH_ABI } from '@/config/abis'
 import { useRouting } from '@/hooks/useRouting'
 import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
@@ -69,10 +69,13 @@ function useTokenBalance(tokenKey: TokenKey, address?: `0x${string}`) {
   return { formatted: parseFloat(formatUnits(data.value, data.decimals)).toFixed(4), raw: data.value, decimals: data.decimals }
 }
 
-// idle -> [wrap -> wrap_wait] -> [approve -> approve_wait] -> swap -> swap_wait -> [unwrap -> unwrap_wait] -> done
+// idle -> [wrap -> wrap_wait] -> [approve -> approve_wait] -> swap -> swap_wait -> done
 // Every step but 'swap' is conditional on the token pair — a plain ERC20<->ERC20
-// swap with existing allowance skips straight from idle to swap.
-type Step = 'idle' | 'wrap' | 'wrap_wait' | 'approve' | 'approve_wait' | 'swap' | 'swap_wait' | 'unwrap' | 'unwrap_wait' | 'done'
+// swap with existing allowance skips straight from idle to swap. Swap-into-ETH
+// used to be its own extra [unwrap -> unwrap_wait] tail (a second wallet
+// prompt calling WETH.withdraw() directly) -- now bundled into a single
+// 'swap' call to AeonSwapUnwrapHelper, so this is one wallet prompt, not two.
+type Step = 'idle' | 'wrap' | 'wrap_wait' | 'approve' | 'approve_wait' | 'swap' | 'swap_wait' | 'done'
 
 export default function SwapPage() {
   const [mounted, setMounted] = useState(false)
@@ -106,23 +109,20 @@ export default function SwapPage() {
   const needsWrapStep   = tokenIn  === 'ETH' && !isWrapUnwrap
   const needsUnwrapStep = tokenOut === 'ETH' && !isWrapUnwrap
 
-  // The address actually approved/spent by the router for this swap — WETH when starting from native ETH.
+  // The address actually approved/spent for this swap — WETH when starting
+  // from native ETH. Spender is the unwrap helper (not the plain router) when
+  // the output is native ETH, since that's the contract that actually pulls
+  // the input tokens for that path.
   const swapTokenInAddr = needsWrapStep ? WETH_ADDR : TOKENS[tokenIn].address
+  const swapSpender     = needsUnwrapStep ? CONTRACTS.SwapUnwrapHelper : CONTRACTS.AeonRouter
 
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: swapTokenInAddr,
     abi: ERC20_ABI,
     functionName: 'allowance',
-    args: address ? [address, CONTRACTS.AeonRouter] : undefined,
+    args: address ? [address, swapSpender] : undefined,
     query: { enabled: !!address && !isWrapUnwrap },
   })
-
-  // Tracks the user's WETH balance so a swap-then-unwrap flow can unwrap exactly
-  // what was received, regardless of any WETH they already held beforehand.
-  const { refetch: refetchWethBal } = useBalance({
-    address, token: WETH_ADDR, query: { enabled: !!address && needsUnwrapStep },
-  })
-  const preSwapWethBalRef = useRef<bigint>(0n)
 
   const { writeContract, data: approveTxHash, isPending: isApproving, error: approveError } = useWriteContract()
   const { writeContract: writeAction, data: actionTxHash, isPending: isActing, error: actionError } = useWriteContract()
@@ -191,17 +191,18 @@ export default function SwapPage() {
     }))
   }
 
-  // Fires the actual router swap. For swap-then-unwrap, snapshots the pre-swap
-  // WETH balance first so the success handler can unwrap exactly the delta.
-  async function fireSwap() {
+  // Fires the actual swap. Output-is-ETH goes through AeonSwapUnwrapHelper
+  // (one call: swap + unwrap + send native ETH) instead of the plain router,
+  // so there's no separate WETH.withdraw() step left for the wallet to show.
+  function fireSwap() {
     if (!address) return
-    if (needsUnwrapStep) {
-      const fresh = await refetchWethBal()
-      preSwapWethBalRef.current = fresh.data?.value ?? 0n
-    }
     const steps    = buildRouterSteps()
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
-    writeAction({ address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens', args: [steps, parsedAmountIn, amountOutMin, address, deadline] })
+    if (needsUnwrapStep) {
+      writeAction({ address: CONTRACTS.SwapUnwrapHelper, abi: AEON_SWAP_UNWRAP_HELPER_ABI, functionName: 'swapExactTokensForETH', args: [steps, parsedAmountIn, amountOutMin, address, deadline] })
+    } else {
+      writeAction({ address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens', args: [steps, parsedAmountIn, amountOutMin, address, deadline] })
+    }
     setStep('swap_wait')
   }
 
@@ -228,7 +229,7 @@ export default function SwapPage() {
     }
 
     if (needsApproval) {
-      writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, maxUint256] })
+      writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [swapSpender, maxUint256] })
       setStep('approve_wait')
       return
     }
@@ -242,7 +243,7 @@ export default function SwapPage() {
     if (step === 'wrap_wait') {
       refetchAllowance().then(res => {
         if ((res.data ?? 0n) < parsedAmountIn) {
-          writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, maxUint256] })
+          writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [swapSpender, maxUint256] })
           setStep('approve_wait')
         } else {
           fireSwap()
@@ -250,23 +251,7 @@ export default function SwapPage() {
       })
       return
     }
-    if (step === 'swap_wait') {
-      if (needsUnwrapStep) {
-        refetchWethBal().then(res => {
-          const delta = (res.data?.value ?? 0n) - preSwapWethBalRef.current
-          if (delta > 0n) {
-            writeAction({ address: WETH_ADDR, abi: WETH_ABI, functionName: 'withdraw', args: [delta] })
-            setStep('unwrap_wait')
-          } else {
-            setStep('done')
-          }
-        })
-      } else {
-        setStep('done')
-      }
-      return
-    }
-    if (step === 'unwrap_wait') { setStep('done'); return }
+    if (step === 'swap_wait') { setStep('done'); return }
   }, [actionSuccess])
 
   useEffect(() => {
@@ -302,14 +287,12 @@ export default function SwapPage() {
     if (step === 'wrap' || step === 'wrap_wait')       return 'Wrapping ETH…'
     if (step === 'approve' || step === 'approve_wait') return `Approving ${needsWrapStep ? 'WETH' : TOKENS[tokenIn].symbol}…`
     if (step === 'swap_wait' && !isWrapUnwrap)         return 'Swapping…'
-    if (step === 'unwrap' || step === 'unwrap_wait')   return 'Unwrapping to ETH…'
     if (isWrapUnwrap && step === 'swap_wait')          return tokenIn === 'ETH' ? 'Wrapping…' : 'Unwrapping…'
     if (step === 'done')   return '✓ Swap complete!'
     if (badPrice)      return 'Pool price too far from market'
     if (needsApproval) return `Approve ${TOKENS[tokenIn].symbol}`
     if (isWrapUnwrap)  return tokenIn === 'ETH' ? 'Wrap ETH → WETH' : 'Unwrap WETH → ETH'
-    if (needsWrapStep)   return `Wrap & Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
-    if (needsUnwrapStep) return `Swap & Unwrap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
+    if (needsWrapStep) return `Wrap & Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
     return `Swap ${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
   }
 
@@ -469,12 +452,13 @@ export default function SwapPage() {
           </div>
         )}
 
-        {/* Wrap/unwrap chain notice */}
-        {(needsWrapStep || needsUnwrapStep) && hasAmount && (
+        {/* Wrap chain notice — only the ETH-input direction still needs a
+            heads-up; ETH-output now goes through AeonSwapUnwrapHelper as one
+            call, same as any other swap, so it needs no special notice. */}
+        {needsWrapStep && hasAmount && (
           <div className="mt-3 mx-1 p-3 bg-bg-base rounded-xl space-y-1.5">
             <div className="text-2xs text-text-muted">
-              {needsWrapStep && 'This swap wraps ETH → WETH automatically, then routes to your output token — confirm each step in your wallet.'}
-              {needsUnwrapStep && 'This swap routes to WETH, then unwraps to native ETH automatically — confirm each step in your wallet.'}
+              This swap wraps ETH → WETH automatically, then routes to your output token — confirm each step in your wallet.
             </div>
           </div>
         )}

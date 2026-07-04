@@ -199,6 +199,33 @@ export const AEON_ROUTER_ABI = [
   },
 ] as const
 
+// Bundles "swap into WETH via AeonRouter, then unwrap to native ETH" into one
+// call -- same Route[]/amountIn/amountOutMin/deadline shape as AEON_ROUTER_ABI,
+// `to` just receives native ETH instead of WETH. Verified end-to-end against
+// a fork simulation before deploying (real 2-hop swap + real unwrap + zero
+// leftover funds in the helper).
+export const AEON_SWAP_UNWRAP_HELPER_ABI = [
+  {
+    name: 'swapExactTokensForETH',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'routes', type: 'tuple[]', components: [
+        { name: 'tokenIn',  type: 'address' },
+        { name: 'tokenOut', type: 'address' },
+        { name: 'pool',     type: 'address' },
+        { name: 'poolType', type: 'uint8'   },
+        { name: 'feeBps',   type: 'uint24'  },
+      ]},
+      { name: 'amountIn',     type: 'uint256' },
+      { name: 'amountOutMin', type: 'uint256' },
+      { name: 'to',           type: 'address' },
+      { name: 'deadline',     type: 'uint256' },
+    ],
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+  },
+] as const
+
 // WETH9-style wrap/unwrap — used for the native ETH <-> WETH pair directly
 export const WETH_ABI = [
   { name: 'deposit',  type: 'function', stateMutability: 'payable',    inputs: [],                                  outputs: [] },

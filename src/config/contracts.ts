@@ -25,6 +25,15 @@ export const CONTRACTS = {
   // fresh contract with no whitelist check at all.
   LiquidityHelper:     '0xbCE7C45dDB6387BCeF217B923E4E1a76ad5B9037' as `0x${string}`,
   Whitelist:           '0x0337333fdCf79D08f4ac10321796A91f300b5a80' as `0x${string}`,
+  // Deployed 2026-07-05: bundles "swap into WETH via AeonRouter, then unwrap
+  // to native ETH" into one transaction/one wallet prompt. Without it, the
+  // unwrap step is a separate raw WETH.withdraw() call that wallets label
+  // "Withdraw" — accurate (that's WETH's own real function name) but reads
+  // as unrelated to a swap. Verified end-to-end against a fork simulation
+  // before deploying: real 2-hop swap, real unwrap, zero leftover funds in
+  // the helper. Wraps AeonRouter unchanged — doesn't touch it, so it can't
+  // change behavior for anything already using that router directly.
+  SwapUnwrapHelper:    '0x86b6760D84EFfF5FD1894473101bD67744eF9FC2' as `0x${string}`,
 } as const
 
 // Native ETH sentinel — convention used across the app for "the chain's
