@@ -60,7 +60,14 @@ export const CONTRACTS = {
   // Verified via fork simulation covering all three orderings (vAMM->CL,
   // CL-as-intermediate->vAMM, DLMM-as-intermediate->vAMM) before deploying —
   // exact-matching reported vs. actual balance deltas on all of them.
-  UniversalRouter:     '0xe1829b2bd8ed07c7d5d1f1f26d1d6ba70b3d24ca' as `0x${string}`,
+  // Redeployed 2026-07-05 to add poolType 3 (external Uniswap-V2-style
+  // pairs). Real Uniswap pairs take a 4-param swap(amount0Out, amount1Out,
+  // to, data) for flash-swap callbacks -- a different function selector
+  // than our own simplified pools' 3-param swap(), confirmed by a direct
+  // revert against the real USDG/VIRTUAL pair before the fix. Verified fixed
+  // via fork simulation (exact-matching reported vs actual balance delta)
+  // before this redeploy.
+  UniversalRouter:     '0x4a4329baF4eFDB782F3C6F37f11aD80C174820C2' as `0x${string}`,
 } as const
 
 // Deployed 2026-07-05: parallel staking + AEON-rewards contracts for CL and
@@ -173,6 +180,21 @@ export const DLMM_POOLS = [
   { name: 'AEON/USDG',    token0: 'AEON',    token1: 'USDG', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x8bCCec714f42eeb73954172C253F84f649599E3B' as `0x${string}` },
   { name: 'ETH/USDG',     token0: 'WETH',    token1: 'USDG', type: 'DLMM', binStep: 10, fee: '0.05%',  address: '0x6E3772afbef845Ef4a3aD23a6eEEf65776375bC6' as `0x${string}` },
   { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xcC62C85794F652ee257cf00c87530fF860755892' as `0x${string}` },
+]
+
+// Real, independently-deployed Uniswap V2 pairs already live on Robinhood
+// Chain (factory 0x8bcEaA40B9AcdfAedF85AdF4FF01F5Ad6517937f, 898 total pairs
+// chain-wide) -- not ours, but AeonUniversalRouter can route through them
+// (poolType 3) alongside our own pools when they offer a better price.
+// Added 2026-07-05: these 4 are deeper than AEON's own corresponding pools
+// for the same tokens, confirmed via getReserves() before wiring in.
+// Standard Uniswap V2 fee (0.3%, i.e. the fixed 997/1000 factor baked into
+// every real UniV2-style pair).
+export const UNISWAP_POOLS = [
+  { name: 'WETH/USDG',     token0: 'WETH', token1: 'USDG',    type: 'UniV2', fee: '0.3%', address: '0x8803c117ccae7B5146297876c2A25DF135141C4d' as `0x${string}` },
+  { name: 'WETH/VIRTUAL',  token0: 'WETH', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0xd95e8e2Cd04c207625C6F23c974d365a5F3A91D3' as `0x${string}` },
+  { name: 'USDG/VIRTUAL',  token0: 'USDG', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D' as `0x${string}` },
+  { name: 'WETH/ROBINFUN', token0: 'WETH', token1: 'ROBINFUN', type: 'UniV2', fee: '0.3%', address: '0xE53377eB912D08e1B0160E5Ea0c626CF162870fF' as `0x${string}` },
 ]
 
 // Genesis + ongoing tokenomics — mirrors EmissionsEngineRH.sol / FeeDistributorV3.sol / BuybackEngineV3.sol

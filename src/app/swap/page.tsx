@@ -206,12 +206,15 @@ export default function SwapPage() {
   // Hops for AeonUniversalRouter — used whenever the best route crosses pool
   // types. CL/DLMM hops pass address(0) for `pool` (Algebra derives its pool
   // from tokenIn/tokenOut/deployer; the LB router derives its pair from
-  // tokenPath/binStep) — neither needs an explicit pool address.
+  // tokenPath/binStep) — neither needs an explicit pool address. vAMM (0) and
+  // external Uniswap V2 (3) hops both need the real pool/pair address, since
+  // the router calls that contract directly rather than going through an
+  // intermediary router.
   function buildUniversalHops() {
     if (!route) return []
     return route.steps.map(step => ({
       poolType: step.poolType,
-      pool:     step.poolType === 0 ? step.poolAddress : ZERO_ADDR,
+      pool:     (step.poolType === 0 || step.poolType === 3) ? step.poolAddress : ZERO_ADDR,
       tokenIn:  step.tokenIn  === 'ETH' ? WETH_ADDR : TOKENS[step.tokenIn  as keyof typeof TOKENS].address,
       tokenOut: step.tokenOut === 'ETH' ? WETH_ADDR : TOKENS[step.tokenOut as keyof typeof TOKENS].address,
       feeBps:   Number(step.feeBps),

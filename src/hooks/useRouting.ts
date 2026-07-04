@@ -1,7 +1,7 @@
 'use client'
 import { useMemo } from 'react'
 import { useReadContracts } from 'wagmi'
-import { POOLS, CL_POOLS, DLMM_POOLS, TOKENS } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, UNISWAP_POOLS, TOKENS } from '@/config/contracts'
 import { PAIR_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI } from '@/config/abis'
 
 export interface RouteStep {
@@ -9,7 +9,7 @@ export interface RouteStep {
   tokenIn:  string   // TOKENS key (never 'ETH' — use 'WETH')
   tokenOut: string
   feeBps:   bigint
-  poolType: number   // 0 = vAMM, 1 = CL, 2 = DLMM — matches AeonUniversalRouter.Hop.poolType
+  poolType: number   // 0 = vAMM, 1 = CL, 2 = DLMM, 3 = external UniV2 — matches AeonUniversalRouter.Hop.poolType
   binStep:  number   // DLMM only
 }
 
@@ -28,12 +28,14 @@ export interface RoutingResult {
                               // AeonRouterRH (poolType 0), not the newer mixed-type router.
 }
 
-// Exhaustive path search across vAMM, CL, and DLMM pools together — AeonRouterRH
-// can only ever execute poolType 0 (vAMM), but AeonUniversalRouter (deployed
-// 2026-07-05) can chain hops across all three, so this search no longer needs
-// to exclude CL/DLMM. CL and DLMM don't have simple reserve pairs the way
-// vAMM does, so each hop's expected output is approximated using "virtual
-// reserves" derived from real on-chain state:
+// Exhaustive path search across vAMM, CL, DLMM, and real external Uniswap V2
+// pools together — AeonRouterRH can only ever execute poolType 0 (vAMM), but
+// AeonUniversalRouter (deployed 2026-07-05, redeployed same day to add
+// poolType 3 for Uniswap) can chain hops across all four, so this search no
+// longer needs to exclude any of them. Uniswap pools use the same simple
+// reserve-pair shape as our own vAMM pools (real getReserves()/token0()) — CL
+// and DLMM don't, so each of those hops' expected output is approximated
+// using "virtual reserves" derived from real on-chain state:
 //   - CL:   virtualReserve0 = liquidity * 2^96 / sqrtPriceX96,
 //           virtualReserve1 = liquidity * sqrtPriceX96 / 2^96
 //           (the standard Uniswap V3/Algebra identity for the CURRENT active
@@ -87,6 +89,18 @@ export function useRouting(
     ]),
   [])
   const { data: vammData } = useReadContracts({ contracts: vammContracts, query: { refetchInterval: 10000, enabled: searchEnabled } })
+
+  // Real external Uniswap V2 pairs — same getReserves()/token0() read
+  // interface as our own vAMM pools, so the quoting side reuses the exact
+  // same fetch pattern. Only the swap-execution side differs (poolType 3
+  // in AeonUniversalRouter uses the 4-param swap() these real pairs need).
+  const uniswapContracts = useMemo(() =>
+    UNISWAP_POOLS.flatMap(p => [
+      { address: p.address as `0x${string}`, abi: PAIR_ABI, functionName: 'getReserves' as const },
+      { address: p.address as `0x${string}`, abi: PAIR_ABI, functionName: 'token0'      as const },
+    ]),
+  [])
+  const { data: uniswapData } = useReadContracts({ contracts: uniswapContracts, query: { refetchInterval: 10000, enabled: searchEnabled } })
 
   // CL — token0, globalState (sqrtPriceX96), liquidity per pool
   const clContracts = useMemo(() =>
@@ -157,10 +171,19 @@ export function useRouting(
       reservesByPool.set(p.address.toLowerCase(), { reserve0: reserveX, reserve1: reserveY, token0Addr: (tokXD.result as string).toLowerCase() })
     })
 
+    UNISWAP_POOLS.forEach((p, i) => {
+      const resD  = uniswapData?.[i * 2]
+      const tok0D = uniswapData?.[i * 2 + 1]
+      if (resD?.status !== 'success' || tok0D?.status !== 'success') return
+      const [r0, r1] = resD.result as [bigint, bigint, number]
+      reservesByPool.set(p.address.toLowerCase(), { reserve0: r0, reserve1: r1, token0Addr: (tok0D.result as string).toLowerCase() })
+    })
+
     const allPools: UnifiedPool[] = [
       ...POOLS.map(p => ({ address: p.address, name: p.name, token0: p.token0, token1: p.token1, fee: p.fee, poolType: 0, binStep: 0 })),
       ...CL_POOLS.map(p => ({ address: p.address, name: p.name, token0: p.token0, token1: p.token1, fee: p.fee, poolType: 1, binStep: 0 })),
       ...DLMM_POOLS.map(p => ({ address: p.address, name: p.name, token0: p.token0, token1: p.token1, fee: p.fee, poolType: 2, binStep: p.binStep })),
+      ...UNISWAP_POOLS.map(p => ({ address: p.address, name: p.name, token0: p.token0, token1: p.token1, fee: p.fee, poolType: 3, binStep: 0 })),
     ]
 
     function reservesFor(pool: UnifiedPool, fromToken: string): { rIn: bigint; rOut: bigint } | null {
@@ -234,5 +257,5 @@ export function useRouting(
       best: search(allPools),
       vammOnly: search(allPools.filter(p => p.poolType === 0)),
     }
-  }, [vammData, clData, dlmmPhase1, dlmmPhase2, amountIn, tkIn, tkOut])
+  }, [vammData, clData, dlmmPhase1, dlmmPhase2, uniswapData, amountIn, tkIn, tkOut])
 }
