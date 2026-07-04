@@ -14,7 +14,7 @@ import { useVolume24h } from '@/hooks/useVolume24h'
 import { useClPositions } from '@/hooks/useClPositions'
 import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { TokenIcon } from '@/components/TokenIcon'
-import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
+import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, amountsForLiquidity, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
 import { binIdToPrice, dlmmRangeSide, computeSpotDistribution } from '@/lib/dlmmMath'
 
 type PoolMode = 'vAMM' | 'CL' | 'DLMM'
@@ -1073,6 +1073,25 @@ function PositionCard({ pos, onDone }: { pos: { tokenId: bigint, token0: string,
   const [step, setStep] = useState<'idle' | 'decrease' | 'decrease_wait' | 'collect' | 'collect_wait' | 'done'>('idle')
   const [errMsg, setErrMsg] = useState('')
 
+  // Same TokenMismatch-class fix as vAMM's LiquidityHelperV2 — decreaseLiquidity
+  // previously passed amount0Min/amount1Min as 0, meaning a reserve shift
+  // between load and confirmation (or a same-block sandwich) could hand back
+  // far less than the position was actually worth with no floor at all.
+  const pool = CL_POOLS.find(cp => {
+    const a0 = TOKENS[cp.token0 as keyof typeof TOKENS]?.address.toLowerCase()
+    const a1 = TOKENS[cp.token1 as keyof typeof TOKENS]?.address.toLowerCase()
+    const p0 = pos.token0.toLowerCase(), p1 = pos.token1.toLowerCase()
+    return (a0 === p0 && a1 === p1) || (a0 === p1 && a1 === p0)
+  })
+  const { data: globalStateData } = useReadContract({
+    address: pool?.address, abi: ALGEBRA_POOL_ABI, functionName: 'globalState',
+    query: { enabled: !!pool, refetchInterval: 15000 },
+  })
+  const curSqrtPriceX96 = (globalStateData as readonly [bigint, number, number, number, number, boolean] | undefined)?.[0] ?? 0n
+  const expected = curSqrtPriceX96 > 0n
+    ? amountsForLiquidity(curSqrtPriceX96, pos.tickLower, pos.tickUpper, pos.liquidity)
+    : { amount0: 0n, amount1: 0n }
+
   const { writeContract, data: txHash, error: writeError } = useWriteContract()
   const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
 
@@ -1087,7 +1106,11 @@ function PositionCard({ pos, onDone }: { pos: { tokenId: bigint, token0: string,
     if (step === 'decrease') {
       writeContract({
         address: PM, abi: ALGEBRA_POSITION_MANAGER_ABI, functionName: 'decreaseLiquidity',
-        args: [{ tokenId: pos.tokenId, liquidity: pos.liquidity, amount0Min: 0n, amount1Min: 0n, deadline: BigInt(Math.floor(Date.now() / 1000) + 1200) }],
+        args: [{
+          tokenId: pos.tokenId, liquidity: pos.liquidity,
+          amount0Min: withSlippage(expected.amount0), amount1Min: withSlippage(expected.amount1),
+          deadline: BigInt(Math.floor(Date.now() / 1000) + 1200),
+        }],
       })
       setStep('decrease_wait')
     }
@@ -1759,6 +1782,22 @@ function DlmmPositionCard({ pool, pos, owner, onDone }: { pool: typeof DLMM_POOL
     args: [owner, DLMM_ROUTER], query: { enabled: !!owner },
   })
 
+  // Same slippage-protection fix as the vAMM/CL remove flows — removeLiquidity
+  // previously passed amountXMin/amountYMin as 0, so a same-block sandwich or
+  // just unlucky timing around a bin-shifting trade could hand back far less
+  // than the position was actually worth with no floor at all.
+  const { data: binData } = useReadContracts({
+    contracts: [
+      { address: pool.address, abi: LB_PAIR_ABI, functionName: 'getBin' as const, args: [pos.id] },
+      { address: pool.address, abi: LB_PAIR_ABI, functionName: 'totalSupply' as const, args: [BigInt(pos.id)] },
+    ],
+    query: { refetchInterval: 15000 },
+  })
+  const [binReserveX, binReserveY] = binData?.[0]?.status === 'success' ? binData[0].result as [bigint, bigint] : [0n, 0n]
+  const binTotalSupply = binData?.[1]?.status === 'success' ? binData[1].result as bigint : 0n
+  const expectedX = binTotalSupply > 0n ? binReserveX * pos.balance / binTotalSupply : 0n
+  const expectedY = binTotalSupply > 0n ? binReserveY * pos.balance / binTotalSupply : 0n
+
   const { writeContract, data: txHash, error: writeError } = useWriteContract()
   const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
 
@@ -1777,7 +1816,7 @@ function DlmmPositionCard({ pool, pos, owner, onDone }: { pool: typeof DLMM_POOL
     if (step === 'remove') {
       writeContract({
         address: DLMM_ROUTER, abi: LB_ROUTER_ABI, functionName: 'removeLiquidity',
-        args: [token0Addr, token1Addr, pool.binStep, 0n, 0n, [BigInt(pos.id)], [pos.balance], owner, BigInt(Math.floor(Date.now() / 1000) + 1200)],
+        args: [token0Addr, token1Addr, pool.binStep, withSlippage(expectedX), withSlippage(expectedY), [BigInt(pos.id)], [pos.balance], owner, BigInt(Math.floor(Date.now() / 1000) + 1200)],
       })
       setStep('remove_wait')
     }
