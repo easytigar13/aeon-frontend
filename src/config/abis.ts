@@ -199,6 +199,34 @@ export const AEON_ROUTER_ABI = [
   },
 ] as const
 
+// AeonUniversalRouter — chains hops across vAMM, CL, and DLMM in one
+// transaction (AEON_ROUTER_ABI above only ever supports poolType 0). Hop.pool
+// is only meaningful for vAMM (poolType 0); CL/DLMM hops pass address(0) —
+// Algebra derives its pool from tokenIn/tokenOut/deployer, DLMM's router
+// derives its pair from tokenPath/binStep, neither needs an explicit pool arg.
+export const AEON_UNIVERSAL_ROUTER_ABI = [
+  {
+    name: 'swapExactTokensForTokens',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'hops', type: 'tuple[]', components: [
+        { name: 'poolType', type: 'uint8'   }, // 0 = vAMM, 1 = CL, 2 = DLMM
+        { name: 'pool',     type: 'address' },
+        { name: 'tokenIn',  type: 'address' },
+        { name: 'tokenOut', type: 'address' },
+        { name: 'feeBps',   type: 'uint24'  }, // vAMM only
+        { name: 'binStep',  type: 'uint16'  }, // DLMM only
+      ]},
+      { name: 'amountIn',     type: 'uint256' },
+      { name: 'amountOutMin', type: 'uint256' },
+      { name: 'to',           type: 'address' },
+      { name: 'deadline',     type: 'uint256' },
+    ],
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+  },
+] as const
+
 // Bundles "swap into WETH via AeonRouter, then unwrap to native ETH" into one
 // call -- same Route[]/amountIn/amountOutMin/deadline shape as AEON_ROUTER_ABI,
 // `to` just receives native ETH instead of WETH. Verified end-to-end against

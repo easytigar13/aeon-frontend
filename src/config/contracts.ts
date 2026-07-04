@@ -52,6 +52,15 @@ export const CONTRACTS = {
   // generic raw pair-swap hop abstraction. Not run automatically by anything —
   // see keeper/arb-bot.js in aeon-protocol-v5 for the analysis/execution script.
   ArbKeeper:           '0xdce1773a806cdf172f76f94d8828971d580cd472' as `0x${string}`,
+  // Deployed 2026-07-05: AeonRouterRH only ever implements vAMM's swap
+  // interface (hardcoded poolType 0) — it has no code path for Algebra's
+  // exactInputSingle (CL) or Trader Joe's LB swapExactTokensForTokens
+  // (DLMM), so a route could never cross pool types before this. One
+  // transaction can now chain hops across vAMM, CL, and DLMM in any order.
+  // Verified via fork simulation covering all three orderings (vAMM->CL,
+  // CL-as-intermediate->vAMM, DLMM-as-intermediate->vAMM) before deploying —
+  // exact-matching reported vs. actual balance deltas on all of them.
+  UniversalRouter:     '0xe1829b2bd8ed07c7d5d1f1f26d1d6ba70b3d24ca' as `0x${string}`,
 } as const
 
 // Deployed 2026-07-05: parallel staking + AEON-rewards contracts for CL and
