@@ -7,7 +7,7 @@ import { useAccount, useBalance, useReadContract, useReadContracts, useWriteCont
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, LIQUIDITY_HELPER_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
+import { ERC20_ABI, LIQUIDITY_HELPER_V2_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -23,10 +23,18 @@ type Step = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait'
 type ClStep = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'mint' | 'mint_wait' | 'done'
 type DlmmStep = 'idle' | 'approve0' | 'approve0_wait' | 'approve1' | 'approve1_wait' | 'addliq' | 'addliq_wait' | 'done'
 
-const HELPER = CONTRACTS.LiquidityHelper
+const HELPER = CONTRACTS.LiquidityHelperV2
 const PM = ALGEBRA_CONTRACTS.nonfungiblePositionManager
 const MAX_UINT128 = 2n ** 128n - 1n
 const DLMM_ROUTER = DLMM_CONTRACTS.router
+
+// Slippage tolerance applied to vAMM add/remove liquidity — protects against
+// reserve shifts between quoting and confirmation. LiquidityHelperV2 reverts
+// if the actual outcome misses these bounds rather than silently accepting
+// whatever the pool computes.
+const LIQ_SLIPPAGE_BPS = 50n // 0.5%
+const withSlippage = (wei: bigint) => wei * (10000n - LIQ_SLIPPAGE_BPS) / 10000n
+const liqDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 1200)
 
 function parseFeeRate(fee: string): number { return parseFloat(fee.replace('%', '')) / 100 }
 function fmtApr(apr: number | null): string {
@@ -491,7 +499,12 @@ function CreatePoolView({ onCreated }: { onCreated: (address: string) => void })
     const [addr0, amt0, addr1, amt1] = isAFirst
       ? [tokenA, amountAWei, tokenB, amountBWei]
       : [tokenB, amountBWei, tokenA, amountAWei]
-    writeContract({ address: HELPER, abi: LIQUIDITY_HELPER_ABI, functionName: 'addLiquidity', args: [createdPool, addr0 as `0x${string}`, amt0, addr1 as `0x${string}`, amt1, address] })
+    // Brand-new pool has zero reserves — there's no existing ratio to slip
+    // against, so min amounts are 0 (this deposit itself sets the price).
+    writeContract({
+      address: HELPER, abi: LIQUIDITY_HELPER_V2_ABI, functionName: 'addLiquidity',
+      args: [createdPool, addr0 as `0x${string}`, amt0, amt1, 0n, 0n, addr1 as `0x${string}`, address, liqDeadline()],
+    })
     setStep('addliq_wait')
   }, [step, createdPool, createdPoolToken0])
 
@@ -730,8 +743,11 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
     }
     if (step === 'addliq') {
       writeContract({
-        address: HELPER, abi: LIQUIDITY_HELPER_ABI, functionName: 'addLiquidity',
-        args: [selectedPool.address, addToken0, addAmount0Wei, addToken1, addAmount1Wei, address],
+        address: HELPER, abi: LIQUIDITY_HELPER_V2_ABI, functionName: 'addLiquidity',
+        args: [
+          selectedPool.address, addToken0, addAmount0Wei, addAmount1Wei,
+          withSlippage(addAmount0Wei), withSlippage(addAmount1Wei), addToken1, address, liqDeadline(),
+        ],
       })
       setStep('addliq_wait')
     }
@@ -742,7 +758,12 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
     if (step === 'remove') {
       const lpToRemove = lpBal * BigInt(removeAmount) / 100n
       if (lpToRemove === 0n) { setStep('idle'); return }
-      writeContract({ address: HELPER, abi: LIQUIDITY_HELPER_ABI, functionName: 'removeLiquidity', args: [selectedPool.address, lpToRemove, address!] })
+      const quotedRecv0 = totalSupply > 0n ? lpToRemove * reserve0 / totalSupply : 0n
+      const quotedRecv1 = totalSupply > 0n ? lpToRemove * reserve1 / totalSupply : 0n
+      writeContract({
+        address: HELPER, abi: LIQUIDITY_HELPER_V2_ABI, functionName: 'removeLiquidity',
+        args: [selectedPool.address, lpToRemove, withSlippage(quotedRecv0), withSlippage(quotedRecv1), address!, liqDeadline()],
+      })
       setStep('remove_wait')
     }
   }, [step])

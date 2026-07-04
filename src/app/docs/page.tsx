@@ -335,7 +335,7 @@ export default function DocsPage() {
             <Addr label="Factory"             address={CONTRACTS.AeonFactory} />
             <Addr label="Router"              address={CONTRACTS.AeonRouter} />
             <Addr label="Gauge Factory"       address={CONTRACTS.AeonGaugeFactory} />
-            <Addr label="Liquidity Helper"    address={CONTRACTS.LiquidityHelper} />
+            <Addr label="Liquidity Helper"    address={CONTRACTS.LiquidityHelperV2} />
           </div>
 
           <H3>Token Addresses</H3>

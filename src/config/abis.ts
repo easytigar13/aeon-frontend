@@ -700,6 +700,51 @@ export const LIQUIDITY_HELPER_ABI = [
   },
 ] as const
 
+// Slippage-protected replacement for LIQUIDITY_HELPER_ABI — computes the
+// optimal matching amount from live pool reserves and reverts if either
+// side misses the caller's min bound (add), or if either received amount
+// undercuts the caller's min bound (remove).
+export const LIQUIDITY_HELPER_V2_ABI = [
+  {
+    name: 'addLiquidity',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'pool',            type: 'address' },
+      { name: 'token0',          type: 'address' },
+      { name: 'amount0Desired',  type: 'uint256' },
+      { name: 'amount1Desired',  type: 'uint256' },
+      { name: 'amount0Min',      type: 'uint256' },
+      { name: 'amount1Min',      type: 'uint256' },
+      { name: 'token1',          type: 'address' },
+      { name: 'to',              type: 'address' },
+      { name: 'deadline',        type: 'uint256' },
+    ],
+    outputs: [
+      { name: 'amount0',   type: 'uint256' },
+      { name: 'amount1',   type: 'uint256' },
+      { name: 'liquidity', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'removeLiquidity',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'pool',        type: 'address' },
+      { name: 'lpAmount',    type: 'uint256' },
+      { name: 'amount0Min',  type: 'uint256' },
+      { name: 'amount1Min',  type: 'uint256' },
+      { name: 'to',          type: 'address' },
+      { name: 'deadline',    type: 'uint256' },
+    ],
+    outputs: [
+      { name: 'amount0', type: 'uint256' },
+      { name: 'amount1', type: 'uint256' },
+    ],
+  },
+] as const
+
 export const VOTER_ABI = [
   {
     name: 'vote',

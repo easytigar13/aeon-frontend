@@ -24,6 +24,17 @@ export const CONTRACTS = {
   // (there should be no paywall to add liquidity to the protocol) — this is a
   // fresh contract with no whitelist check at all.
   LiquidityHelper:     '0xbCE7C45dDB6387BCeF217B923E4E1a76ad5B9037' as `0x${string}`,
+  // Deployed 2026-07-04: replaces LiquidityHelper for all ongoing add/remove
+  // calls. The old helper took the caller's amounts (or the pool's burn()
+  // output) on faith — no slippage bound, no live-reserve ratio correction —
+  // so a reserve shift between quoting and confirming could silently donate
+  // value on add, or hand back less than quoted on remove, with zero floor.
+  // This version computes the optimal matching amount from live reserves
+  // (Uniswap V2 Router pattern) and reverts if either side misses the
+  // caller's min bound. EmissionsEngine's stored liquidityHelper reference
+  // only fired once, inside the already-executed genesis epoch, so pointing
+  // the frontend here doesn't touch anything already on-chain.
+  LiquidityHelperV2:   '0xF5eDf6C1932e2E558ee560041c7B647a41673e78' as `0x${string}`,
   Whitelist:           '0x0337333fdCf79D08f4ac10321796A91f300b5a80' as `0x${string}`,
   // Deployed 2026-07-05: bundles "swap into WETH via AeonRouter, then unwrap
   // to native ETH" into one transaction/one wallet prompt. Without it, the

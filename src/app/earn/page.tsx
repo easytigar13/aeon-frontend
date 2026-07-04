@@ -7,7 +7,7 @@ import { useAccount, useReadContract, useReadContracts, useWriteContract, useWai
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI } from '@/config/abis'
+import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -18,6 +18,14 @@ import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
 import { binIdToPrice } from '@/lib/dlmmMath'
 
 type PriceMap = Record<string, number | null>
+
+// Same slippage tolerance as the Liquidity page's LiquidityHelperV2 calls —
+// bounds what this panel's price-oracle-derived amounts are allowed to
+// diverge from the pool's real reserve ratio before the mint reverts
+// instead of silently accepting a lopsided deposit.
+const LIQ_SLIPPAGE_BPS = 50n // 0.5%
+const withLiqSlippage = (wei: bigint) => wei * (10000n - LIQ_SLIPPAGE_BPS) / 10000n
+const liqDeadline = () => BigInt(Math.floor(Date.now() / 1000) + 1200)
 
 function fmtUsd(n: number | null): string {
   if (n === null || n <= 0) return '$—'
@@ -106,8 +114,8 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   const { data: bal0Raw,    refetch: refBal0   } = useReadContract({ address: t0?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t0, refetchInterval: 15000 } })
   const { data: bal1Raw,    refetch: refBal1   } = useReadContract({ address: t1?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t1, refetchInterval: 15000 } })
   const { data: lpBalRaw,   refetch: refLpBal  } = useReadContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { refetchInterval: 15000 } })
-  const { data: allow0Raw,  refetch: refAllow0 } = useReadContract({ address: t0?.address, abi: ERC20_ABI, functionName: 'allowance', args: [wallet, CONTRACTS.LiquidityHelper], query: { enabled: !!t0 } })
-  const { data: allow1Raw,  refetch: refAllow1 } = useReadContract({ address: t1?.address, abi: ERC20_ABI, functionName: 'allowance', args: [wallet, CONTRACTS.LiquidityHelper], query: { enabled: !!t1 } })
+  const { data: allow0Raw,  refetch: refAllow0 } = useReadContract({ address: t0?.address, abi: ERC20_ABI, functionName: 'allowance', args: [wallet, CONTRACTS.LiquidityHelperV2], query: { enabled: !!t0 } })
+  const { data: allow1Raw,  refetch: refAllow1 } = useReadContract({ address: t1?.address, abi: ERC20_ABI, functionName: 'allowance', args: [wallet, CONTRACTS.LiquidityHelperV2], query: { enabled: !!t1 } })
 
   const bal0    = (bal0Raw    as bigint | undefined) ?? 0n
   const bal1    = (bal1Raw    as bigint | undefined) ?? 0n
@@ -139,15 +147,18 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   useEffect(() => {
     if (!t0 || !t1) return
     setLiqErr('')
-    if (liqStep === 'app0')    { liqWrite({ address: t0.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelper, maxUint256] }); setLiqStep('app0_wait') }
-    if (liqStep === 'app1')    { liqWrite({ address: t1.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelper, maxUint256] }); setLiqStep('app1_wait') }
+    if (liqStep === 'app0')    { liqWrite({ address: t0.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, maxUint256] }); setLiqStep('app0_wait') }
+    if (liqStep === 'app1')    { liqWrite({ address: t1.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, maxUint256] }); setLiqStep('app1_wait') }
     if (liqStep === 'adding')  {
       const a0 = parseUnits(amt0 || '0', t0.decimals)
       const a1 = parseUnits(amt1 || '0', t1.decimals)
       const [addr0, amt0Wei, addr1, amt1Wei] = isToken0First
         ? [t0.address, a0, t1.address, a1]
         : [t1.address, a1, t0.address, a0]
-      liqWrite({ address: CONTRACTS.LiquidityHelper, abi: LIQUIDITY_HELPER_ABI, functionName: 'addLiquidity', args: [pool.address as `0x${string}`, addr0, amt0Wei, addr1, amt1Wei, wallet] })
+      liqWrite({
+        address: CONTRACTS.LiquidityHelperV2, abi: LIQUIDITY_HELPER_V2_ABI, functionName: 'addLiquidity',
+        args: [pool.address as `0x${string}`, addr0, amt0Wei, amt1Wei, withLiqSlippage(amt0Wei), withLiqSlippage(amt1Wei), addr1, wallet, liqDeadline()],
+      })
       setLiqStep('adding_wait')
     }
   }, [liqStep])
