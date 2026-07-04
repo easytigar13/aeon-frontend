@@ -593,6 +593,43 @@ export const GAUGE_ABI = [
   },
 ] as const
 
+// Minimal ERC721 approve — used to approve a single CL position NFT to a
+// gauge before staking it (positionManager already exposes this; not a new deploy).
+export const ERC721_APPROVE_ABI = [
+  { name: 'approve', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'to', type: 'address' }, { name: 'tokenId', type: 'uint256' }], outputs: [] },
+  { name: 'getApproved', type: 'function', stateMutability: 'view', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [{ name: '', type: 'address' }] },
+] as const
+
+// AeonClGauge — parallel staking gauge for CL position NFTs. Not the same
+// contract as GAUGE_ABI (deposit/withdraw take a tokenId, not an amount;
+// staked weight is the position's own liquidity).
+export const CL_GAUGE_ABI = [
+  { name: 'stake',    type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [] },
+  { name: 'withdraw', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'tokenId', type: 'uint256' }], outputs: [] },
+  { name: 'getReward', type: 'function', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { name: 'earned',   type: 'function', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'balanceOf', type: 'function', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'totalSupply', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'rewardRate', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'periodFinish', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'getStakedTokenIds', type: 'function', stateMutability: 'view', inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: '', type: 'uint256[]' }] },
+  { name: 'stakedLiquidity', type: 'function', stateMutability: 'view', inputs: [{ name: '', type: 'uint256' }], outputs: [{ name: '', type: 'uint128' }] },
+] as const
+
+// AeonDlmmGauge — parallel staking gauge for LB (DLMM) bin-share tokens.
+export const DLMM_GAUGE_ABI = [
+  { name: 'stake',    type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'ids', type: 'uint256[]' }, { name: 'amounts', type: 'uint256[]' }], outputs: [] },
+  { name: 'withdraw', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'ids', type: 'uint256[]' }, { name: 'amounts', type: 'uint256[]' }], outputs: [] },
+  { name: 'getReward', type: 'function', stateMutability: 'nonpayable', inputs: [], outputs: [] },
+  { name: 'earned',   type: 'function', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'balanceOf', type: 'function', stateMutability: 'view', inputs: [{ name: 'account', type: 'address' }], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'totalSupply', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'rewardRate', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'periodFinish', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'getStakedBinIds', type: 'function', stateMutability: 'view', inputs: [{ name: 'user', type: 'address' }], outputs: [{ name: '', type: 'uint256[]' }] },
+  { name: 'stakedBins', type: 'function', stateMutability: 'view', inputs: [{ name: '', type: 'address' }, { name: '', type: 'uint256' }], outputs: [{ name: '', type: 'uint256' }] },
+] as const
+
 export const BRIBE_ABI = [
   {
     name: 'earned',

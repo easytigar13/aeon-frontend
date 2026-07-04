@@ -62,17 +62,22 @@ export const CONTRACTS = {
 // per-bin share tokens, neither of which fit that shape. These gauges take
 // a governor-funded discretionary AEON budget via notifyRewardAmount()
 // instead of the automatic stream vAMM gauges get.
+// Redeployed 2026-07-05 (v2) to add per-user staked-position enumeration
+// (getStakedTokenIds / getStakedBinIds) — needed for the frontend to show
+// "your staked positions" at all, since staking transfers custody away from
+// the user. The v1 addresses were replaced before anything was ever staked
+// in them (confirmed totalSupply()==0 on all 8 first).
 export const CL_GAUGES: Record<string, `0x${string}`> = {
-  '0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e': '0x54823e28ae34c97f2750f32a331de1af5818d565', // CL AEON/ETH
-  '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6': '0x606dce9f79e22e4794ada29a090d9221c273ff5e', // CL AEON/USDG
-  '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3': '0x3955848ccf2888c6f57ff093d1954f0099e30015', // CL ETH/USDG
-  '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d': '0x1a87875838434db5b0e329e1a9b9d1dbd4c86ba1', // CL VIRTUAL/AEON
+  '0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e': '0xd4f0a5b1905537ad8be89a04591171c25cb916ef', // CL AEON/ETH
+  '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6': '0x5f6c7ffca91223fc1187ac3e29abb5d66d455367', // CL AEON/USDG
+  '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3': '0xb3ed0456a2637a71711c415e9e5c5982284fa432', // CL ETH/USDG
+  '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d': '0xafff2c5d9bb53bc3553b2e9086225aa6e293a2cc', // CL VIRTUAL/AEON
 }
 export const DLMM_GAUGES: Record<string, `0x${string}`> = {
-  '0x736d8E418673253b2CDE1ef3Df6205Fc9780816b': '0xb1a12a37b509149aa8a52e8a19a2c76e4b526b07', // DLMM AEON/ETH
-  '0x8bCCec714f42eeb73954172C253F84f649599E3B': '0x693483620f0b69e505aad92900574ff0c63f856a', // DLMM AEON/USDG
-  '0x6E3772afbef845Ef4a3aD23a6eEEf65776375bC6': '0x0d7ecc90b178eeb7a78d0256652e3124ddc59150', // DLMM ETH/USDG
-  '0xcC62C85794F652ee257cf00c87530fF860755892': '0x0e7ec4bb8da7d45b60a38f74d0aa933dd4b3dae7', // DLMM VIRTUAL/AEON
+  '0x736d8E418673253b2CDE1ef3Df6205Fc9780816b': '0xe3c3457d17f7a63b6f1af36274be141af97e3ac2', // DLMM AEON/ETH
+  '0x8bCCec714f42eeb73954172C253F84f649599E3B': '0x71f4b4d6ef39bf0f666cd8c37636502800edda52', // DLMM AEON/USDG
+  '0x6E3772afbef845Ef4a3aD23a6eEEf65776375bC6': '0x0ccf1f26e820f8045424877821e2e6412f4f4abc', // DLMM ETH/USDG
+  '0xcC62C85794F652ee257cf00c87530fF860755892': '0xf5b1f8c09de36fb508dc8f3669a76eed4be4db87', // DLMM VIRTUAL/AEON
 }
 
 // Native ETH sentinel — convention used across the app for "the chain's

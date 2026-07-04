@@ -6,8 +6,8 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI } from '@/config/abis'
+import { POOLS, CL_POOLS, DLMM_POOLS, CL_GAUGES, DLMM_GAUGES, ALGEBRA_CONTRACTS, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
+import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, CL_GAUGE_ABI, DLMM_GAUGE_ABI, ERC721_APPROVE_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -480,6 +480,363 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
               <span className="text-2xs text-text-muted font-mono">{pool.address.slice(0, 10)}…{pool.address.slice(-8)}</span>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// CL and DLMM staking — parallel gauges (see CL_GAUGES/DLMM_GAUGES in
+// config/contracts.ts for why these aren't the same official-emissions
+// gauges vAMM pools use). Same expandable-row shape as PoolRow, but staking
+// works on discrete positions (an NFT, or a set of bins) instead of a plain
+// amount of a fungible LP token.
+// ─────────────────────────────────────────────────────────────────────────
+
+type GaugeStep = 'idle' | 'approving' | 'approve_wait' | 'staking' | 'stake_wait' | 'unstaking' | 'unstake_wait' | 'claiming' | 'claim_wait'
+
+function ClGaugeRow({ pool, wallet }: { pool: typeof CL_POOLS[number]; wallet?: `0x${string}` }) {
+  const [expanded, setExpanded] = useState(false)
+  const [step, setStep] = useState<GaugeStep>('idle')
+  const [errMsg, setErrMsg] = useState('')
+  const [activeTokenId, setActiveTokenId] = useState<bigint | null>(null)
+
+  const gauge = CL_GAUGES[pool.address]
+  const t0Addr = TOKENS[pool.token0 as keyof typeof TOKENS].address.toLowerCase()
+  const t1Addr = TOKENS[pool.token1 as keyof typeof TOKENS].address.toLowerCase()
+
+  const { positions: myPositions, refetch: refetchPositions } = useClPositions(wallet)
+  const poolPositions = myPositions.filter(p => {
+    const pt0 = p.token0.toLowerCase(), pt1 = p.token1.toLowerCase()
+    return (pt0 === t0Addr && pt1 === t1Addr) || (pt0 === t1Addr && pt1 === t0Addr)
+  })
+
+  const { data: stakedIdsRaw, refetch: refetchStakedIds } = useReadContract({
+    address: gauge, abi: CL_GAUGE_ABI, functionName: 'getStakedTokenIds',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!wallet && expanded },
+  })
+  const stakedIds = (stakedIdsRaw as readonly bigint[] | undefined) ?? []
+
+  const { data: stakedLiqRaw } = useReadContracts({
+    contracts: stakedIds.map(id => ({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'stakedLiquidity' as const, args: [id] as const })),
+    query: { enabled: stakedIds.length > 0 },
+  })
+  const stakedPositions = stakedIds.map((id, i) => ({
+    id,
+    liquidity: stakedLiqRaw?.[i]?.status === 'success' ? stakedLiqRaw[i].result as bigint : 0n,
+  }))
+
+  const { data: earnedRaw, refetch: refetchEarned } = useReadContract({
+    address: gauge, abi: CL_GAUGE_ABI, functionName: 'earned',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!wallet, refetchInterval: 15000 },
+  })
+  const earned = (earnedRaw as bigint | undefined) ?? 0n
+  const earnedFormatted = earned > 0n ? parseFloat(formatUnits(earned, 18)).toFixed(4) : '0'
+
+  const { data: rewardRateRaw } = useReadContract({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'rewardRate', query: { enabled: expanded, refetchInterval: 60000 } })
+  const { data: periodFinishRaw } = useReadContract({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'periodFinish', query: { enabled: expanded } })
+  const rewardRate = (rewardRateRaw as bigint | undefined) ?? 0n
+  const periodFinish = (periodFinishRaw as bigint | undefined) ?? 0n
+  const isEmitting = periodFinish > BigInt(Math.floor(Date.now() / 1000))
+
+  const { writeContract, data: txHash, error: writeError } = useWriteContract()
+  const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash })
+
+  useEffect(() => {
+    if (!txSuccess) return
+    refetchPositions(); refetchStakedIds(); refetchEarned()
+    if (step === 'approve_wait') { setStep('staking'); return }
+    if (['stake_wait', 'unstake_wait', 'claim_wait'].includes(step)) { setStep('idle'); setActiveTokenId(null); return }
+  }, [txSuccess])
+
+  useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
+
+  useEffect(() => {
+    if (!wallet || !gauge) return
+    setErrMsg('')
+    if (step === 'approving' && activeTokenId !== null) {
+      writeContract({ address: ALGEBRA_CONTRACTS.nonfungiblePositionManager, abi: ERC721_APPROVE_ABI, functionName: 'approve', args: [gauge, activeTokenId] })
+      setStep('approve_wait')
+    }
+    if (step === 'staking' && activeTokenId !== null) {
+      writeContract({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'stake', args: [activeTokenId] })
+      setStep('stake_wait')
+    }
+    if (step === 'unstaking' && activeTokenId !== null) {
+      writeContract({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'withdraw', args: [activeTokenId] })
+      setStep('unstake_wait')
+    }
+    if (step === 'claiming') {
+      writeContract({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'getReward', args: [] })
+      setStep('claim_wait')
+    }
+  }, [step])
+
+  const isBusy = step !== 'idle'
+
+  function handleStake(tokenId: bigint) { setActiveTokenId(tokenId); setStep('approving') }
+  function handleUnstake(tokenId: bigint) { setActiveTokenId(tokenId); setStep('unstaking') }
+
+  if (!gauge) return null
+
+  return (
+    <div className={clsx('card overflow-hidden transition-all', expanded && 'border-aeon-400/20')}>
+      <button className="w-full grid grid-cols-12 gap-2 px-4 py-4 items-center hover:bg-bg-raised transition-colors text-left" onClick={() => setExpanded(!expanded)}>
+        <div className="col-span-4 flex items-center gap-2">
+          <div className="flex -space-x-1">
+            <TokenIcon symbol={pool.token0} size={28} />
+            <TokenIcon symbol={pool.token1} size={28} />
+          </div>
+          <div>
+            <span className="text-sm font-medium text-text-primary">{pool.name}</span>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className="text-2xs font-mono font-bold text-violet-400">CL</span>
+              <span className="text-2xs text-text-muted">· {pool.fee}</span>
+            </div>
+          </div>
+        </div>
+        <div className="col-span-3">
+          <div className="text-sm font-mono text-text-secondary">{poolPositions.length} unstaked · {stakedIds.length} staked</div>
+          <div className="text-2xs text-text-muted">Your positions</div>
+        </div>
+        <div className="col-span-3">
+          <div className={clsx('text-sm font-mono', isEmitting ? 'text-aeon-400 font-bold' : 'text-text-muted')}>{isEmitting ? 'Emitting' : 'No active rewards'}</div>
+          <div className="text-2xs text-text-muted">Reward status</div>
+        </div>
+        <div className="col-span-1 flex justify-end">
+          {expanded ? <ChevronUp size={16} className="text-text-muted" /> : <ChevronDown size={16} className="text-text-muted" />}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-bg-border bg-bg-raised px-4 py-4 space-y-3">
+          {!wallet ? (
+            <div className="p-4 text-center text-sm text-text-muted">Connect wallet to stake and earn</div>
+          ) : (
+            <>
+              <div className="text-2xs font-mono text-text-muted uppercase tracking-wider">Unstaked positions</div>
+              {poolPositions.length === 0 && <div className="text-xs text-text-muted">None — add liquidity on the <Link href="/liquidity" className="text-aeon-400 hover:underline">Liquidity page</Link> first.</div>}
+              {poolPositions.map(p => (
+                <div key={p.tokenId.toString()} className="flex items-center justify-between p-2 bg-bg-base rounded-lg">
+                  <span className="text-xs font-mono text-text-secondary">#{p.tokenId.toString()} · liquidity {p.liquidity.toString()}</span>
+                  <button
+                    disabled={isBusy && activeTokenId === p.tokenId}
+                    onClick={() => handleStake(p.tokenId)}
+                    className="btn-primary text-xs py-1.5 px-3 disabled:opacity-40 flex items-center gap-1"
+                  >
+                    {isBusy && activeTokenId === p.tokenId && <Loader2 size={11} className="animate-spin" />}
+                    {isBusy && activeTokenId === p.tokenId ? (step === 'approving' || step === 'approve_wait' ? 'Approving…' : 'Staking…') : 'Stake'}
+                  </button>
+                </div>
+              ))}
+
+              <div className="text-2xs font-mono text-text-muted uppercase tracking-wider pt-2">Staked positions</div>
+              {stakedPositions.length === 0 && <div className="text-xs text-text-muted">None yet.</div>}
+              {stakedPositions.map(p => (
+                <div key={p.id.toString()} className="flex items-center justify-between p-2 bg-bg-base rounded-lg">
+                  <span className="text-xs font-mono text-text-secondary">#{p.id.toString()} · liquidity {p.liquidity.toString()}</span>
+                  <button
+                    disabled={isBusy && activeTokenId === p.id}
+                    onClick={() => handleUnstake(p.id)}
+                    className="btn-ghost text-xs py-1.5 px-3 border border-bg-border disabled:opacity-40 flex items-center gap-1"
+                  >
+                    {isBusy && activeTokenId === p.id && <Loader2 size={11} className="animate-spin" />}
+                    Unstake
+                  </button>
+                </div>
+              ))}
+
+              <div className="flex items-center justify-between p-3 bg-bg-base rounded-xl mt-2">
+                <span className="text-sm text-text-muted">Claimable AEON</span>
+                <div className="flex items-center gap-2">
+                  <span className={clsx('font-mono font-bold text-sm', earned > 0n ? 'text-aeon-400' : 'text-text-muted')}>{earnedFormatted} AEON</span>
+                  <button disabled={earned === 0n || isBusy} onClick={() => setStep('claiming')} className="text-xs btn-ghost py-1 px-2 text-aeon-400 disabled:opacity-40 flex items-center gap-1">
+                    {(step === 'claiming' || step === 'claim_wait') && <Loader2 size={10} className="animate-spin" />}
+                    Claim
+                  </button>
+                </div>
+              </div>
+
+              {errMsg && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{errMsg}</div>}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DlmmGaugeRow({ pool, wallet }: { pool: typeof DLMM_POOLS[number]; wallet?: `0x${string}` }) {
+  const [expanded, setExpanded] = useState(false)
+  const [step, setStep] = useState<GaugeStep>('idle')
+  const [errMsg, setErrMsg] = useState('')
+
+  const gauge = DLMM_GAUGES[pool.address]
+
+  const { data: activeIdRaw } = useReadContract({
+    address: pool.address, abi: LB_PAIR_ABI, functionName: 'getActiveId', query: { enabled: expanded, refetchInterval: 20000 },
+  })
+  const activeId = activeIdRaw !== undefined ? Number(activeIdRaw) : undefined
+  const { positions: myPositions, refetch: refetchPositions } = useDlmmPositions(pool, wallet, activeId)
+
+  const { data: isApprovedRaw, refetch: refetchApproval } = useReadContract({
+    address: pool.address, abi: LB_PAIR_ABI, functionName: 'isApprovedForAll',
+    args: wallet && gauge ? [wallet, gauge] : undefined, query: { enabled: !!wallet && !!gauge && expanded },
+  })
+  const isApproved = !!isApprovedRaw
+
+  const { data: stakedIdsRaw, refetch: refetchStakedIds } = useReadContract({
+    address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'getStakedBinIds',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!wallet && expanded },
+  })
+  const stakedIdsAll = (stakedIdsRaw as readonly bigint[] | undefined) ?? []
+
+  const { data: stakedAmountsRaw } = useReadContracts({
+    contracts: stakedIdsAll.map(id => ({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'stakedBins' as const, args: wallet ? [wallet, id] as const : undefined })),
+    query: { enabled: !!wallet && stakedIdsAll.length > 0 },
+  })
+  const stakedPositions = stakedIdsAll
+    .map((id, i) => {
+      const r = stakedAmountsRaw?.[i]
+      const amt = r?.status === 'success' ? r.result as bigint : 0n
+      return amt > 0n ? { id, amount: amt } : null
+    })
+    .filter((p): p is { id: bigint; amount: bigint } => p !== null)
+
+  const { data: earnedRaw, refetch: refetchEarned } = useReadContract({
+    address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'earned',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!wallet, refetchInterval: 15000 },
+  })
+  const earned = (earnedRaw as bigint | undefined) ?? 0n
+  const earnedFormatted = earned > 0n ? parseFloat(formatUnits(earned, 18)).toFixed(4) : '0'
+
+  const { data: rewardRateRaw } = useReadContract({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'rewardRate', query: { enabled: expanded, refetchInterval: 60000 } })
+  const { data: periodFinishRaw } = useReadContract({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'periodFinish', query: { enabled: expanded } })
+  const periodFinish = (periodFinishRaw as bigint | undefined) ?? 0n
+  const isEmitting = periodFinish > BigInt(Math.floor(Date.now() / 1000))
+
+  const { writeContract, data: txHash, error: writeError } = useWriteContract()
+  const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash })
+
+  useEffect(() => {
+    if (!txSuccess) return
+    refetchPositions(); refetchStakedIds(); refetchEarned(); refetchApproval()
+    if (step === 'approve_wait') { setStep('staking'); return }
+    if (['stake_wait', 'unstake_wait', 'claim_wait'].includes(step)) { setStep('idle'); return }
+  }, [txSuccess])
+
+  useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
+
+  useEffect(() => {
+    if (!wallet || !gauge) return
+    setErrMsg('')
+    if (step === 'approving') {
+      writeContract({ address: pool.address, abi: LB_PAIR_ABI, functionName: 'approveForAll', args: [gauge, true] })
+      setStep('approve_wait')
+    }
+    if (step === 'staking') {
+      const ids = myPositions.map(p => BigInt(p.id))
+      const amounts = myPositions.map(p => p.balance)
+      if (ids.length === 0) { setStep('idle'); return }
+      writeContract({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'stake', args: [ids, amounts] })
+      setStep('stake_wait')
+    }
+    if (step === 'unstaking') {
+      const ids = stakedPositions.map(p => p.id)
+      const amounts = stakedPositions.map(p => p.amount)
+      if (ids.length === 0) { setStep('idle'); return }
+      writeContract({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'withdraw', args: [ids, amounts] })
+      setStep('unstake_wait')
+    }
+    if (step === 'claiming') {
+      writeContract({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'getReward', args: [] })
+      setStep('claim_wait')
+    }
+  }, [step])
+
+  const isBusy = step !== 'idle'
+
+  function handleStakeAll() {
+    if (myPositions.length === 0) return
+    setStep(isApproved ? 'staking' : 'approving')
+  }
+
+  if (!gauge) return null
+
+  return (
+    <div className={clsx('card overflow-hidden transition-all', expanded && 'border-aeon-400/20')}>
+      <button className="w-full grid grid-cols-12 gap-2 px-4 py-4 items-center hover:bg-bg-raised transition-colors text-left" onClick={() => setExpanded(!expanded)}>
+        <div className="col-span-4 flex items-center gap-2">
+          <div className="flex -space-x-1">
+            <TokenIcon symbol={pool.token0} size={28} />
+            <TokenIcon symbol={pool.token1} size={28} />
+          </div>
+          <div>
+            <span className="text-sm font-medium text-text-primary">{pool.name}</span>
+            <div className="flex items-center gap-1 mt-0.5">
+              <span className="text-2xs font-mono font-bold text-amber-400">DLMM</span>
+              <span className="text-2xs text-text-muted">· {pool.binStep}bp bins</span>
+            </div>
+          </div>
+        </div>
+        <div className="col-span-3">
+          <div className="text-sm font-mono text-text-secondary">{myPositions.length} unstaked bin{myPositions.length === 1 ? '' : 's'} · {stakedPositions.length} staked</div>
+          <div className="text-2xs text-text-muted">Your positions</div>
+        </div>
+        <div className="col-span-3">
+          <div className={clsx('text-sm font-mono', isEmitting ? 'text-aeon-400 font-bold' : 'text-text-muted')}>{isEmitting ? 'Emitting' : 'No active rewards'}</div>
+          <div className="text-2xs text-text-muted">Reward status</div>
+        </div>
+        <div className="col-span-1 flex justify-end">
+          {expanded ? <ChevronUp size={16} className="text-text-muted" /> : <ChevronDown size={16} className="text-text-muted" />}
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-bg-border bg-bg-raised px-4 py-4 space-y-3">
+          {!wallet ? (
+            <div className="p-4 text-center text-sm text-text-muted">Connect wallet to stake and earn</div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between p-2 bg-bg-base rounded-lg">
+                <span className="text-xs text-text-muted">{myPositions.length} unstaked bin{myPositions.length === 1 ? '' : 's'} available</span>
+                <button
+                  disabled={myPositions.length === 0 || isBusy}
+                  onClick={handleStakeAll}
+                  className="btn-primary text-xs py-1.5 px-3 disabled:opacity-40 flex items-center gap-1"
+                >
+                  {(step === 'approving' || step === 'approve_wait' || step === 'staking' || step === 'stake_wait') && <Loader2 size={11} className="animate-spin" />}
+                  {step === 'approving' || step === 'approve_wait' ? 'Approving…' : step === 'staking' || step === 'stake_wait' ? 'Staking…' : 'Stake All'}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-2 bg-bg-base rounded-lg">
+                <span className="text-xs text-text-muted">{stakedPositions.length} bin{stakedPositions.length === 1 ? '' : 's'} staked</span>
+                <button
+                  disabled={stakedPositions.length === 0 || isBusy}
+                  onClick={() => setStep('unstaking')}
+                  className="btn-ghost text-xs py-1.5 px-3 border border-bg-border disabled:opacity-40 flex items-center gap-1"
+                >
+                  {(step === 'unstaking' || step === 'unstake_wait') && <Loader2 size={11} className="animate-spin" />}
+                  Unstake All
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between p-3 bg-bg-base rounded-xl mt-2">
+                <span className="text-sm text-text-muted">Claimable AEON</span>
+                <div className="flex items-center gap-2">
+                  <span className={clsx('font-mono font-bold text-sm', earned > 0n ? 'text-aeon-400' : 'text-text-muted')}>{earnedFormatted} AEON</span>
+                  <button disabled={earned === 0n || isBusy} onClick={() => setStep('claiming')} className="text-xs btn-ghost py-1 px-2 text-aeon-400 disabled:opacity-40 flex items-center gap-1">
+                    {(step === 'claiming' || step === 'claim_wait') && <Loader2 size={10} className="animate-spin" />}
+                    Claim
+                  </button>
+                </div>
+              </div>
+
+              {errMsg && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{errMsg}</div>}
+            </>
+          )}
         </div>
       )}
     </div>
@@ -1004,6 +1361,29 @@ export default function EarnPage() {
                 prices={prices}
               />
             ))}
+          </div>
+
+          <div className="mt-8">
+            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">
+              Concentrated Liquidity (CL) Staking
+            </div>
+            <div className="p-3 mb-3 rounded-xl bg-yellow-500/5 border border-yellow-500/20 text-2xs text-yellow-400">
+              Governor-funded rewards, not the automatic vote-weighted emissions vAMM pools get — see docs for why.
+            </div>
+            <div className="space-y-2">
+              {CL_POOLS.map(pool => (
+                <ClGaugeRow key={pool.address} pool={pool} wallet={isConnected ? address : undefined} />
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-8">
+            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">DLMM Staking</div>
+            <div className="space-y-2">
+              {DLMM_POOLS.map(pool => (
+                <DlmmGaugeRow key={pool.address} pool={pool} wallet={isConnected ? address : undefined} />
+              ))}
+            </div>
           </div>
         </>
       )}
