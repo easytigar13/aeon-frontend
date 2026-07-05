@@ -1143,3 +1143,39 @@ export const LB_FACTORY_ABI = [
   },
 ] as const
 
+
+// AeonTowerDefenseArena — entry fee + self-funded prize pool for the Tower
+// Defense mini-game. startSession() pulls the fee and records the session on
+// chain; claimReward() only pays out with a valid signature from the
+// contract's trustedSigner (a dedicated off-chain key that re-checks the
+// session and applies anti-cheat rules before signing -- see /api/games/tower-defense/claim).
+export const TOWER_DEFENSE_ARENA_ABI = [
+  { name: 'startSession', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'difficulty', type: 'uint8' }], outputs: [{ name: 'sessionId', type: 'uint256' }] },
+  { name: 'claimReward', type: 'function', stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'sessionId', type: 'uint256' },
+      { name: 'rewardAmount', type: 'uint256' },
+      { name: 'signature', type: 'bytes' },
+    ], outputs: [] },
+  { name: 'entryFee', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'maxRewardPerClaim', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'sessions', type: 'function', stateMutability: 'view', inputs: [{ name: '', type: 'uint256' }],
+    outputs: [
+      { name: 'player', type: 'address' },
+      { name: 'startedAt', type: 'uint40' },
+      { name: 'difficulty', type: 'uint8' },
+      { name: 'claimed', type: 'bool' },
+    ] },
+  { name: 'SessionStarted', type: 'event', inputs: [
+    { name: 'sessionId', type: 'uint256', indexed: true },
+    { name: 'player', type: 'address', indexed: true },
+    { name: 'difficulty', type: 'uint8', indexed: false },
+    { name: 'fee', type: 'uint256', indexed: false },
+  ] },
+  { name: 'RewardClaimed', type: 'event', inputs: [
+    { name: 'sessionId', type: 'uint256', indexed: true },
+    { name: 'player', type: 'address', indexed: true },
+    { name: 'reward', type: 'uint256', indexed: false },
+  ] },
+] as const

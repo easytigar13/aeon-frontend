@@ -79,6 +79,16 @@ export const CONTRACTS = {
   // reported vs actual balance delta) splitting a real USDG->WETH trade
   // across AEON's own vAMM ETH/USDG pool and Uniswap's WETH/USDG pair.
   UniversalRouter:     '0xd948c4ea449e36d899bdC8f62585DC04B5e26942' as `0x${string}`,
+  // Deployed 2026-07-05: backs the Tower Defense mini-game. 50 AEON entry fee
+  // per session feeds a self-funded prize pool; claimReward() only pays out
+  // with a signature from trustedSigner (a dedicated key held by
+  // /api/games/tower-defense/claim, holding no funds itself) attesting to a
+  // specific reward amount for a specific session -- the game runs client-side
+  // so a client's own "I won" claim can never be trusted directly. Hard caps
+  // (maxRewardPerClaim, maxClaimsPerDay) bound worst-case payout even if that
+  // signer key were ever compromised. Fork-verified (happy path + double-claim
+  // + wrong-signer + over-cap all behave correctly) before deploying.
+  TowerDefenseArena:   '0xCFcb643D8f51D640e0B81257340C1cA344238F48' as `0x${string}`,
 } as const
 
 // Deployed 2026-07-05: parallel staking + AEON-rewards contracts for CL and

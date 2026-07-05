@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { href: '/earn',       label: 'Portfolio' },
   { href: '/vote',       label: 'Vote'      },
   { href: '/lock',       label: 'Lock'      },
+  { href: '/games',      label: 'Games'     },
   { href: '/dashboard',  label: 'Dashboard' },
   { href: '/docs',       label: 'Docs'      },
 ]
