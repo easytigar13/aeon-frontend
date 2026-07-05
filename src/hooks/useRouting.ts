@@ -19,13 +19,26 @@ export interface BestRoute {
   priceImpact:  number   // percent, computed across the whole path (not just the first hop)
   label:        string   // e.g. "AEON → WETH → USDG"
   via:          string   // pool name(s)
+  // Present when this route prioritizes our own pool over the theoretical
+  // best route -- see the "priority split" comment below. Absent means a
+  // plain single route (possibly still multi-hop), same as before.
+  split?: {
+    aeonStep:            RouteStep
+    aeonAmountIn:        bigint
+    aeonAmountOut:       bigint
+    remainderSteps:      RouteStep[]
+    remainderAmountIn:   bigint
+    remainderAmountOut:  bigint
+  }
 }
 
 export interface RoutingResult {
-  best:     BestRoute | null  // best route across all pool types (vAMM + CL + DLMM)
+  best:     BestRoute | null  // best route across all pool types (vAMM + CL + DLMM + Uniswap),
+                              // possibly a priority split (see `split` on BestRoute)
   vammOnly: BestRoute | null  // best route restricted to vAMM — the fallback for ETH-output
                               // swaps, since AeonSwapUnwrapHelper only knows how to call
                               // AeonRouterRH (poolType 0), not the newer mixed-type router.
+                              // Never a split (SwapUnwrapHelper can't call the split function either).
 }
 
 // Exhaustive path search across vAMM, CL, DLMM, and real external Uniswap V2
@@ -48,6 +61,19 @@ export interface RoutingResult {
 // through AeonUniversalRouter/AeonRouterRH with real on-chain amountOutMin
 // slippage protection, so an imperfect estimate here can't cause fund loss,
 // only pick a slightly suboptimal route in a rare edge case.
+//
+// Priority split (added 2026-07-05): a pure best-price search sends most
+// volume on overlapping pairs (e.g. ETH/USDG) straight to Uniswap's real
+// pair, since our own vAMM/CL/DLMM pools there are currently far shallower.
+// Product decision: prioritize filling from our own pool first, and only
+// spill the remainder to whichever route is best, capped so the BLENDED
+// output never falls further behind the theoretical best route than the
+// user's own slippage tolerance allows. Mechanically: binary-search the max
+// amount sendable to our own direct pool such that
+// (ourPoolOutput + bestRemainderRouteOutput) >= bestRoute * (1 - tolerance).
+// Only applies when we actually have a direct (single-hop) pool for the
+// exact pair being traded — Uniswap-only pairs (no AEON equivalent, e.g.
+// WETH/VIRTUAL) are untouched by this and still just use the best route.
 const MAX_HOPS = 3
 
 type UnifiedPool = {
@@ -76,6 +102,7 @@ export function useRouting(
   tokenInKey:  string,
   tokenOutKey: string,
   amountIn:    bigint,
+  slippagePct: number = 0.5,   // percent, e.g. 0.5 for 0.5% — caps the priority-split leg (see above)
 ): RoutingResult {
   const tkIn  = tokenInKey  === 'ETH' ? 'WETH' : tokenInKey
   const tkOut = tokenOutKey === 'ETH' ? 'WETH' : tokenOutKey
@@ -198,7 +225,7 @@ export function useRouting(
     // keeping whichever complete path yields the highest final amountOut.
     // Reusable over any pool subset so the same search can be run once
     // unrestricted and once vAMM-only (see RoutingResult).
-    function search(pools: UnifiedPool[]): BestRoute | null {
+    function search(pools: UnifiedPool[], amt: bigint = amountIn): BestRoute | null {
       const adjacency = new Map<string, { pool: UnifiedPool; other: string }[]>()
       pools.forEach(p => {
         const add = (from: string, to: string) => {
@@ -235,11 +262,11 @@ export function useRouting(
         }
       }
 
-      dfs(tkIn, amountIn, 1, [], new Set([tkIn]))
+      dfs(tkIn, amt, 1, [], new Set([tkIn]))
       if (!best) return null
       const b = best as { steps: RouteStep[]; amountOut: bigint; midPriceProduct: number }
 
-      const execPrice   = Number(b.amountOut) / Number(amountIn)
+      const execPrice   = Number(b.amountOut) / Number(amt)
       const midPrice    = b.midPriceProduct
       const priceImpact = midPrice > 0 ? Math.max(0, ((midPrice - execPrice) / midPrice) * 100) : 0
       const pathTokens  = [tkIn, ...b.steps.map(s => s.tokenOut)]
@@ -253,9 +280,83 @@ export function useRouting(
       }
     }
 
-    return {
-      best: search(allPools),
-      vammOnly: search(allPools.filter(p => p.poolType === 0)),
+    const bestRoute = search(allPools)
+    const vammOnly   = search(allPools.filter(p => p.poolType === 0))
+
+    // Priority split: does a direct (single-hop) pool of our own exist for
+    // this exact pair? Only vAMM/CL/DLMM (poolType 0/1/2) count as "ours" —
+    // Uniswap pools (poolType 3) are never a priority target.
+    const ownDirectPools = allPools.filter(p =>
+      p.poolType !== 3 && ((p.token0 === tkIn && p.token1 === tkOut) || (p.token0 === tkOut && p.token1 === tkIn)),
+    )
+    let aeonPool: UnifiedPool | null = null
+    let aeonBestAtFull = -1n
+    for (const p of ownDirectPools) {
+      const r = reservesFor(p, tkIn)
+      if (!r) continue
+      const out = amtOut(amountIn, r.rIn, r.rOut, feeToBps(p.fee))
+      if (out > aeonBestAtFull) { aeonBestAtFull = out; aeonPool = p }
     }
-  }, [vammData, clData, dlmmPhase1, dlmmPhase2, uniswapData, amountIn, tkIn, tkOut])
+
+    let best = bestRoute
+    if (bestRoute && aeonPool) {
+      const aeonReserves = reservesFor(aeonPool, tkIn)
+      if (aeonReserves) {
+        const aeonFee     = feeToBps(aeonPool.fee)
+        const bestOut      = bestRoute.amountOut
+        const toleranceBps = BigInt(Math.round(Math.max(0, slippagePct) * 100))
+        const threshold    = bestOut - (bestOut * toleranceBps) / 10000n
+
+        const blendedOut = (aeonAmt: bigint): bigint => {
+          const aeonOut = amtOut(aeonAmt, aeonReserves.rIn, aeonReserves.rOut, aeonFee)
+          const remainderAmt = amountIn - aeonAmt
+          const remainderOut = remainderAmt > 0n ? (search(allPools, remainderAmt)?.amountOut ?? 0n) : 0n
+          return aeonOut + remainderOut
+        }
+
+        let lo = 0n, hi = amountIn
+        for (let i = 0; i < 40 && hi - lo > 1n; i++) {
+          const mid = (lo + hi) / 2n
+          if (blendedOut(mid) >= threshold) lo = mid; else hi = mid
+        }
+        const aeonAmt = lo
+
+        if (aeonAmt > 0n) {
+          const aeonOut  = amtOut(aeonAmt, aeonReserves.rIn, aeonReserves.rOut, aeonFee)
+          const aeonStep: RouteStep = { poolAddress: aeonPool.address, tokenIn: tkIn, tokenOut: tkOut, feeBps: aeonFee, poolType: aeonPool.poolType, binStep: aeonPool.binStep }
+          const remainderAmt = amountIn - aeonAmt
+
+          if (remainderAmt === 0n) {
+            // Whole trade fits within tolerance on our own pool alone.
+            best = {
+              steps: [aeonStep],
+              amountOut: aeonOut,
+              priceImpact: bestOut > 0n ? Math.max(0, Number(bestOut - aeonOut) / Number(bestOut) * 100) : 0,
+              label: `${tkIn} → ${tkOut}`,
+              via: aeonPool.name,
+            }
+          } else {
+            const remainderRoute  = search(allPools, remainderAmt)
+            const remainderSteps  = remainderRoute?.steps ?? []
+            const remainderOut    = remainderRoute?.amountOut ?? 0n
+            const blended         = aeonOut + remainderOut
+            const aeonPct         = Math.round(Number(aeonAmt) * 100 / Number(amountIn))
+            best = {
+              steps: [aeonStep, ...remainderSteps],
+              amountOut: blended,
+              priceImpact: bestOut > 0n ? Math.max(0, Number(bestOut - blended) / Number(bestOut) * 100) : 0,
+              label: `${tkIn} → ${tkOut}`,
+              via: `${aeonPool.name} (${aeonPct}%) + ${remainderRoute?.via ?? '?'} (${100 - aeonPct}%)`,
+              split: {
+                aeonStep, aeonAmountIn: aeonAmt, aeonAmountOut: aeonOut,
+                remainderSteps, remainderAmountIn: remainderAmt, remainderAmountOut: remainderOut,
+              },
+            }
+          }
+        }
+      }
+    }
+
+    return { best, vammOnly }
+  }, [vammData, clData, dlmmPhase1, dlmmPhase2, uniswapData, amountIn, tkIn, tkOut, slippagePct])
 }

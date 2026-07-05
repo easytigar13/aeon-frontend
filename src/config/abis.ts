@@ -211,14 +211,40 @@ export const AEON_UNIVERSAL_ROUTER_ABI = [
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'hops', type: 'tuple[]', components: [
-        { name: 'poolType', type: 'uint8'   }, // 0 = vAMM, 1 = CL, 2 = DLMM
+        { name: 'poolType', type: 'uint8'   }, // 0 = vAMM, 1 = CL, 2 = DLMM, 3 = UniV2
         { name: 'pool',     type: 'address' },
         { name: 'tokenIn',  type: 'address' },
         { name: 'tokenOut', type: 'address' },
-        { name: 'feeBps',   type: 'uint24'  }, // vAMM only
+        { name: 'feeBps',   type: 'uint24'  }, // vAMM/UniV2 only
         { name: 'binStep',  type: 'uint16'  }, // DLMM only
       ]},
       { name: 'amountIn',     type: 'uint256' },
+      { name: 'amountOutMin', type: 'uint256' },
+      { name: 'to',           type: 'address' },
+      { name: 'deadline',     type: 'uint256' },
+    ],
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+  },
+  // Splits the SAME input token across independent legs (e.g. "as much as
+  // fits our own pool within tolerance, the rest via the best remaining
+  // route") and sums their outputs -- only the blended total is checked
+  // against amountOutMin, same pattern as the single-route function above.
+  {
+    name: 'swapSplitExactTokensForTokens',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'legs', type: 'tuple[]', components: [
+        { name: 'hops', type: 'tuple[]', components: [
+          { name: 'poolType', type: 'uint8'   },
+          { name: 'pool',     type: 'address' },
+          { name: 'tokenIn',  type: 'address' },
+          { name: 'tokenOut', type: 'address' },
+          { name: 'feeBps',   type: 'uint24'  },
+          { name: 'binStep',  type: 'uint16'  },
+        ]},
+        { name: 'amountIn', type: 'uint256' },
+      ]},
       { name: 'amountOutMin', type: 'uint256' },
       { name: 'to',           type: 'address' },
       { name: 'deadline',     type: 'uint256' },

@@ -8,7 +8,7 @@ import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { TOKENS, POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
 import { robinhoodChain } from '@/config/chain'
 import { AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, AEON_SWAP_UNWRAP_HELPER_ABI, ERC20_ABI, WETH_ABI } from '@/config/abis'
-import { useRouting } from '@/hooks/useRouting'
+import { useRouting, type RouteStep } from '@/hooks/useRouting'
 import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -111,17 +111,22 @@ export default function SwapPage() {
   const needsUnwrapStep = tokenOut === 'ETH' && !isWrapUnwrap
 
   const parsedAmountIn = safeParseUnits(amountIn, TOKENS[tokenIn].decimals)
+  const slippageSafe   = safeSlippage(slippage)          // always 0.01–49, never NaN
+  const slippagePct    = slippageSafe / 100
 
   // Multi-hop routing (skipped for wrap/unwrap) — useRouting already normalises ETH -> WETH internally.
-  // Searches across vAMM + CL + DLMM together (AeonUniversalRouter can chain
-  // all three), but ETH-output swaps go through AeonSwapUnwrapHelper, which
-  // only knows how to call the older vAMM-only AeonRouterRH -- so that case
-  // always uses the vAMM-only fallback route, even if a mixed route would be
-  // marginally better, to keep that path on its proven contract.
+  // Searches across vAMM + CL + DLMM + Uniswap together (AeonUniversalRouter
+  // can chain all four), but ETH-output swaps go through AeonSwapUnwrapHelper,
+  // which only knows how to call the older vAMM-only AeonRouterRH -- so that
+  // case always uses the vAMM-only fallback route, even if a mixed route
+  // would be marginally better, to keep that path on its proven contract.
+  // slippageSafe caps how much of a trade prioritizes our own pool over a
+  // better-priced route elsewhere (see useRouting's "priority split" note).
   const routing = useRouting(
     isWrapUnwrap ? '' : tokenIn,
     isWrapUnwrap ? '' : tokenOut,
     isWrapUnwrap ? 0n : parsedAmountIn,
+    slippageSafe,
   )
   const route = needsUnwrapStep ? routing.vammOnly : routing.best
   const hasNonVammHop = !!route && route.steps.some(s => s.poolType !== 0)
@@ -168,8 +173,6 @@ export default function SwapPage() {
 
   const hasAmount      = parsedAmountIn > 0n
   const needsApproval  = !isWrapUnwrap && hasAmount && allowance !== undefined && allowance < parsedAmountIn
-  const slippageSafe   = safeSlippage(slippage)          // always 0.01–49, never NaN
-  const slippagePct    = slippageSafe / 100
   const highSlippage   = slippageSafe >= 5
   const amountOutMin   = amountOutWei > 0n
     ? (amountOutWei * BigInt(Math.floor((1 - slippagePct) * 10000))) / 10000n
@@ -203,36 +206,60 @@ export default function SwapPage() {
     }))
   }
 
-  // Hops for AeonUniversalRouter — used whenever the best route crosses pool
-  // types. CL/DLMM hops pass address(0) for `pool` (Algebra derives its pool
-  // from tokenIn/tokenOut/deployer; the LB router derives its pair from
+  // Shared by buildUniversalHops and buildSplitLegs — CL/DLMM hops pass
+  // address(0) for `pool` (Algebra derives its pool from
+  // tokenIn/tokenOut/deployer; the LB router derives its pair from
   // tokenPath/binStep) — neither needs an explicit pool address. vAMM (0) and
   // external Uniswap V2 (3) hops both need the real pool/pair address, since
   // the router calls that contract directly rather than going through an
   // intermediary router.
-  function buildUniversalHops() {
-    if (!route) return []
-    return route.steps.map(step => ({
+  function stepToHop(step: RouteStep) {
+    return {
       poolType: step.poolType,
       pool:     (step.poolType === 0 || step.poolType === 3) ? step.poolAddress : ZERO_ADDR,
       tokenIn:  step.tokenIn  === 'ETH' ? WETH_ADDR : TOKENS[step.tokenIn  as keyof typeof TOKENS].address,
       tokenOut: step.tokenOut === 'ETH' ? WETH_ADDR : TOKENS[step.tokenOut as keyof typeof TOKENS].address,
       feeBps:   Number(step.feeBps),
       binStep:  step.binStep,
-    }))
+    }
+  }
+
+  // Hops for AeonUniversalRouter's plain (non-split) route — used whenever
+  // the best route crosses pool types.
+  function buildUniversalHops() {
+    if (!route) return []
+    return route.steps.map(stepToHop)
+  }
+
+  // Legs for AeonUniversalRouter's swapSplitExactTokensForTokens — used when
+  // the routing search decided to prioritize our own pool for part of the
+  // trade (see useRouting's "priority split"). Leg 1 is always our own
+  // direct pool; leg 2 is whatever route is best for the remainder.
+  function buildSplitLegs() {
+    if (!route?.split) return []
+    const s = route.split
+    return [
+      { hops: [stepToHop(s.aeonStep)], amountIn: s.aeonAmountIn },
+      { hops: s.remainderSteps.map(stepToHop), amountIn: s.remainderAmountIn },
+    ]
   }
 
   // Fires the actual swap. Output-is-ETH goes through AeonSwapUnwrapHelper
   // (one call: swap + unwrap + send native ETH) instead of the plain router,
   // so there's no separate WETH.withdraw() step left for the wallet to show.
-  // A route crossing pool types goes through AeonUniversalRouter instead of
-  // the older vAMM-only AeonRouterRH.
+  // A route with a priority split goes through AeonUniversalRouter's
+  // swapSplitExactTokensForTokens (two legs summed); any other route crossing
+  // pool types goes through its plain swapExactTokensForTokens instead of the
+  // older vAMM-only AeonRouterRH.
   function fireSwap() {
     if (!address) return
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
     if (needsUnwrapStep) {
       const steps = buildLegacySteps()
       writeAction({ address: CONTRACTS.SwapUnwrapHelper, abi: AEON_SWAP_UNWRAP_HELPER_ABI, functionName: 'swapExactTokensForETH', args: [steps, parsedAmountIn, amountOutMin, address, deadline] })
+    } else if (route?.split) {
+      const legs = buildSplitLegs()
+      writeAction({ address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapSplitExactTokensForTokens', args: [legs, amountOutMin, address, deadline] })
     } else if (hasNonVammHop) {
       const hops = buildUniversalHops()
       writeAction({ address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens', args: [hops, parsedAmountIn, amountOutMin, address, deadline] })
@@ -464,10 +491,13 @@ export default function SwapPage() {
           </div>
           <div className="flex items-center justify-between mt-2">
             <span className="text-xs text-text-muted font-mono">{valueOut ? fmtUsd(valueOut) : '≈ $—'}</span>
-            {route && route.steps.length > 1 && (
+            {route?.split && (
+              <span className="text-2xs font-mono text-emerald-400">Split</span>
+            )}
+            {route && !route.split && route.steps.length > 1 && (
               <span className="text-2xs font-mono text-violet-400">Multi-hop</span>
             )}
-            {route && route.steps.length === 1 && (
+            {route && !route.split && route.steps.length === 1 && (
               <span className="text-2xs font-mono text-blue-400">Direct</span>
             )}
           </div>

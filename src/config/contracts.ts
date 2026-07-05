@@ -67,7 +67,18 @@ export const CONTRACTS = {
   // revert against the real USDG/VIRTUAL pair before the fix. Verified fixed
   // via fork simulation (exact-matching reported vs actual balance delta)
   // before this redeploy.
-  UniversalRouter:     '0x4a4329baF4eFDB782F3C6F37f11aD80C174820C2' as `0x${string}`,
+  // Redeployed again 2026-07-05 to add swapSplitExactTokensForTokens: splits
+  // one trade's input across independent legs (e.g. "fill from our own pool
+  // up to the caller's slippage tolerance, route the remainder through
+  // whichever venue is best") and sums their outputs. Product decision: a
+  // pure best-price router would send most ETH/USDG volume straight to
+  // Uniswap's real pair (our own vAMM+CL+DLMM pools there total ~$54 vs
+  // Uniswap's ~$6,600) -- this lets the swap page prioritize our own pools
+  // for as much of a trade as the user's own slippage setting tolerates,
+  // instead of losing that volume outright. Fork-verified (exact-matching
+  // reported vs actual balance delta) splitting a real USDG->WETH trade
+  // across AEON's own vAMM ETH/USDG pool and Uniswap's WETH/USDG pair.
+  UniversalRouter:     '0xd948c4ea449e36d899bdC8f62585DC04B5e26942' as `0x${string}`,
 } as const
 
 // Deployed 2026-07-05: parallel staking + AEON-rewards contracts for CL and
