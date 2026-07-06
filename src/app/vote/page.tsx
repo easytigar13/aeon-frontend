@@ -235,6 +235,37 @@ export default function VotePage() {
       : null
   }
 
+  // vAPR per pool: the annualized $ return a pool's LPs get from the AEON
+  // emissions voting currently directs to it, relative to its own TVL --
+  // distinct from "APR" above (trading-fee yield). Mirrors EmissionsEngineRH's
+  // real on-chain formula (emissionBudgetUSD = feesUSD / EMISSION_RATIO,
+  // toVoter = 95% of the resulting mint) rather than guessing a number, but
+  // projects this epoch's fee budget from live 24h volume instead of reading
+  // EmissionsEngineRH's own 3-epoch rolling average -- this is a fresh
+  // deployment and that history is still genuinely empty (feeHistory is all
+  // zeros pre-genesis-flip), so a live-volume projection is the only estimate
+  // that reflects anything real right now. Same category of extrapolation the
+  // "APR" column already makes from a single day of volume.
+  const { data: onChainTotalWeight } = useReadContract({
+    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'totalWeight',
+  })
+  const aeonPrice = prices['AEON'] ?? null
+
+  const totalFeesUSD24h = POOLS.reduce((sum, pool) => {
+    const vol = volResult.byPool[pool.address.toLowerCase()] ?? null
+    return vol !== null ? sum + vol * parseFeeRate(pool.fee) : sum
+  }, 0)
+  const projectedWeeklyToVoterUSD = (totalFeesUSD24h * 7 / 10) * 0.95 // EMISSION_RATIO=10, TO_VOTER_BPS=9500
+
+  const vaprByAddr: Record<string, number | null> = {}
+  for (const pool of POOLS) {
+    const tvl = tvlByAddr[pool.address] ?? null
+    const poolWeight = poolStats.find(s => s.address === pool.address)?.votesWei ?? 0n
+    vaprByAddr[pool.address] = (tvl && tvl > 0 && aeonPrice && onChainTotalWeight && onChainTotalWeight > 0n)
+      ? (projectedWeeklyToVoterUSD * (Number(poolWeight) / Number(onChainTotalWeight)) * 52 / tvl) * 100
+      : null
+  }
+
   const totalWeight = allocations.reduce((s, a) => s + a.weight, 0)
   const remaining   = 100 - totalWeight
 
@@ -506,7 +537,7 @@ export default function VotePage() {
                     <div className="col-span-2 text-sm font-mono text-text-secondary">{fmtUsd(tvlByAddr[pool.address] ?? null)}</div>
                     <div className="col-span-2 text-sm font-mono text-text-secondary">{fmtUsd(volResult.byPool[pool.address.toLowerCase()] ?? null)}</div>
                     <div className="col-span-2 text-sm font-mono text-emerald-400">{fmtApr(aprByAddr[pool.address] ?? null)}</div>
-                    <div className="col-span-1 text-sm font-mono text-violet-400">—%</div>
+                    <div className="col-span-1 text-sm font-mono text-violet-400">{fmtApr(vaprByAddr[pool.address] ?? null)}</div>
                     <div className="col-span-1 flex justify-end">
                       <button
                         onClick={() => isSelected ? removePool(pool.address) : addPool(pool)}
