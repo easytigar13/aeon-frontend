@@ -10,14 +10,34 @@ import { VOTING_ESCROW_ABI, FURNACE_ABI, ERC20_ABI } from '@/config/abis'
 
 type Tab = 'lock' | 'furnace' | 'manage'
 
+// AeonVotingEscrow.MAXTIME is exactly 4 * 365 * 86400 seconds (1460 days, no
+// leap-year day) -- confirmed on-chain. The "4 Years" preset here used to say
+// 1461 days, one day over that ceiling; the contract rounds the requested
+// duration down to a week boundary before checking it against MAXTIME, so
+// depending on where "now" falls in the week that extra day was sometimes
+// absorbed by the rounding and sometimes not, making a lock at this preset
+// only intermittently revert with LockDurationTooLong(). Fixed to 1460 to
+// match the contract exactly, every time.
 const LOCK_DURATIONS = [
   { label: '1 Week',   days: 7,    multiplier: 0.003 },
   { label: '1 Month',  days: 30,   multiplier: 0.019 },
   { label: '6 Months', days: 182,  multiplier: 0.125 },
   { label: '1 Year',   days: 365,  multiplier: 0.250 },
   { label: '2 Years',  days: 730,  multiplier: 0.500 },
-  { label: '4 Years',  days: 1461, multiplier: 1.000 },
+  { label: '4 Years',  days: 1460, multiplier: 1.000 },
 ]
+
+// AeonVotingEscrow's global checkpoint (triggered by createLock/increaseAmount/
+// merge) fills in gaps in its weekly point-history array since whoever last
+// touched it -- a real cost that scales with however long it's been (a
+// veCRV/Curve-style pattern), not a fixed amount. A plain call currently
+// estimates ~310k gas, but wallets estimate against CURRENT chain state at
+// click time -- if that estimate is even slightly stale or conservative by
+// the time the tx actually lands, the call can run out of gas partway through
+// the catch-up loop instead of cleanly reverting with a decodable reason
+// (this chain's block gas limit is effectively unbounded, so there's no
+// downside to just giving these calls generous headroom explicitly).
+const ESCROW_GAS_LIMIT = 2_000_000n
 
 export default function LockPage() {
   const [mounted, setMounted] = useState(false)
@@ -29,7 +49,7 @@ export default function LockPage() {
 
   const [tab,           setTab]          = useState<Tab>('lock')
   const [lockAmount,    setLockAmount]    = useState('')
-  const [lockDays,      setLockDays]      = useState(1461)
+  const [lockDays,      setLockDays]      = useState(1460)
   const [burnAmount,    setBurnAmount]    = useState('')
   const [mergeFrom,     setMergeFrom]     = useState('')
   const [mergeTo,       setMergeTo]       = useState('')
@@ -140,6 +160,7 @@ export default function LockPage() {
       abi: VOTING_ESCROW_ABI,
       functionName: 'createLock',
       args: [parsedLockAmount, BigInt(lockDays * 86400)],
+      gas: ESCROW_GAS_LIMIT,
     })
   }
 
@@ -162,7 +183,7 @@ export default function LockPage() {
     const from = mergeFrom ? BigInt(mergeFrom) : undefined
     const to   = mergeTo   ? BigInt(mergeTo)   : undefined
     if (!from || !to || from === to) return
-    writeContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'merge', args: [from, to] })
+    writeContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'merge', args: [from, to], gas: ESCROW_GAS_LIMIT })
   }
 
   function handleIncreaseAmount() {
@@ -174,7 +195,7 @@ export default function LockPage() {
       writeContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonVotingEscrow, maxUint256] })
       return
     }
-    writeContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'increaseAmount', args: [id, amt] })
+    writeContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'increaseAmount', args: [id, amt], gas: ESCROW_GAS_LIMIT })
   }
 
   function lockButtonLabel() {
@@ -261,7 +282,7 @@ export default function LockPage() {
                 </button>
               ))}
             </div>
-            <input type="range" min={7} max={1461} value={lockDays} onChange={e => setLockDays(parseInt(e.target.value))} className="w-full accent-aeon-400" />
+            <input type="range" min={7} max={1460} value={lockDays} onChange={e => setLockDays(parseInt(e.target.value))} className="w-full accent-aeon-400" />
             <div className="flex justify-between text-2xs text-text-muted font-mono mt-1">
               <span>7 days</span><span>4 years</span>
             </div>
