@@ -2,10 +2,11 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Search, Copy, Check, TrendingUp, TrendingDown } from 'lucide-react'
-import { TOKENS, POOLS } from '@/config/contracts'
+import { TOKENS, POOLS, CL_POOLS, DLMM_POOLS } from '@/config/contracts'
 import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
 import { useVolume24h } from '@/hooks/useVolume24h'
+import { useAllPools } from '@/hooks/useAllPools'
 import { TokenIcon, ChainBadge } from '@/components/TokenIcon'
 import { Sparkline } from '@/components/Sparkline'
 import { AddToWalletButton } from '@/components/AddToWalletButton'
@@ -36,14 +37,20 @@ export default function TokensPage() {
 
   const entries = useMemo(() => Object.entries(TOKENS), [])
 
+  const { discovered } = useAllPools()
+
+  // Was only counting POOLS (vAMM) -- a token with a CL and/or DLMM pool
+  // (e.g. VIRTUAL: one of each) showed "1 pool" instead of the real total.
+  // Also includes pools discovered live from AeonFactoryRH.allPools() that
+  // aren't in the hardcoded list yet.
   const poolCountBySymbol = useMemo(() => {
     const counts: Record<string, number> = {}
-    for (const p of POOLS) {
+    for (const p of [...POOLS, ...CL_POOLS, ...DLMM_POOLS, ...discovered]) {
       counts[p.token0] = (counts[p.token0] ?? 0) + 1
       counts[p.token1] = (counts[p.token1] ?? 0) + 1
     }
     return counts
-  }, [])
+  }, [discovered])
 
   const filtered = entries.filter(([key, t]) => {
     const q = query.trim().toLowerCase()
