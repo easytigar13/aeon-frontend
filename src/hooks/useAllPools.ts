@@ -38,6 +38,31 @@ function feeLabel(feeBps: number): string {
   return `${pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(2)}%`
 }
 
+function pairFeeKey(a: string, b: string, feeBps: number): string {
+  const [x, y] = a.toLowerCase() < b.toLowerCase() ? [a, b] : [b, a]
+  return `${x.toLowerCase()}-${y.toLowerCase()}-${feeBps}`
+}
+
+// AeonFactoryRH.allPools() still lists the ORIGINAL genesis pools for AEON/ETH,
+// AEON/USDG, and ETH/USDG (created via factory.createPool() at launch) --
+// the 2026-07-03 fee-fix migration replaced them with fresh pools deployed
+// directly (bypassing the factory, so the new ones were never registered,
+// and the old drained ones were never de-registered either). Both the old
+// dead pool and the new real one exist on-chain at the SAME pair+fee; only
+// the address in POOLS is the one anyone should use. Dedup by (pair, fee)
+// against POOLS, not just by exact address, or these dead pools resurface
+// as apparent "duplicates" alongside the real ones.
+const STATIC_PAIR_FEE_KEYS = new Set(
+  POOLS
+    .map(p => {
+      const a0 = TOKENS[p.token0 as keyof typeof TOKENS]?.address
+      const a1 = TOKENS[p.token1 as keyof typeof TOKENS]?.address
+      if (!a0 || !a1) return null
+      return pairFeeKey(a0, a1, Math.round(parseFloat(p.fee) * 100))
+    })
+    .filter((k): k is string => !!k),
+)
+
 /// Every real vAMM pool from AeonFactoryRH.allPools() that ISN'T already one
 /// of the hardcoded POOLS entries. Merge with POOLS yourself at the call site
 /// (`[...POOLS, ...discovered]`) -- kept separate here so existing static
@@ -109,6 +134,7 @@ export function useAllPools(): { discovered: DiscoveredPool[]; isLoading: boolea
       const t1 = metaResults?.[i * 3 + 1]?.result as string | undefined
       const feeBpsRaw = metaResults?.[i * 3 + 2]?.result as number | undefined
       if (!t0 || !t1 || feeBpsRaw === undefined) return
+      if (STATIC_PAIR_FEE_KEYS.has(pairFeeKey(t0, t1, feeBpsRaw))) return
       const s0 = symbolFor(t0)
       const s1 = symbolFor(t1)
       out.push({
