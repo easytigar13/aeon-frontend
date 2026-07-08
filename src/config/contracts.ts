@@ -78,7 +78,18 @@ export const CONTRACTS = {
   // instead of losing that volume outright. Fork-verified (exact-matching
   // reported vs actual balance delta) splitting a real USDG->WETH trade
   // across AEON's own vAMM ETH/USDG pool and Uniswap's WETH/USDG pair.
-  UniversalRouter:     '0xd948c4ea449e36d899bdC8f62585DC04B5e26942' as `0x${string}`,
+  // Redeployed 2026-07-08: real users hit "UniswapV2: K" reverts routing
+  // through ROBINFUN -- ROBINFUN taxes 1% on transfers touching its own
+  // official Uniswap pair, so the router's off-chain-quoted amountOut
+  // (computed from the full pre-tax amountIn) asked that pair for more
+  // than it actually received, tripping the pair's own K-check. Separately,
+  // a real (non-dust) split route -- AEON/USDG (78%) + AEON->VIRTUAL->USDG
+  // (22%) -- failed the same way pre-sign, so the fix is general: every
+  // intermediate hop now re-measures this router's actual received balance
+  // instead of trusting the previous hop's theoretical reported amountOut,
+  // covering tax tokens and any other quote/settlement mismatch, not just
+  // the one already-observed case.
+  UniversalRouter:     '0x75Cb8CFDCB0894A1D2187c670250af5f2022586d' as `0x${string}`,
   // Deployed 2026-07-05: backs the Tower Defense mini-game. 50 AEON entry fee
   // per session feeds a self-funded prize pool; claimReward() only pays out
   // with a signature from trustedSigner (a dedicated key held by

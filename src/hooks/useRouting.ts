@@ -322,9 +322,25 @@ export function useRouting(
         const aeonAmt = lo
 
         if (aeonAmt > 0n) {
-          const aeonOut  = amtOut(aeonAmt, aeonReserves.rIn, aeonReserves.rOut, aeonFee)
+          let finalAeonAmt = aeonAmt
+          let remainderAmt = amountIn - aeonAmt
+
+          // The binary search above only guarantees hi-lo <= 1, which can
+          // leave a dust-sized remainder (up to ~2^40 wei on an 18-decimal
+          // amount) whose quoted output rounds down to exactly 0. A pool's
+          // swap() explicitly reverts on a zero-output leg, so fold any
+          // remainder that wouldn't actually produce output into the aeon
+          // leg (rather than dropping it, or sending a doomed second leg).
+          if (remainderAmt > 0n) {
+            const dustCheck = search(allPools, remainderAmt)
+            if (!dustCheck || dustCheck.amountOut === 0n) {
+              finalAeonAmt = amountIn
+              remainderAmt = 0n
+            }
+          }
+
+          const aeonOut  = amtOut(finalAeonAmt, aeonReserves.rIn, aeonReserves.rOut, aeonFee)
           const aeonStep: RouteStep = { poolAddress: aeonPool.address, tokenIn: tkIn, tokenOut: tkOut, feeBps: aeonFee, poolType: aeonPool.poolType, binStep: aeonPool.binStep }
-          const remainderAmt = amountIn - aeonAmt
 
           if (remainderAmt === 0n) {
             // Whole trade fits within tolerance on our own pool alone.
