@@ -134,6 +134,11 @@ export const TOKENS = {
   // this same chain (DexScreener: ~$21k liquidity, real volume) — added
   // 2026-07-05 at the user's request, with an AEON vAMM pool
   ROBINFUN: { address: '0x56A98Db16Cf501b686c14BA00a5DeC02E87083FA' as `0x${string}`, symbol: 'ROBINFUN', decimals: 18, name: 'Robinfun' },
+  // real, independently-deployed token, already trading elsewhere on this
+  // chain (verified via Blockscout: 8,333 holders, ~$88M/24h volume,
+  // ~$0.106 price at the time these pools were created 2026-07-06) — added
+  // at the user's request, with AEON/WETH/USDG vAMM pools
+  CASHCAT: { address: '0x020bfC650A365f8BB26819deAAbF3E21291018b4' as `0x${string}`, symbol: 'CASHCAT', decimals: 18, name: 'Cash Cat' },
 } as const
 
 // Migrated 2026-07-03: the genesis vAMM pools had no way to ever claim swap
@@ -155,6 +160,13 @@ export const POOLS = [
   // was the binding constraint): 6.5 AEON against a price-matched ~1991
   // ROBINFUN, pegged to ROBINFUN's real price on its other DEX listing.
   { name: 'ROBINFUN/AEON', token0: 'ROBINFUN', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x6EE853608078a207A30836Eec6310974D4506c14' as `0x${string}` },
+  // Added 2026-07-06 via AeonFactoryRH.createPool() at the user's request.
+  // Deployed EMPTY on purpose -- deployer wallet held zero CASHCAT and only
+  // dust WETH at deploy time, so there was nothing real to seed with yet.
+  // These show 0 TVL/unswappable until liquidity is actually added.
+  { name: 'CASHCAT/AEON', token0: 'CASHCAT', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x8323E657009aBBF1567A15294766203150908b10' as `0x${string}` },
+  { name: 'CASHCAT/ETH',  token0: 'CASHCAT', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0xAbC3DA2cc75387Caf867B07bC272DF19d3Cff02C' as `0x${string}` },
+  { name: 'CASHCAT/USDG', token0: 'CASHCAT', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xb55dadbFb20912466F2961cF466f331Fe98706F1' as `0x${string}` },
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3

@@ -7,6 +7,7 @@ const POOL_AEON_USDG     = POOLS.find(p => p.name === 'AEON/USDG')!.address
 const POOL_ETH_USDG      = POOLS.find(p => p.name === 'ETH/USDG')!.address
 const POOL_VIRTUAL_AEON  = CL_POOLS.find(p => p.name === 'VIRTUAL/AEON')!.address
 const POOL_ROBINFUN_AEON = POOLS.find(p => p.name === 'ROBINFUN/AEON')!.address
+const POOL_CASHCAT_USDG  = POOLS.find(p => p.name === 'CASHCAT/USDG')!.address
 
 // Static — defined once at module scope so useReadContracts gets a stable
 // reference across renders instead of a fresh array every time (which
@@ -20,6 +21,8 @@ const PRICE_CONTRACTS = [
   { address: POOL_VIRTUAL_AEON,  abi: PAIR_ABI,         functionName: 'token0' },
   { address: POOL_ROBINFUN_AEON, abi: PAIR_ABI,         functionName: 'getReserves' },
   { address: POOL_ROBINFUN_AEON, abi: PAIR_ABI,         functionName: 'token0' },
+  { address: POOL_CASHCAT_USDG,  abi: PAIR_ABI,         functionName: 'getReserves' },
+  { address: POOL_CASHCAT_USDG,  abi: PAIR_ABI,         functionName: 'token0' },
 ] as const
 
 type Reserves = readonly [bigint, bigint, number]
@@ -85,6 +88,11 @@ export function usePrices(): PriceMap {
   const virtualGlobalState = get(4) as readonly [bigint, number, number, number, number, boolean] | undefined
   const virtual  = deriveVirtualUsdPrice(virtualGlobalState?.[0], get(5) as string | undefined, aeon)
   const robinfun = deriveViaAeonPool(get(6) as Reserves | undefined, get(7) as string | undefined, TOKENS.ROBINFUN.address, aeon)
+  // CASHCAT/USDG is a direct USDG pair (unlike VIRTUAL/ROBINFUN), so this
+  // uses the same direct derivation as AEON/WETH -- returns null while the
+  // pool is still unseeded (zero reserves), starts working the moment
+  // liquidity is actually added, no code change needed then.
+  const cashcat = deriveUsdPrice(get(8) as Reserves | undefined, get(9) as string | undefined, TOKENS.USDG.address, TOKENS.CASHCAT.decimals)
 
-  return { AEON: aeon, ETH: weth, WETH: weth, USDG: 1, VIRTUAL: virtual, ROBINFUN: robinfun }
+  return { AEON: aeon, ETH: weth, WETH: weth, USDG: 1, VIRTUAL: virtual, ROBINFUN: robinfun, CASHCAT: cashcat }
 }
