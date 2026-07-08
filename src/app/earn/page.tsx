@@ -244,9 +244,15 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
 
   const poolPrice = usePoolPrice(pool)
 
+  // No refetchInterval before meant a pool with no gauge yet at first expand
+  // stayed "Gauge not yet deployed" forever for that session, even after a
+  // gauge was created moments later elsewhere -- happened for real with
+  // CASHCAT/ROBINFUN and SLEEP/AEON, both gauge'd after the page was already
+  // loaded. Refetching periodically means a newly created gauge shows up
+  // without the user needing a hard refresh.
   const { data: gaugeAddr } = useReadContract({
     address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'gauges',
-    args: [pool.address], query: { enabled: expanded },
+    args: [pool.address], query: { enabled: expanded, refetchInterval: 20000 },
   })
   const gauge = gaugeAddr && gaugeAddr !== '0x0000000000000000000000000000000000000000' ? gaugeAddr : undefined
 
