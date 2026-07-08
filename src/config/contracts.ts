@@ -167,6 +167,12 @@ export const POOLS = [
   { name: 'CASHCAT/AEON', token0: 'CASHCAT', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x8323E657009aBBF1567A15294766203150908b10' as `0x${string}` },
   { name: 'CASHCAT/ETH',  token0: 'CASHCAT', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0xAbC3DA2cc75387Caf867B07bC272DF19d3Cff02C' as `0x${string}` },
   { name: 'CASHCAT/USDG', token0: 'CASHCAT', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xb55dadbFb20912466F2961cF466f331Fe98706F1' as `0x${string}` },
+  // Added 2026-07-08 for parity with ROBINFUN/AEON. ROBINFUN/USDG seeded for
+  // real (deployer's full remaining 303.11 ROBINFUN + 0.012669 USDG, pegged
+  // to ROBINFUN/AEON's own real price). ROBINFUN/ETH deployed EMPTY --
+  // deployer WETH balance was dust (~$0.0016), nothing meaningful to seed yet.
+  { name: 'ROBINFUN/ETH',  token0: 'ROBINFUN', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x0B499B8c6BA886090ADd7C21f8e1810BDDD8277D' as `0x${string}` },
+  { name: 'ROBINFUN/USDG', token0: 'ROBINFUN', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xd4F8574d3bC25FE20195Ce58a47d61D79bA7504b' as `0x${string}` },
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3
