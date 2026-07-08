@@ -27,25 +27,18 @@ export function useDexTokenInfo(): Record<string, DexTokenInfo> {
     } catch {}
 
     async function load() {
-      // GeckoTerminal doesn't index Robinhood Chain (confirmed 2026-07-08:
-      // every request below 404s, every time, for every token) -- this used
-      // to spend a real network round-trip on every fresh session waiting
-      // on a call that can never succeed before falling back to the local
-      // letter-avatar in TokenIcon anyway. Short-circuited to skip straight
-      // to that fallback. Revert this early-return if this chain ever gets
-      // indexed there (verify with a manual fetch first, not by removing
-      // this guard blind).
-      setInfo(Object.fromEntries(TOKEN_ENTRIES.map(([key]) => [key, { imageUrl: null, sparkline: [], priceChange24h: null }])))
-      return
-
-      // eslint-disable-next-line no-unreachable
+      // GeckoTerminal DOES index this chain -- it was just under network id
+      // "robinhood", not "robinhood-chain" (confirmed 2026-07-09 via a real
+      // fetch that returned actual AEON price/volume data). The previous
+      // "chain isn't indexed" guard here was itself wrong, caused by that
+      // slug mismatch, not by GeckoTerminal actually lacking this chain.
       const addrs = TOKEN_ENTRIES.map(([, t]) => t.address.toLowerCase())
 
       // One request: token metadata + top pools (included)
       let tokenJson: any = { data: [], included: [] }
       try {
         const r = await fetch(
-          `https://api.geckoterminal.com/api/v2/networks/robinhood-chain/tokens/multi/${addrs.join(',')}?include=top_pools`,
+          `https://api.geckoterminal.com/api/v2/networks/robinhood/tokens/multi/${addrs.join(',')}?include=top_pools`,
           { headers: { Accept: 'application/json;version=20230302' } }
         )
         if (r.ok) tokenJson = await r.json()
@@ -65,7 +58,7 @@ export function useDexTokenInfo(): Record<string, DexTokenInfo> {
         if (inc.type === 'pool') {
           poolAddrById[inc.id] = inc.attributes?.address ?? ''
           const baseId: string = inc.relationships?.base_token?.data?.id ?? ''
-          baseByPoolId[inc.id] = baseId.replace(/^robinhood-chain_/, '').toLowerCase()
+          baseByPoolId[inc.id] = baseId.replace(/^robinhood_/, '').toLowerCase()
         }
       }
 
@@ -94,7 +87,7 @@ export function useDexTokenInfo(): Record<string, DexTokenInfo> {
           if (pool) {
             try {
               const r = await fetch(
-                `https://api.geckoterminal.com/api/v2/networks/robinhood-chain/pools/${pool.poolAddr}/ohlcv/hour?limit=24&token=${pool.role}`,
+                `https://api.geckoterminal.com/api/v2/networks/robinhood/pools/${pool.poolAddr}/ohlcv/hour?limit=24&token=${pool.role}`,
                 { headers: { Accept: 'application/json;version=20230302' } }
               )
               if (r.ok) {
