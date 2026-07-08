@@ -135,8 +135,11 @@ export const NATIVE_SENTINEL = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `
 export const TOKENS = {
   AEON:    { address: CONTRACTS.AeonToken,                                       symbol: 'AEON',    decimals: 18, name: 'Aeon' },
   ETH:     { address: NATIVE_SENTINEL,                                           symbol: 'ETH',     decimals: 18, name: 'Ether (Native)' },
-  WETH:    { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73' as `0x${string}`, symbol: 'WETH',    decimals: 18, name: 'Wrapped Ether' },
-  USDG:    { address: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168' as `0x${string}`, symbol: 'USDG',    decimals: 6,  name: 'USDG' },
+  // name fields below match each token's real on-chain name() exactly
+  // (verified via cast 2026-07-08) -- WETH's real name is "WETH" itself,
+  // not the generic "Wrapped Ether"; USDG's real name is "Global Dollar".
+  WETH:    { address: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73' as `0x${string}`, symbol: 'WETH',    decimals: 18, name: 'WETH' },
+  USDG:    { address: '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168' as `0x${string}`, symbol: 'USDG',    decimals: 6,  name: 'Global Dollar' },
   // real, independently-deployed Virtuals Protocol token on Robinhood Chain (not
   // ours) — verified via Blockscout (582 holders) and cross-checked against its
   // own live WETH/VIRTUAL and USDG/VIRTUAL pools before wiring in a CL pool for it
@@ -150,6 +153,10 @@ export const TOKENS = {
   // ~$0.106 price at the time these pools were created 2026-07-06) — added
   // at the user's request, with AEON/WETH/USDG vAMM pools
   CASHCAT: { address: '0x020bfC650A365f8BB26819deAAbF3E21291018b4' as `0x${string}`, symbol: 'CASHCAT', decimals: 18, name: 'Cash Cat' },
+  // real, independently-deployed token (verified via Blockscout: 93 holders,
+  // no price/volume data yet elsewhere on this chain) — added 2026-07-08 at
+  // the user's request, with an AEON vAMM pool
+  SLEEP: { address: '0x84864dbA3e1dFffcaf3d39c44f12833897Cf5B06' as `0x${string}`, symbol: 'SLEEP', decimals: 18, name: "Don't Sleep" },
 } as const
 
 // Migrated 2026-07-03: the genesis vAMM pools had no way to ever claim swap
@@ -184,6 +191,10 @@ export const POOLS = [
   // deployer WETH balance was dust (~$0.0016), nothing meaningful to seed yet.
   { name: 'ROBINFUN/ETH',  token0: 'ROBINFUN', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x0B499B8c6BA886090ADd7C21f8e1810BDDD8277D' as `0x${string}` },
   { name: 'ROBINFUN/USDG', token0: 'ROBINFUN', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xd4F8574d3bC25FE20195Ce58a47d61D79bA7504b' as `0x${string}` },
+  // Added 2026-07-08 at the user's request. Deployed EMPTY -- deployer held
+  // zero SLEEP at deploy time, so there's nothing real to seed with yet.
+  // Real AeonVoterV2 gauge created same day: 0xD897B5F459E64688873b5D032C9B862716D03Bf1.
+  { name: 'SLEEP/AEON',    token0: 'SLEEP',    token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xDF769bF01Ee70e2F86adC0417E0717D32c4586be' as `0x${string}` },
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3

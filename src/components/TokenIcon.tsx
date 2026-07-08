@@ -7,11 +7,14 @@ const TRUSTWALLET_LOGOS: Record<string, string> = {
 }
 
 const AVATAR_COLORS: Record<string, string> = {
-  AEON:    '#FFB800',
-  ETH:     '#627EEA',
-  WETH:    '#627EEA',
-  USDG:    '#00C805',
-  VIRTUAL: '#8B5CF6',
+  AEON:     '#FFB800',
+  ETH:      '#627EEA',
+  WETH:     '#627EEA',
+  USDG:     '#00C805',
+  VIRTUAL:  '#8B5CF6',
+  ROBINFUN: '#EC4899',
+  CASHCAT:  '#22D3EE',
+  SLEEP:    '#6366F1',
 }
 
 // Optional imageUrl from an external source (e.g. GeckoTerminal) takes priority

@@ -27,6 +27,18 @@ export function useDexTokenInfo(): Record<string, DexTokenInfo> {
     } catch {}
 
     async function load() {
+      // GeckoTerminal doesn't index Robinhood Chain (confirmed 2026-07-08:
+      // every request below 404s, every time, for every token) -- this used
+      // to spend a real network round-trip on every fresh session waiting
+      // on a call that can never succeed before falling back to the local
+      // letter-avatar in TokenIcon anyway. Short-circuited to skip straight
+      // to that fallback. Revert this early-return if this chain ever gets
+      // indexed there (verify with a manual fetch first, not by removing
+      // this guard blind).
+      setInfo(Object.fromEntries(TOKEN_ENTRIES.map(([key]) => [key, { imageUrl: null, sparkline: [], priceChange24h: null }])))
+      return
+
+      // eslint-disable-next-line no-unreachable
       const addrs = TOKEN_ENTRIES.map(([, t]) => t.address.toLowerCase())
 
       // One request: token metadata + top pools (included)

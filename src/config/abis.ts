@@ -733,6 +733,13 @@ export const PAIR_ABI = [
     inputs: [],
     outputs: [{ name: '', type: 'address' }],
   },
+  {
+    name: 'feeBps',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint24' }],
+  },
 ] as const
 
 export const AEON_FACTORY_ABI = [
@@ -757,6 +764,20 @@ export const AEON_FACTORY_ABI = [
       { name: 'feeBps', type: 'uint24'  },
     ],
     outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'allPools',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'uint256' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'allPoolsLength',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
   },
 ] as const
 

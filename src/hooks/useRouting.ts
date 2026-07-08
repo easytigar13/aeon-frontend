@@ -3,6 +3,7 @@ import { useMemo } from 'react'
 import { useReadContracts } from 'wagmi'
 import { POOLS, CL_POOLS, DLMM_POOLS, UNISWAP_POOLS, TOKENS } from '@/config/contracts'
 import { PAIR_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI } from '@/config/abis'
+import { useAllPools } from './useAllPools'
 
 export interface RouteStep {
   poolAddress: `0x${string}`
@@ -108,13 +109,20 @@ export function useRouting(
   const tkOut = tokenOutKey === 'ETH' ? 'WETH' : tokenOutKey
   const searchEnabled = amountIn > 0n && tkIn !== tkOut
 
+  // Pools anyone created via Create Pool (AeonFactoryRH.createPool()),
+  // discovered live rather than requiring a manual contracts.ts edit — see
+  // useAllPools.ts. Merged into the same vAMM reserve-fetch pattern below,
+  // so a pair someone just deployed is swappable immediately.
+  const { discovered } = useAllPools()
+
   // vAMM — reserves + token0 per pool (unchanged from before)
+  const vammPoolList = useMemo(() => [...POOLS, ...discovered], [discovered])
   const vammContracts = useMemo(() =>
-    POOLS.flatMap(p => [
+    vammPoolList.flatMap(p => [
       { address: p.address as `0x${string}`, abi: PAIR_ABI, functionName: 'getReserves' as const },
       { address: p.address as `0x${string}`, abi: PAIR_ABI, functionName: 'token0'      as const },
     ]),
-  [])
+  [vammPoolList])
   const { data: vammData } = useReadContracts({ contracts: vammContracts, query: { refetchInterval: 10000, enabled: searchEnabled } })
 
   // Real external Uniswap V2 pairs — same getReserves()/token0() read
@@ -169,7 +177,7 @@ export function useRouting(
     // Build one uniform {reserve0, reserve1, token0Addr} per pool, regardless of type.
     const reservesByPool = new Map<string, { reserve0: bigint; reserve1: bigint; token0Addr: string }>()
 
-    POOLS.forEach((p, i) => {
+    vammPoolList.forEach((p, i) => {
       const resD  = vammData?.[i * 2]
       const tok0D = vammData?.[i * 2 + 1]
       if (resD?.status !== 'success' || tok0D?.status !== 'success') return
@@ -207,7 +215,7 @@ export function useRouting(
     })
 
     const allPools: UnifiedPool[] = [
-      ...POOLS.map(p => ({ address: p.address, name: p.name, token0: p.token0, token1: p.token1, fee: p.fee, poolType: 0, binStep: 0 })),
+      ...vammPoolList.map(p => ({ address: p.address, name: p.name, token0: p.token0, token1: p.token1, fee: p.fee, poolType: 0, binStep: 0 })),
       ...CL_POOLS.map(p => ({ address: p.address, name: p.name, token0: p.token0, token1: p.token1, fee: p.fee, poolType: 1, binStep: 0 })),
       ...DLMM_POOLS.map(p => ({ address: p.address, name: p.name, token0: p.token0, token1: p.token1, fee: p.fee, poolType: 2, binStep: p.binStep })),
       ...UNISWAP_POOLS.map(p => ({ address: p.address, name: p.name, token0: p.token0, token1: p.token1, fee: p.fee, poolType: 3, binStep: 0 })),
@@ -374,5 +382,5 @@ export function useRouting(
     }
 
     return { best, vammOnly }
-  }, [vammData, clData, dlmmPhase1, dlmmPhase2, uniswapData, amountIn, tkIn, tkOut, slippagePct])
+  }, [vammData, clData, dlmmPhase1, dlmmPhase2, uniswapData, amountIn, tkIn, tkOut, slippagePct, vammPoolList])
 }

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Layers, Waves, Grid3x3, Search, ArrowLeft, Repeat } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -9,6 +9,7 @@ import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
 import { ERC20_ABI, LIQUIDITY_HELPER_V2_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
+import { useAllPools } from '@/hooks/useAllPools'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { useClPositions } from '@/hooks/useClPositions'
@@ -186,6 +187,7 @@ function usePoolListData(): UnifiedPool[] {
   const clPoolStats    = useClPoolStats(prices)
   const dlmmPoolStats  = useDlmmPoolStats(prices)
   const volResult      = useVolume24h(prices)
+  const { discovered }  = useAllPools()
 
   const vamm: UnifiedPool[] = POOLS.map(p => {
     const tvlUsd = poolStats.find(s => s.address === p.address)?.tvlUsd ?? null
@@ -197,6 +199,16 @@ function usePoolListData(): UnifiedPool[] {
       : null
     return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, aprPct }
   })
+
+  // Pools anyone created themselves via Create Pool, discovered live from
+  // AeonFactoryRH.allPools() rather than hardcoded -- no gauge/TVL indexing
+  // yet (those still key off the static POOLS list), but they show up and
+  // are addable/swappable immediately instead of being invisible until
+  // someone manually wires them into contracts.ts.
+  const vammDiscovered: UnifiedPool[] = discovered.map(p => ({
+    type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address,
+    feeLabel: p.fee, tvlUsd: null, volUsd: null, feesUsd: null, aprPct: null,
+  }))
 
   const cl: UnifiedPool[] = CL_POOLS.map(p => {
     const tvlUsd = clPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
@@ -220,7 +232,7 @@ function usePoolListData(): UnifiedPool[] {
     return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, aprPct }
   })
 
-  return [...vamm, ...cl, ...dlmm]
+  return [...vamm, ...vammDiscovered, ...cl, ...dlmm]
 }
 
 const TYPE_BADGE: Record<PoolMode, string> = {
@@ -234,6 +246,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
   const [search, setSearch] = useState('')
 
   const pools = usePoolListData()
+  const poolCount = pools.length
 
   const filtered = pools.filter(p => {
     if (filter !== 'ALL' && p.type !== filter) return false
@@ -249,7 +262,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
           <h1 className="font-display font-bold text-2xl text-text-primary">Liquidity Pools</h1>
-          <p className="text-sm text-text-muted mt-0.5">There are {POOLS.length + CL_POOLS.length + DLMM_POOLS.length} pools listed currently</p>
+          <p className="text-sm text-text-muted mt-0.5">There are {poolCount} pools listed currently</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -618,8 +631,22 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   const isConnected = mounted && _isConnected
   const { openConnectModal } = useConnectModal()
 
+  // Includes pools anyone created via Create Pool (discovered live from
+  // AeonFactoryRH.allPools()), not just the hardcoded POOLS list -- so a
+  // pool a user just deployed is immediately selectable/depositable here,
+  // not just visible-but-broken in the list above.
+  const { discovered } = useAllPools()
+  const allVammPools = useMemo(() => [
+    ...POOLS.map(p => ({
+      ...p,
+      token0Address: TOKENS[p.token0 as keyof typeof TOKENS]?.address,
+      token1Address: TOKENS[p.token1 as keyof typeof TOKENS]?.address,
+    })),
+    ...discovered,
+  ], [discovered])
+
   const [tab,            setTab]            = useState<Tab>('add')
-  const [selectedPool,   setSelectedPool]   = useState(() => POOLS.find(p => p.address === initialPool) ?? POOLS[0])
+  const [selectedPool,   setSelectedPool]   = useState(() => allVammPools.find(p => p.address === initialPool) ?? allVammPools[0])
   const [amount0,        setAmount0]        = useState('')
   const [amount1,        setAmount1]        = useState('')
   const [removeAmount,   setRemoveAmount]   = useState(50)
@@ -627,14 +654,25 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   const [step,           setStep]           = useState<Step>('idle')
   const [errMsg,         setErrMsg]         = useState('')
 
+  // Once discovered pools load in (they arrive a beat after the static
+  // list on first render), pick up a match for initialPool if we didn't
+  // have one yet -- otherwise deep-linking straight to a just-created pool
+  // would get stuck showing whatever pool happened to be first.
+  useEffect(() => {
+    if (!initialPool || selectedPool.address.toLowerCase() === initialPool.toLowerCase()) return
+    const match = allVammPools.find(p => p.address.toLowerCase() === initialPool.toLowerCase())
+    if (match) setSelectedPool(match)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allVammPools, initialPool])
+
   const prices    = usePrices()
   const poolStats = usePoolStats(prices)
   const volResult = useVolume24h(prices)
 
   const token0Key  = selectedPool.token0 as keyof typeof TOKENS
   const token1Key  = selectedPool.token1 as keyof typeof TOKENS
-  const token0Addr = TOKENS[token0Key].address
-  const token1Addr = TOKENS[token1Key].address
+  const token0Addr = selectedPool.token0Address ?? TOKENS[token0Key]?.address
+  const token1Addr = selectedPool.token1Address ?? TOKENS[token1Key]?.address
   const token0Dec  = TOKENS[token0Key].decimals
   const token1Dec  = TOKENS[token1Key].decimals
 
@@ -866,7 +904,7 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
 
         {showPoolPicker && (
           <div className="mt-2 space-y-1">
-            {POOLS.map(pool => (
+            {allVammPools.map(pool => (
               <button key={pool.address} onClick={() => { setSelectedPool(pool); setShowPoolPicker(false); setStep('idle') }} className={clsx('w-full flex items-center gap-3 p-2.5 rounded-xl hover:bg-bg-raised transition-colors text-left', selectedPool.address === pool.address && 'bg-aeon-400/5 border border-aeon-400/20')}>
                 <div className="flex -space-x-1">
                   <TokenIcon symbol={pool.token0} size={24} />
