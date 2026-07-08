@@ -195,6 +195,11 @@ export const POOLS = [
   // zero SLEEP at deploy time, so there's nothing real to seed with yet.
   // Real AeonVoterV2 gauge created same day: 0xD897B5F459E64688873b5D032C9B862716D03Bf1.
   { name: 'SLEEP/AEON',    token0: 'SLEEP',    token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xDF769bF01Ee70e2F86adC0417E0717D32c4586be' as `0x${string}` },
+  // Created by another user via the permissionless Create Pool flow (not by
+  // us) -- discovered live via useAllPools.ts, then promoted into this
+  // static list + given a real gauge (0x5bD22db11Ac43bba2A17f1D4c80A7420439f2141)
+  // so it shows up in Earn, not just Liquidity. Real reserves: 1 CASHCAT + 12 ROBINFUN.
+  { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT', token1: 'ROBINFUN', type: 'vAMM', fee: '1%', address: '0x35Bd4b5d17192649098aec846c790178A84A982b' as `0x${string}` },
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3
