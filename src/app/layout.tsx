@@ -26,9 +26,9 @@ export const metadata: Metadata = {
   title: 'AEON Protocol — ve(3,3) DEX on Robinhood Chain',
   description: 'The first fee-anchored DEX. Emissions = Fees ÷ 10. Built on Robinhood Chain.',
   icons: {
-    icon: '/logo.png',
-    apple: '/logo.png',
-    shortcut: '/logo.png',
+    icon: '/logo.jpg',
+    apple: '/logo.jpg',
+    shortcut: '/logo.jpg',
   },
   openGraph: {
     title: 'AEON Protocol',

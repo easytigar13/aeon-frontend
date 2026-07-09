@@ -32,7 +32,7 @@ export function TokenIcon({
 
   const primaryUrl = imageUrl && !primaryFailed ? imageUrl : null
   const twUrl = TRUSTWALLET_LOGOS[symbol] && !fallbackFailed ? TRUSTWALLET_LOGOS[symbol] : null
-  const aeonUrl = symbol === 'AEON' && !fallbackFailed ? '/logo.svg' : null
+  const aeonUrl = symbol === 'AEON' && !fallbackFailed ? '/logo.jpg' : null
   const activeUrl = primaryUrl ?? twUrl ?? aeonUrl
 
   const color = AVATAR_COLORS[symbol] ?? '#FFB800'

@@ -26,7 +26,7 @@ export function AddToWalletButton({ tokenKey, className }: { tokenKey: keyof typ
   function handleClick() {
     if (!isConnected) { openConnectModal?.(); return }
     const image = tokenKey === 'AEON'
-      ? `${window.location.origin}/logo.svg`
+      ? `${window.location.origin}/logo.jpg`
       : KNOWN_LOGOS[tokenKey]
     watchAsset(
       { type: 'ERC20', options: { address: token.address, symbol: token.symbol, decimals: token.decimals, image } },
