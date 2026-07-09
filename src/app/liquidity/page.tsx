@@ -7,7 +7,7 @@ import { useAccount, useBalance, useReadContract, useReadContracts, useWriteCont
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits, maxUint256 } from 'viem'
 import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, LIQUIDITY_HELPER_V2_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI } from '@/config/abis'
+import { ERC20_ABI, LIQUIDITY_HELPER_V2_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WHITELIST_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { useAllPools } from '@/hooks/useAllPools'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
@@ -422,12 +422,80 @@ function TokenSlot({ label, addr, onAddr, amount, onAmount, wallet, resolvedSymb
   )
 }
 
+// Gates pool creation behind WhitelistRH -- 100 AEON one-time payment to
+// the protocol treasury (or a free grantWhitelist() from governor, e.g.
+// the dev wallet, which is already whitelisted on-chain). Rendered instead
+// of the create-pool form until the connected wallet passes isWhitelisted().
+function WhitelistGate({ address, onWhitelisted }: { address: `0x${string}`; onWhitelisted: () => void }) {
+  const [step, setStep] = useState<'idle' | 'approve' | 'approve_wait' | 'join' | 'join_wait'>('idle')
+  const [errMsg, setErrMsg] = useState('')
+
+  const { data: costRaw } = useReadContract({ address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'WHITELIST_COST' })
+  const cost = (costRaw as bigint | undefined) ?? 100n * 10n ** 18n
+
+  const bal = useTokenBal(CONTRACTS.AeonToken, address)
+  const allowance = useAllowance(CONTRACTS.AeonToken, address, CONTRACTS.Whitelist)
+  const needApprove = allowance < cost
+
+  const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
+  const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
+
+  useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
+  useEffect(() => {
+    if (!txSuccess) return
+    if (step === 'approve_wait') { setStep('join'); return }
+    if (step === 'join_wait') { onWhitelisted(); return }
+  }, [txSuccess])
+  useEffect(() => {
+    setErrMsg('')
+    if (step === 'approve') { writeContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.Whitelist, cost] }); setStep('approve_wait') }
+    if (step === 'join')    { writeContract({ address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'joinWhitelist', args: [] }); setStep('join_wait') }
+  }, [step])
+
+  const isBusy = isPending || (step !== 'idle')
+  const costFormatted = parseFloat(formatUnits(cost, 18)).toFixed(0)
+
+  function handleClick() {
+    if (needApprove) { setStep('approve'); return }
+    setStep('join')
+  }
+
+  function label() {
+    if (step === 'approve' || step === 'approve_wait') return 'Approving AEON…'
+    if (step === 'join' || step === 'join_wait') return 'Joining whitelist…'
+    if (needApprove) return `Approve ${costFormatted} AEON`
+    return `Whitelist Address (${costFormatted} AEON)`
+  }
+
+  return (
+    <div className="card p-6 text-center space-y-3">
+      <div className="text-lg font-display font-bold text-text-primary">Whitelist required to create a pool</div>
+      <p className="text-sm text-text-secondary">
+        Creating a new pool costs a one-time {costFormatted} AEON whitelist fee, paid to the protocol treasury.
+        Once your address is whitelisted it's permanent — no fee on future pools.
+      </p>
+      <div className="text-2xs text-text-muted font-mono">Your AEON balance: {bal.formatted}</div>
+      {errMsg && <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">{errMsg}</div>}
+      <button onClick={handleClick} disabled={isBusy} className="btn-primary w-full py-3 flex items-center justify-center gap-2">
+        {isBusy && <Loader2 size={16} className="animate-spin" />}
+        {label()}
+      </button>
+    </div>
+  )
+}
+
 function CreatePoolView({ onCreated }: { onCreated: (address: string) => void }) {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
   const { address, isConnected: _isConnected } = useAccount()
   const isConnected = mounted && _isConnected
   const { openConnectModal } = useConnectModal()
+
+  const { data: isWhitelistedRaw, refetch: refetchWhitelisted } = useReadContract({
+    address: CONTRACTS.Whitelist, abi: WHITELIST_ABI, functionName: 'isWhitelisted',
+    args: address ? [address] : undefined, query: { enabled: !!address },
+  })
+  const isWhitelisted = !!isWhitelistedRaw
 
   const [tokenA, setTokenA] = useState<string>(CONTRACTS.AeonToken)
   const [tokenB, setTokenB] = useState<string>('')
@@ -558,6 +626,10 @@ function CreatePoolView({ onCreated }: { onCreated: (address: string) => void })
     if (needApproveA) return `Approve ${symA}`
     if (needApproveB) return `Approve ${symB}`
     return 'Create Pool'
+  }
+
+  if (isConnected && address && !isWhitelisted) {
+    return <WhitelistGate address={address} onWhitelisted={() => refetchWhitelisted()} />
   }
 
   if (step === 'done' && createdPool) {
