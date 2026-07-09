@@ -898,11 +898,19 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
     if (step === 'remove') {
       const lpToRemove = lpBal * BigInt(removeAmount) / 100n
       if (lpToRemove === 0n) { setStep('idle'); return }
+      // reserve0/reserve1 are in DISPLAY order (selectedPool.token0/token1), but
+      // the pool contract's burn() returns amounts in its own ON-CHAIN token0/
+      // token1 order, which is reversed from display order whenever
+      // !isToken0First. Passing display-ordered mins straight through caused a
+      // real revert (amount0Min held a ROBINFUN-scale value while the pool's
+      // actual amount0 was WETH-scale) -- reorder back to on-chain order here.
       const quotedRecv0 = totalSupply > 0n ? lpToRemove * reserve0 / totalSupply : 0n
       const quotedRecv1 = totalSupply > 0n ? lpToRemove * reserve1 / totalSupply : 0n
+      const onChainMin0 = isToken0First ? withSlippage(quotedRecv0) : withSlippage(quotedRecv1)
+      const onChainMin1 = isToken0First ? withSlippage(quotedRecv1) : withSlippage(quotedRecv0)
       writeContract({
         address: HELPER, abi: LIQUIDITY_HELPER_V2_ABI, functionName: 'removeLiquidity',
-        args: [selectedPool.address, lpToRemove, withSlippage(quotedRecv0), withSlippage(quotedRecv1), address!, liqDeadline()],
+        args: [selectedPool.address, lpToRemove, onChainMin0, onChainMin1, address!, liqDeadline()],
       })
       setStep('remove_wait')
     }
