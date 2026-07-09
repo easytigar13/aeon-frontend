@@ -185,26 +185,13 @@ export const POOLS = [
   { name: 'AEON/ETH',     token0: 'AEON',    token1: 'WETH', type: 'vAMM', fee: '1%',   address: '0xD215650cb628113A64D938164Ee5CD72293F9ea6' as `0x${string}` },
   { name: 'AEON/USDG',    token0: 'AEON',    token1: 'USDG', type: 'vAMM', fee: '1%',   address: '0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288' as `0x${string}` },
   { name: 'ETH/USDG',     token0: 'WETH',    token1: 'USDG', type: 'vAMM', fee: '0.3%', address: '0x2732E1312e5Bba5729534E9d94D44c090b200F14' as `0x${string}` },
-  // ── The following 9 (Old) pools were all created via the OLD AeonFactoryRH
-  // (0xD8495E39...), which has an AeonPoolRH baked into its createPool()
-  // bytecode from BEFORE fee accounting existed -- poolFees()/claimFees()
-  // revert with no matching selector on all 9, confirmed 2026-07-09. Their
-  // swap fees never reach voters, just compound into LP value forever.
-  // Real LP is staked in these (across the user's own multiple wallets, not
-  // third parties -- confirmed with the user), so they're kept listed
-  // as-is rather than removed, so that LP can still be unstaked/withdrawn.
-  // Each has a fresh replacement below with a real fee-working pool +
-  // gauge, deployed via the new AeonFactoryV2. Migration (unstake old,
-  // deposit new) is manual and user-driven -- explicitly on hold, not
-  // automated, since it requires each LP-holding wallet's own signature.
-  { name: 'VIRTUAL/AEON (Old)', token0: 'VIRTUAL', token1: 'AEON', type: 'vAMM', fee: '1%',   address: '0x50bCeFB28502C8628Bc2564A0BFEB6D5D33EFA25' as `0x${string}` },
-  { name: 'ROBINFUN/AEON (Old)', token0: 'ROBINFUN', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x6EE853608078a207A30836Eec6310974D4506c14' as `0x${string}` },
-  { name: 'CASHCAT/AEON (Old)', token0: 'CASHCAT', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x8323E657009aBBF1567A15294766203150908b10' as `0x${string}` },
-  { name: 'CASHCAT/ETH (Old)',  token0: 'CASHCAT', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0xAbC3DA2cc75387Caf867B07bC272DF19d3Cff02C' as `0x${string}` },
-  { name: 'CASHCAT/USDG (Old)', token0: 'CASHCAT', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xb55dadbFb20912466F2961cF466f331Fe98706F1' as `0x${string}` },
-  { name: 'ROBINFUN/ETH (Old)',  token0: 'ROBINFUN', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x0B499B8c6BA886090ADd7C21f8e1810BDDD8277D' as `0x${string}` },
-  { name: 'ROBINFUN/USDG (Old)', token0: 'ROBINFUN', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xd4F8574d3bC25FE20195Ce58a47d61D79bA7504b' as `0x${string}` },
-  { name: 'CASHCAT/ROBINFUN (Old)', token0: 'CASHCAT', token1: 'ROBINFUN', type: 'vAMM', fee: '1%', address: '0x35Bd4b5d17192649098aec846c790178A84A982b' as `0x${string}` },
+  // ── The 8 (Old) pools that used to live here (created via the OLD
+  // AeonFactoryRH, 0xD8495E39..., which has an AeonPoolRH baked into its
+  // createPool() bytecode from before fee accounting existed) have all been
+  // fully drained on-chain as of 2026-07-09 -- every wallet holding real LP
+  // migrated out (unstaked + removed liquidity), confirmed via totalSupply()
+  // sitting at the 1000-wei locked-minimum floor for all of them. Removed
+  // from this list rather than kept as empty dead entries.
 
   // ── Fresh replacements, deployed 2026-07-09 via AeonFactoryV2
   // (0xE27EA15d...) -- real fee accounting verified via poolFees() before
