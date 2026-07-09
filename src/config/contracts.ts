@@ -136,6 +136,21 @@ export const CL_GAUGES: Record<string, `0x${string}`> = {
   '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6': '0x5f6c7ffca91223fc1187ac3e29abb5d66d455367', // CL AEON/USDG
   '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3': '0xb3ed0456a2637a71711c415e9e5c5982284fa432', // CL ETH/USDG
   '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d': '0xafff2c5d9bb53bc3553b2e9086225aa6e293a2cc', // CL VIRTUAL/AEON
+  // Added 2026-07-09 -- one Algebra CL pool per remaining vAMM pair. The
+  // factory's createPool(address,address) selector doesn't exist on this
+  // deployment -- the real signature is createPool(address,address,bytes),
+  // found by grepping the factory bytecode for candidate selectors after
+  // POOLS_ADMINISTRATOR_ROLE (also required, granted via grantRole) still
+  // didn't fix the original empty-revert. Each pool then needed a separate
+  // initialize(uint160 sqrtPriceX96) call -- createPool alone leaves it
+  // unlocked=false. sqrtPriceX96 computed from each pair's live vAMM price.
+  '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B': '0xf4b4dd6caf39a73425a2db017a368936c3f44904', // CL ROBINFUN/AEON
+  '0xbCD1Bf0d9F25503DDfEd0b663827811637B27B80': '0x93ba36bff83b08f2da9e3b44a6d0d074d9901630', // CL CASHCAT/AEON
+  '0x9ebd1C556967d8e3f6f1C043D57eb7762047D60D': '0x7c9dcac9aebd8bc7144f0bcc4d3dcbb5570cbc8d', // CL CASHCAT/USDG
+  '0x09e729D9e077EB1Ad10aDccDE4D18C143035fe04': '0x269b01b00dc427a8b118ae768cd17e72b105ed4d', // CL CASHCAT/ETH
+  '0x14E266508d68107509487DE6Ead5ded5764C5F20': '0x87e27373bee17f043553b60b9321518d0b50a083', // CL CASHCAT/ROBINFUN
+  '0xC6b5b34133E290e5c28B19844970cee783DD9b40': '0x424cfb459b83ed272e0df87e95c8fbcd19af263f', // CL ROBINFUN/ETH
+  '0xBb6aA9914f53afb8e7C89Bf05D4DD2525aF4E4ce': '0x05581a779096183bc15387f81a784ab22d40abfe', // CL ROBINFUN/USDG
 }
 export const DLMM_GAUGES: Record<string, `0x${string}`> = {
   '0x736d8E418673253b2CDE1ef3Df6205Fc9780816b': '0xe3c3457d17f7a63b6f1af36274be141af97e3ac2', // DLMM AEON/ETH
@@ -248,6 +263,15 @@ export const CL_POOLS = [
   { name: 'AEON/USDG',    token0: 'AEON', token1: 'USDG',    type: 'CL', fee: '0.25%', address: '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6' as `0x${string}` },
   { name: 'ETH/USDG',     token0: 'WETH', token1: 'USDG',    type: 'CL', fee: '0.25%', address: '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3' as `0x${string}` },
   { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
+  // Added 2026-07-09 -- see CL_GAUGES above for how these got created.
+  // defaultFee() confirmed 2500 (0.25%) on-chain, same tier as the 4 above.
+  { name: 'ROBINFUN/AEON',    token0: 'ROBINFUN', token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B' as `0x${string}` },
+  { name: 'CASHCAT/AEON',     token0: 'CASHCAT',  token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0xbCD1Bf0d9F25503DDfEd0b663827811637B27B80' as `0x${string}` },
+  { name: 'CASHCAT/USDG',     token0: 'CASHCAT',  token1: 'USDG',     type: 'CL', fee: '0.25%', address: '0x9ebd1C556967d8e3f6f1C043D57eb7762047D60D' as `0x${string}` },
+  { name: 'CASHCAT/ETH',      token0: 'CASHCAT',  token1: 'WETH',     type: 'CL', fee: '0.25%', address: '0x09e729D9e077EB1Ad10aDccDE4D18C143035fe04' as `0x${string}` },
+  { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT',  token1: 'ROBINFUN', type: 'CL', fee: '0.25%', address: '0x14E266508d68107509487DE6Ead5ded5764C5F20' as `0x${string}` },
+  { name: 'ROBINFUN/ETH',     token0: 'WETH',     token1: 'ROBINFUN', type: 'CL', fee: '0.25%', address: '0xC6b5b34133E290e5c28B19844970cee783DD9b40' as `0x${string}` },
+  { name: 'ROBINFUN/USDG',    token0: 'ROBINFUN', token1: 'USDG',     type: 'CL', fee: '0.25%', address: '0xBb6aA9914f53afb8e7C89Bf05D4DD2525aF4E4ce' as `0x${string}` },
 ]
 
 export const CL_RANGE_PRESETS = [
