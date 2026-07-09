@@ -196,14 +196,6 @@ export default function DashboardPage() {
                 <span className={clsx('text-sm font-mono', (item as { highlight?: boolean }).highlight ? 'text-aeon-400' : 'text-text-primary')}>{item.value}</span>
               </div>
             ))}
-            <div className="pt-2 mt-1 border-t border-bg-border">
-              <p className="text-2xs text-text-muted leading-relaxed">
-                Note: the protocol's own 25k/25k genesis vote still points at the two vAMM pools retired in the fee-fix
-                migration — that's most of the total votes above, and why per-pool votes below read close to zero. It
-                can't be redirected until this epoch ends (veAEON votes are locked for the epoch they're cast in);
-                it'll be re-pointed at the current pools once that unlocks.
-              </p>
-            </div>
           </div>
         </div>
 

@@ -7,13 +7,16 @@ import { CONTRACTS, TOKENS, EPOCH_CONFIG } from '@/config/contracts'
 const NAV = [
   { id: 'overview',       label: 'Overview' },
   { id: 'how-it-works',  label: 'How It Works' },
+  { id: 'pool-architectures', label: 'Pool Architectures' },
   { id: 'the-furnace',   label: 'The Furnace' },
   { id: 'tokenomics',    label: 'Tokenomics' },
   { id: 'guide-swap',    label: '→ How to Swap',            indent: true },
   { id: 'guide-earn',    label: '→ Earn (LP + Gauge)',      indent: true },
   { id: 'guide-lock',    label: '→ Lock (veNFT)',           indent: true },
   { id: 'guide-vote',    label: '→ Vote',                   indent: true },
+  { id: 'guide-create-pool', label: '→ Create a Pool',      indent: true },
   { id: 'contracts',     label: 'Contract Addresses' },
+  { id: 'integrations',  label: 'Integrations & Tools' },
 ]
 
 function H2({ id, children }: { id: string; children: React.ReactNode }) {
@@ -186,6 +189,28 @@ export default function DocsPage() {
             <li>LPs staked in those gauges earn AEON emissions throughout the next epoch</li>
           </ol>
 
+          {/* Pool Architectures */}
+          <H2 id="pool-architectures">Pool Architectures</H2>
+          <P>
+            Every trading pair on AEON is available across three independent pool architectures at once — LPs pick whichever fits their strategy, and the swap router automatically searches all three (plus real external venues) and executes whichever route gives the best price, splitting a single trade across multiple routes when that's better than any single one.
+          </P>
+          <div className="my-6 grid md:grid-cols-3 gap-4">
+            {[
+              { title: 'vAMM', sub: 'Full-range, x*y=k', body: 'The default. Deposit both tokens, earn fees across the entire price curve, zero management. Same audited-pattern fee accounting as Aerodrome/Velodrome.' },
+              { title: 'Concentrated Liquidity', sub: 'Algebra Integral', body: 'Pick a price range for your liquidity to concentrate in. Higher capital efficiency and fee share within that range, but your position stops earning if price moves outside it.' },
+              { title: 'DLMM', sub: 'Trader Joe Liquidity Book', body: 'Liquidity is split into discrete price bins instead of a continuous curve. Zero-slippage swaps within a single active bin, and LPs can target specific price levels precisely.' },
+            ].map(col => (
+              <div key={col.title} className="card p-4">
+                <div className="text-sm font-display font-semibold text-aeon-400 mb-1">{col.title}</div>
+                <div className="text-2xs font-mono text-text-muted mb-3 uppercase tracking-wider">{col.sub}</div>
+                <p className="text-xs text-text-secondary leading-relaxed">{col.body}</p>
+              </div>
+            ))}
+          </div>
+          <Note>
+            Only vAMM pools feed AEON's official gauge-voting emissions (veNFT holders vote for vAMM gauges specifically). CL and DLMM positions earn trading fees the same as any LP, plus a separate governor-funded AEON reward stream via their own dedicated gauges — visible on the <Link href="/earn" className="text-aeon-400 hover:underline">Earn</Link> page alongside vAMM gauges.
+          </Note>
+
           {/* The Furnace */}
           <H2 id="the-furnace">The Furnace</H2>
           <P>
@@ -318,6 +343,23 @@ export default function DocsPage() {
             Fees from your voted pools accumulate in real time and are claimable directly from the FeeDistributor contract for each pool/epoch you voted in.
           </Step>
 
+          <H2 id="guide-create-pool">Create a Pool</H2>
+          <P>
+            Anyone can permissionlessly create a new vAMM pool for any token pair — gated by a one-time 100 AEON whitelist fee to keep spam pools out. CL and DLMM pools for a pair are added by the team on request once real vAMM liquidity exists for it.
+          </P>
+          <Step n={1} title="Get whitelisted">
+            Go to <Link href="/liquidity" className="text-aeon-400 hover:underline">Liquidity</Link> → <strong>Create Pool</strong>. If your wallet isn't whitelisted yet, approve and pay the one-time 100 AEON fee.
+          </Step>
+          <Step n={2} title="Choose your pair and fee tier">
+            Enter both token addresses and pick a fee tier. The page checks both factories for an existing pool at that exact pair + fee before letting you create a duplicate.
+          </Step>
+          <Step n={3} title="Create and seed liquidity">
+            Confirm pool creation, then add the initial liquidity in the same flow. The new pool appears on Liquidity/Earn/Swap automatically — no manual listing step.
+          </Step>
+          <Note>
+            New pools deploy through the current factory, which has correct, working fee accounting from pool #1 — swap fees route to voters immediately, the same as every existing pool.
+          </Note>
+
           {/* Contracts */}
           <H2 id="contracts">Contract Addresses</H2>
           <P>All contracts are deployed on Robinhood Chain (chain ID 4663).</P>
@@ -332,11 +374,18 @@ export default function DocsPage() {
             <Addr label="Fee Distributor"     address={CONTRACTS.FeeDistributor} />
             <Addr label="Buyback Engine"      address={CONTRACTS.BuybackEngine} />
             <Addr label="Oracle"              address={CONTRACTS.AeonOracle} />
-            <Addr label="Factory"             address={CONTRACTS.AeonFactory} />
-            <Addr label="Router"              address={CONTRACTS.AeonRouter} />
+            <Addr label="Factory (current, used for new pools)" address={CONTRACTS.AeonFactoryV2} />
+            <Addr label="Factory (legacy, reads only)" address={CONTRACTS.AeonFactory} />
+            <Addr label="Router (vAMM only)"  address={CONTRACTS.AeonRouter} />
+            <Addr label="Universal Router (vAMM + CL + DLMM)" address={CONTRACTS.UniversalRouter} />
             <Addr label="Gauge Factory"       address={CONTRACTS.AeonGaugeFactory} />
             <Addr label="Liquidity Helper"    address={CONTRACTS.LiquidityHelperV2} />
+            <Addr label="Pool-Creation Whitelist" address={CONTRACTS.Whitelist} />
+            <Addr label="Tower Defense Arena" address={CONTRACTS.TowerDefenseArena} />
           </div>
+          <Note>
+            The legacy factory's earliest pools have an older <code>AeonPoolRH</code> bytecode without working fee-claim accounting. Every pool created through the current factory (including all pools created from 2026-07-09 onward) has correct fee accounting from day one — check a pool's own listing on <Link href="/liquidity" className="text-aeon-400 hover:underline">Liquidity</Link> rather than assuming from the factory alone.
+          </Note>
 
           <H3>Token Addresses</H3>
           <div className="card p-4">
@@ -344,6 +393,24 @@ export default function DocsPage() {
               <Addr key={sym} label={`${t.name} (${t.symbol})`} address={t.address} />
             ))}
           </div>
+
+          {/* Integrations */}
+          <H2 id="integrations">Integrations & Tools</H2>
+          <P>
+            AEON exposes machine-readable endpoints for aggregators, explorers, and bots to index the protocol directly — no manual listing or static snapshot required.
+          </P>
+          <ul className="space-y-2 mb-6 ml-4">
+            {[
+              ['DEX Screener Adapter', 'Full spec implementation (/latest-block, /asset, /pair, /events) at /api/dexscreener/* — live, real-time, on-chain-verified. Covers all vAMM pools.'],
+              ['Machine-readable pool list', '/api/v1/pools — live reserves + token metadata for every pool, for aggregators and custom bots.'],
+              ['1inch aggregation', 'Wired in as a 4th swap venue on the Swap page — AEON compares its own routing against 1inch\'s pathfinding and uses whichever quote is better.'],
+            ].map(([title, desc]) => (
+              <li key={title} className="text-sm">
+                <span className="font-mono text-aeon-400">{title}</span>
+                <span className="text-text-secondary"> — {desc}</span>
+              </li>
+            ))}
+          </ul>
 
           <div className="mt-12 pt-8 border-t border-bg-border text-center text-sm text-text-muted">
             Built on Robinhood Chain · {new Date().getFullYear()} AEON Protocol

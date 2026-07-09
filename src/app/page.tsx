@@ -25,7 +25,7 @@ export default function HomePage() {
             <span className="relative inline-flex rounded-full h-2 w-2 bg-aeon-400" />
           </span>
           <span className="text-xs font-mono text-aeon-400 font-bold tracking-wider uppercase">
-            Live on Robinhood Chain — Genesis Epoch 0
+            Live on Robinhood Chain — Fee-Anchored Emissions Active
           </span>
         </div>
 
@@ -425,27 +425,30 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 py-16">
         <Reveal className="text-center mb-12">
           <h2 className="font-display font-bold text-3xl text-text-primary mb-3">
-            3 Pools at Genesis
+            11 Pairs, 3 Pool Types Each
           </h2>
-          <p className="text-text-secondary">vAMM to start — concentrated liquidity pools land next</p>
+          <p className="text-text-secondary">Every pair trades across vAMM, Concentrated Liquidity, and DLMM simultaneously — 33 pools total</p>
         </Reveal>
 
         <div className="grid md:grid-cols-3 gap-6">
           {[
-            { name: 'AEON / ETH',  desc: 'Seeded at genesis with 20,000 AEON paired against ETH.', fee: '1%' },
-            { name: 'AEON / USDG', desc: 'Seeded at genesis with 20,000 AEON paired against USDG.', fee: '1%' },
-            { name: 'ETH / USDG',  desc: 'The base trading pair between the chain\'s native asset and USDG.', fee: '0.3%' },
+            { name: 'vAMM', desc: 'Full-range, zero management. Deposit both tokens, earn fees across the entire price curve — the same audited-pattern accounting as Aerodrome/Velodrome.', badge: 'pool-type-vamm' },
+            { name: 'Concentrated Liquidity', desc: 'Algebra Integral. Pick a price range to concentrate your liquidity in for higher capital efficiency and fee share within that range.', badge: 'pool-type-cl' },
+            { name: 'DLMM', desc: 'Trader Joe Liquidity Book. Liquidity split into discrete price bins — zero-slippage swaps within the active bin.', badge: 'pool-type-dlmm' },
           ].map((item, i) => (
             <Reveal key={item.name} delay={i * 100} className="card p-6 transition-all duration-300 hover:-translate-y-1 hover:border-bg-hover">
               <div className="flex items-center justify-between mb-4">
-                <span className="pool-type-vamm">vAMM</span>
-                <span className="text-xs text-text-muted font-mono">{item.fee} fee</span>
+                <span className={item.badge}>{item.name}</span>
               </div>
-              <h3 className="font-display font-semibold text-text-primary mb-2">{item.name}</h3>
               <p className="text-text-secondary text-sm leading-relaxed">{item.desc}</p>
             </Reveal>
           ))}
         </div>
+        <Reveal delay={300} className="text-center mt-8">
+          <Link href="/liquidity" className="btn-secondary inline-flex items-center gap-2 hover:scale-[1.03] active:scale-[0.97]">
+            View All Pools <ArrowRight size={16} />
+          </Link>
+        </Reveal>
       </section>
 
       {/* Genesis Epoch */}
@@ -500,12 +503,12 @@ export default function HomePage() {
             </p>
           </div>
           <a
-            href="https://github.com/easytigar13/aeon-protocol"
+            href="https://robinhoodchain.blockscout.com/address/0xd4c93eD1843606f92CccA078941f3d52A585982f?tab=contract"
             target="_blank"
             rel="noopener noreferrer"
             className="btn-secondary shrink-0 text-sm hover:scale-[1.03] active:scale-[0.97]"
           >
-            View on GitHub
+            View Verified Contract
           </a>
         </Reveal>
       </section>
