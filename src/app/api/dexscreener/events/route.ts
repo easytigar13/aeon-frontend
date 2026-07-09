@@ -17,14 +17,24 @@
 // not the pool event's own `sender`/`to` params, since those are usually
 // the router/helper contract rather than the real user.
 import { NextResponse } from 'next/server'
-import { formatUnits, getAddress, type Log } from 'viem'
+import { formatUnits, getAddress } from 'viem'
 import {
   client, CORS, VAMM_POOL_ADDRESSES, SWAP_EVENT, MINT_EVENT, BURN_EVENT,
   getPoolMetaBatch, getDecimalsBatch,
 } from '@/lib/dexscreener/shared'
 import { PAIR_ABI } from '@/config/abis'
 
-type TaggedLog = Log<bigint, number, false, undefined, true, [typeof SWAP_EVENT | typeof MINT_EVENT | typeof BURN_EVENT]> & {
+// Loosely typed on purpose -- the three source event shapes (Swap/Mint/Burn)
+// don't unify cleanly under viem's strict per-event Log<> generic, and every
+// call site below already does an explicit `as {...}` cast on `args` before
+// use, so there's no runtime safety lost by not fighting the type system here.
+interface TaggedLog {
+  address: `0x${string}`
+  blockNumber: bigint
+  transactionHash: `0x${string}`
+  transactionIndex: number
+  logIndex: number
+  args: Record<string, unknown>
   _kind: 'swap' | 'join' | 'exit'
 }
 
