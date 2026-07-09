@@ -1,7 +1,7 @@
 'use client'
 import { useMemo } from 'react'
 import { useReadContract, useReadContracts } from 'wagmi'
-import { CONTRACTS, POOLS, TOKENS } from '@/config/contracts'
+import { CONTRACTS, POOLS, TOKENS, HIDDEN_POOLS } from '@/config/contracts'
 import { AEON_FACTORY_ABI, PAIR_ABI, ERC20_ABI } from '@/config/abis'
 
 // AeonFactoryRH.createPool() is permissionless -- anyone can deploy a vAMM
@@ -106,7 +106,11 @@ export function useAllPools(): { discovered: DiscoveredPool[]; isLoading: boolea
   )
 
   const staticAddrs = useMemo(() => new Set(POOLS.map(p => p.address.toLowerCase())), [])
-  const newAddrs = useMemo(() => poolAddrs.filter(a => !staticAddrs.has(a.toLowerCase())), [poolAddrs, staticAddrs])
+  const hiddenAddrs = useMemo(() => new Set(HIDDEN_POOLS.map(a => a.toLowerCase())), [])
+  const newAddrs = useMemo(
+    () => poolAddrs.filter(a => !staticAddrs.has(a.toLowerCase()) && !hiddenAddrs.has(a.toLowerCase())),
+    [poolAddrs, staticAddrs, hiddenAddrs],
+  )
 
   const metaContracts = useMemo(
     () => newAddrs.flatMap(addr => [

@@ -204,8 +204,19 @@ export const POOLS = [
   { name: 'CASHCAT/USDG', token0: 'CASHCAT', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x82203a764428Fbf826DCd1CE48Fdd57655b604f2' as `0x${string}` },
   { name: 'ROBINFUN/ETH',  token0: 'ROBINFUN', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x625fcD4CA1cA34Eb8ac74883748419De037d78DF' as `0x${string}` },
   { name: 'ROBINFUN/USDG', token0: 'ROBINFUN', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xB60d3Dea956204c6731cA22622bE2b8bEFac4029' as `0x${string}` },
-  { name: 'SLEEP/AEON',    token0: 'SLEEP',    token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x77FE92Da859e6d9cfdD948CF8900A3AF147b8cE4' as `0x${string}` },
   { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT', token1: 'ROBINFUN', type: 'vAMM', fee: '1%', address: '0x8Ca7acDe0218B5A905dC29CC9d650fadC706Fd9E' as `0x${string}` },
+]
+
+// Real, working pools deliberately excluded from the Liquidity page's
+// dynamic discovery (useAllPools.ts). Unlike the (Old) pools above, these
+// have no surviving same-pair entry in POOLS to dedupe against, so without
+// this list useAllPools would resurface them via the factory's allPools()
+// registry. SLEEP/AEON: user explicitly asked to hide it 2026-07-09 despite
+// it being a real, fee-accounting-correct pool -- on-chain pool/gauge still
+// exist, just not discoverable via the UI.
+export const HIDDEN_POOLS: `0x${string}`[] = [
+  '0x77FE92Da859e6d9cfdD948CF8900A3AF147b8cE4', // SLEEP/AEON (new factory)
+  '0xDF769bF01Ee70e2F86adC0417E0717D32c4586be', // SLEEP/AEON (Old, empty, never had liquidity)
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3
