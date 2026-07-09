@@ -185,37 +185,41 @@ export const POOLS = [
   { name: 'AEON/ETH',     token0: 'AEON',    token1: 'WETH', type: 'vAMM', fee: '1%',   address: '0xD215650cb628113A64D938164Ee5CD72293F9ea6' as `0x${string}` },
   { name: 'AEON/USDG',    token0: 'AEON',    token1: 'USDG', type: 'vAMM', fee: '1%',   address: '0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288' as `0x${string}` },
   { name: 'ETH/USDG',     token0: 'WETH',    token1: 'USDG', type: 'vAMM', fee: '0.3%', address: '0x2732E1312e5Bba5729534E9d94D44c090b200F14' as `0x${string}` },
-  // Added 2026-07-05 for parity with VIRTUAL's existing CL and DLMM pools —
-  // deployed via the real AeonFactoryRH.createPool() (no PoolExists conflict,
-  // unlike the fee-fix migration's pools, so its own on-chain registry stays
-  // in sync for this one).
-  { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'vAMM', fee: '1%',   address: '0x50bCeFB28502C8628Bc2564A0BFEB6D5D33EFA25' as `0x${string}` },
-  // Added 2026-07-05 — small/dust-sized on purpose (deployer's AEON balance
-  // was the binding constraint): 6.5 AEON against a price-matched ~1991
-  // ROBINFUN, pegged to ROBINFUN's real price on its other DEX listing.
-  { name: 'ROBINFUN/AEON', token0: 'ROBINFUN', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x6EE853608078a207A30836Eec6310974D4506c14' as `0x${string}` },
-  // Added 2026-07-06 via AeonFactoryRH.createPool() at the user's request.
-  // Deployed EMPTY on purpose -- deployer wallet held zero CASHCAT and only
-  // dust WETH at deploy time, so there was nothing real to seed with yet.
-  // These show 0 TVL/unswappable until liquidity is actually added.
-  { name: 'CASHCAT/AEON', token0: 'CASHCAT', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x8323E657009aBBF1567A15294766203150908b10' as `0x${string}` },
-  { name: 'CASHCAT/ETH',  token0: 'CASHCAT', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0xAbC3DA2cc75387Caf867B07bC272DF19d3Cff02C' as `0x${string}` },
-  { name: 'CASHCAT/USDG', token0: 'CASHCAT', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xb55dadbFb20912466F2961cF466f331Fe98706F1' as `0x${string}` },
-  // Added 2026-07-08 for parity with ROBINFUN/AEON. ROBINFUN/USDG seeded for
-  // real (deployer's full remaining 303.11 ROBINFUN + 0.012669 USDG, pegged
-  // to ROBINFUN/AEON's own real price). ROBINFUN/ETH deployed EMPTY --
-  // deployer WETH balance was dust (~$0.0016), nothing meaningful to seed yet.
-  { name: 'ROBINFUN/ETH',  token0: 'ROBINFUN', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x0B499B8c6BA886090ADd7C21f8e1810BDDD8277D' as `0x${string}` },
-  { name: 'ROBINFUN/USDG', token0: 'ROBINFUN', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xd4F8574d3bC25FE20195Ce58a47d61D79bA7504b' as `0x${string}` },
-  // Added 2026-07-08 at the user's request. Deployed EMPTY -- deployer held
-  // zero SLEEP at deploy time, so there's nothing real to seed with yet.
-  // Real AeonVoterV2 gauge created same day: 0xD897B5F459E64688873b5D032C9B862716D03Bf1.
-  { name: 'SLEEP/AEON',    token0: 'SLEEP',    token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xDF769bF01Ee70e2F86adC0417E0717D32c4586be' as `0x${string}` },
-  // Created by another user via the permissionless Create Pool flow (not by
-  // us) -- discovered live via useAllPools.ts, then promoted into this
-  // static list + given a real gauge (0x5bD22db11Ac43bba2A17f1D4c80A7420439f2141)
-  // so it shows up in Earn, not just Liquidity. Real reserves: 1 CASHCAT + 12 ROBINFUN.
-  { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT', token1: 'ROBINFUN', type: 'vAMM', fee: '1%', address: '0x35Bd4b5d17192649098aec846c790178A84A982b' as `0x${string}` },
+  // ── The following 9 (Old) pools were all created via the OLD AeonFactoryRH
+  // (0xD8495E39...), which has an AeonPoolRH baked into its createPool()
+  // bytecode from BEFORE fee accounting existed -- poolFees()/claimFees()
+  // revert with no matching selector on all 9, confirmed 2026-07-09. Their
+  // swap fees never reach voters, just compound into LP value forever.
+  // Real LP is staked in these (across the user's own multiple wallets, not
+  // third parties -- confirmed with the user), so they're kept listed
+  // as-is rather than removed, so that LP can still be unstaked/withdrawn.
+  // Each has a fresh replacement below with a real fee-working pool +
+  // gauge, deployed via the new AeonFactoryV2. Migration (unstake old,
+  // deposit new) is manual and user-driven -- explicitly on hold, not
+  // automated, since it requires each LP-holding wallet's own signature.
+  { name: 'VIRTUAL/AEON (Old)', token0: 'VIRTUAL', token1: 'AEON', type: 'vAMM', fee: '1%',   address: '0x50bCeFB28502C8628Bc2564A0BFEB6D5D33EFA25' as `0x${string}` },
+  { name: 'ROBINFUN/AEON (Old)', token0: 'ROBINFUN', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x6EE853608078a207A30836Eec6310974D4506c14' as `0x${string}` },
+  { name: 'CASHCAT/AEON (Old)', token0: 'CASHCAT', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x8323E657009aBBF1567A15294766203150908b10' as `0x${string}` },
+  { name: 'CASHCAT/ETH (Old)',  token0: 'CASHCAT', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0xAbC3DA2cc75387Caf867B07bC272DF19d3Cff02C' as `0x${string}` },
+  { name: 'CASHCAT/USDG (Old)', token0: 'CASHCAT', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xb55dadbFb20912466F2961cF466f331Fe98706F1' as `0x${string}` },
+  { name: 'ROBINFUN/ETH (Old)',  token0: 'ROBINFUN', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x0B499B8c6BA886090ADd7C21f8e1810BDDD8277D' as `0x${string}` },
+  { name: 'ROBINFUN/USDG (Old)', token0: 'ROBINFUN', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xd4F8574d3bC25FE20195Ce58a47d61D79bA7504b' as `0x${string}` },
+  { name: 'SLEEP/AEON (Old)',    token0: 'SLEEP',    token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xDF769bF01Ee70e2F86adC0417E0717D32c4586be' as `0x${string}` },
+  { name: 'CASHCAT/ROBINFUN (Old)', token0: 'CASHCAT', token1: 'ROBINFUN', type: 'vAMM', fee: '1%', address: '0x35Bd4b5d17192649098aec846c790178A84A982b' as `0x${string}` },
+
+  // ── Fresh replacements, deployed 2026-07-09 via AeonFactoryV2
+  // (0xE27EA15d...) -- real fee accounting verified via poolFees() before
+  // deploying. Real gauges created for all 9. Empty until LP migrates over
+  // from the corresponding (Old) pool above.
+  { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'vAMM', fee: '1%',   address: '0x67B2da1742187Aa09b427082b06ACDC5bBCA2D99' as `0x${string}` },
+  { name: 'ROBINFUN/AEON', token0: 'ROBINFUN', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xeB638e1FA253E5526C2be76626dE26F02E4bdaba' as `0x${string}` },
+  { name: 'CASHCAT/AEON', token0: 'CASHCAT', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x22d76bf4e8d2c1DfCca7de6c9dC46Ec2a8Ed7Eb7' as `0x${string}` },
+  { name: 'CASHCAT/ETH',  token0: 'CASHCAT', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x3DC6b6c354fB1e9CFdaA8A36ff845728f7176f4e' as `0x${string}` },
+  { name: 'CASHCAT/USDG', token0: 'CASHCAT', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x82203a764428Fbf826DCd1CE48Fdd57655b604f2' as `0x${string}` },
+  { name: 'ROBINFUN/ETH',  token0: 'ROBINFUN', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x625fcD4CA1cA34Eb8ac74883748419De037d78DF' as `0x${string}` },
+  { name: 'ROBINFUN/USDG', token0: 'ROBINFUN', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xB60d3Dea956204c6731cA22622bE2b8bEFac4029' as `0x${string}` },
+  { name: 'SLEEP/AEON',    token0: 'SLEEP',    token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x77FE92Da859e6d9cfdD948CF8900A3AF147b8cE4' as `0x${string}` },
+  { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT', token1: 'ROBINFUN', type: 'vAMM', fee: '1%', address: '0x8Ca7acDe0218B5A905dC29CC9d650fadC706Fd9E' as `0x${string}` },
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3
