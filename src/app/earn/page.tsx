@@ -42,7 +42,17 @@ function fmtPricePoint(n: number | null): string {
   return '$' + n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
 }
 function symbolFor(addr: string): string {
-  return Object.entries(TOKENS).find(([, t]) => t.address.toLowerCase() === addr.toLowerCase())?.[0] ?? '?'
+  const key = Object.entries(TOKENS).find(([, t]) => t.address.toLowerCase() === addr.toLowerCase())?.[0] ?? '?'
+  return dispSym(key)
+}
+
+// Display-only: WETH's real display symbol stays 'WETH' in TOKENS (needed
+// so the Swap page's native ETH and wrapped WETH stay distinguishable as
+// two separate selectable tokens there) -- but on the Earn page's CL/DLMM
+// panels there's no such ambiguity (WETH is always just "the ETH side" of
+// a pair), so show the more familiar "ETH" label here instead.
+function dispSym(sym: string): string {
+  return sym === 'WETH' ? 'ETH' : sym
 }
 
 const UNIQUE_POOLS = POOLS
@@ -79,8 +89,8 @@ function usePoolPrice(pool: typeof UNIQUE_POOLS[number]) {
   const adjR0 = Number(r0) / 10 ** dec0
   const adjR1 = Number(r1) / 10 ** dec1
   const price = isFlipped ? adjR0 / adjR1 : adjR1 / adjR0
-  const sym0  = cfgT0?.symbol ?? pool.token0
-  const sym1  = cfgT1?.symbol ?? pool.token1
+  const sym0  = dispSym(cfgT0?.symbol ?? pool.token0)
+  const sym1  = dispSym(cfgT1?.symbol ?? pool.token1)
   const priceLabel = price < 0.001
     ? `1 ${sym1} = ${(1 / price).toFixed(2)} ${sym0}`
     : `1 ${sym1} = ${price < 1 ? price.toFixed(6) : price.toFixed(4)} ${sym0}`
@@ -199,14 +209,14 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
     <div className="space-y-3">
       <div>
         <div className="flex justify-between text-2xs text-text-muted mb-1">
-          <span>{t0?.symbol ?? pool.token0}</span>
+          <span>{dispSym(t0?.symbol ?? pool.token0)}</span>
           <button onClick={() => autoFill0(bal0Fmt)} className="text-aeon-400 font-mono hover:underline">MAX {bal0Fmt}</button>
         </div>
         <input type="number" value={amt0} onChange={e => autoFill0(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
       </div>
       <div>
         <div className="flex justify-between text-2xs text-text-muted mb-1">
-          <span>{t1?.symbol ?? pool.token1}</span>
+          <span>{dispSym(t1?.symbol ?? pool.token1)}</span>
           <button onClick={() => autoFill1(bal1Fmt)} className="text-aeon-400 font-mono hover:underline">MAX {bal1Fmt}</button>
         </div>
         <input type="number" value={amt1} onChange={e => autoFill1(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
@@ -540,8 +550,13 @@ function ClGaugeRow({ pool, wallet }: { pool: typeof CL_POOLS[number]; wallet?: 
   const earned = (earnedRaw as bigint | undefined) ?? 0n
   const earnedFormatted = earned > 0n ? parseFloat(formatUnits(earned, 18)).toFixed(4) : '0'
 
-  const { data: rewardRateRaw } = useReadContract({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'rewardRate', query: { enabled: expanded, refetchInterval: 60000 } })
-  const { data: periodFinishRaw } = useReadContract({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'periodFinish', query: { enabled: expanded } })
+  // Not gated behind `expanded` -- "Reward status" (Emitting / No active
+  // rewards) shows in the COLLAPSED row summary, so gating this behind
+  // expansion made it default to a wrong "No active rewards" for every
+  // gauge until the user happened to click it open, even when real
+  // rewards were live. Cheap single-value reads, fine to always fetch.
+  const { data: rewardRateRaw } = useReadContract({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'rewardRate', query: { refetchInterval: 60000 } })
+  const { data: periodFinishRaw } = useReadContract({ address: gauge, abi: CL_GAUGE_ABI, functionName: 'periodFinish' })
   const rewardRate = (rewardRateRaw as bigint | undefined) ?? 0n
   const periodFinish = (periodFinishRaw as bigint | undefined) ?? 0n
   const isEmitting = periodFinish > BigInt(Math.floor(Date.now() / 1000))
@@ -717,8 +732,11 @@ function DlmmGaugeRow({ pool, wallet }: { pool: typeof DLMM_POOLS[number]; walle
   const earned = (earnedRaw as bigint | undefined) ?? 0n
   const earnedFormatted = earned > 0n ? parseFloat(formatUnits(earned, 18)).toFixed(4) : '0'
 
-  const { data: rewardRateRaw } = useReadContract({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'rewardRate', query: { enabled: expanded, refetchInterval: 60000 } })
-  const { data: periodFinishRaw } = useReadContract({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'periodFinish', query: { enabled: expanded } })
+  // See matching comment in ClGaugeRow above -- not gated behind `expanded`
+  // for the same reason (collapsed-row "Reward status" was defaulting to
+  // wrong).
+  const { data: rewardRateRaw } = useReadContract({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'rewardRate', query: { refetchInterval: 60000 } })
+  const { data: periodFinishRaw } = useReadContract({ address: gauge, abi: DLMM_GAUGE_ABI, functionName: 'periodFinish' })
   const periodFinish = (periodFinishRaw as bigint | undefined) ?? 0n
   const isEmitting = periodFinish > BigInt(Math.floor(Date.now() / 1000))
 

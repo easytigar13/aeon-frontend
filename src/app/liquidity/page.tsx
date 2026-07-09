@@ -58,6 +58,15 @@ function fmtPricePoint(n: number | null): string {
   return '$' + n.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
 }
 
+// Display-only: this page never lists native ETH as a selectable token
+// (KNOWN_TOKENS below filters it out, and vAMM/CL/DLMM pools only ever use
+// WETH) -- so unlike the Swap page, there's no risk of two entries both
+// showing "ETH" here. Shows the more familiar label without touching any
+// actual address/lookup logic, which still keys off the real 'WETH' string.
+function dispEthSym(sym: string): string {
+  return sym === 'WETH' ? 'ETH' : sym
+}
+
 function useTokenBal(tokenAddr: `0x${string}` | undefined, wallet: `0x${string}` | undefined) {
   const isNative = tokenAddr === NATIVE_SENTINEL
   const { data } = useBalance({
@@ -918,23 +927,23 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   function stepLabel() {
     if (!isConnected) return 'Connect Wallet'
     if (!amount0 && !amount1) return 'Enter amounts'
-    if (!amount1) return `Enter ${selectedPool.token1} amount`
-    if (!amount0) return `Enter ${selectedPool.token0} amount`
-    if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
-    if (step === 'approve1' || step === 'approve1_wait') return `Approving ${selectedPool.token1}…`
+    if (!amount1) return `Enter ${dispEthSym(selectedPool.token1)} amount`
+    if (!amount0) return `Enter ${dispEthSym(selectedPool.token0)} amount`
+    if (step === 'approve0' || step === 'approve0_wait') return `Approving ${dispEthSym(selectedPool.token0)}…`
+    if (step === 'approve1' || step === 'approve1_wait') return `Approving ${dispEthSym(selectedPool.token1)}…`
     if (step === 'addliq'   || step === 'addliq_wait')  return 'Adding Liquidity…'
     if (step === 'done') return '✓ Liquidity Added!'
-    if (needApprove0) return `1. Approve ${selectedPool.token0}`
-    if (needApprove1) return `2. Approve ${selectedPool.token1}`
+    if (needApprove0) return `1. Approve ${dispEthSym(selectedPool.token0)}`
+    if (needApprove1) return `2. Approve ${dispEthSym(selectedPool.token1)}`
     return 'Add Liquidity'
   }
 
   function progressSteps() {
     const steps = [] as { label: string, done: boolean, active: boolean }[]
     if (needApprove0 || ['approve0', 'approve0_wait'].includes(step))
-      steps.push({ label: `Approve ${selectedPool.token0}`, done: !needApprove0 || ['approve1', 'approve1_wait', 'addliq', 'addliq_wait', 'done'].includes(step), active: step === 'approve0' || step === 'approve0_wait' })
+      steps.push({ label: `Approve ${dispEthSym(selectedPool.token0)}`, done: !needApprove0 || ['approve1', 'approve1_wait', 'addliq', 'addliq_wait', 'done'].includes(step), active: step === 'approve0' || step === 'approve0_wait' })
     if (needApprove1 || ['approve1', 'approve1_wait'].includes(step))
-      steps.push({ label: `Approve ${selectedPool.token1}`, done: !needApprove1 || ['addliq', 'addliq_wait', 'done'].includes(step), active: step === 'approve1' || step === 'approve1_wait' })
+      steps.push({ label: `Approve ${dispEthSym(selectedPool.token1)}`, done: !needApprove1 || ['addliq', 'addliq_wait', 'done'].includes(step), active: step === 'approve1' || step === 'approve1_wait' })
     steps.push({ label: 'Add Liquidity', done: step === 'done', active: step === 'addliq' || step === 'addliq_wait' })
     return steps
   }
@@ -1005,32 +1014,32 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
             <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Deposit Amounts</div>
             <div className="bg-bg-raised rounded-xl p-3">
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-text-muted">{selectedPool.token0}</span>
+                <span className="text-xs text-text-muted">{dispEthSym(selectedPool.token0)}</span>
                 <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal0.formatted !== '—' && handleAmount0Change(bal0.formatted.replace(',', ''))}>
                   Balance: {bal0.formatted}
                 </button>
               </div>
               <div className="flex items-center gap-2">
                 <input type="number" value={amount0} onChange={e => handleAmount0Change(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
-                <span className="text-sm font-bold text-text-secondary">{selectedPool.token0}</span>
+                <span className="text-sm font-bold text-text-secondary">{dispEthSym(selectedPool.token0)}</span>
               </div>
             </div>
             <div className="flex justify-center"><span className="text-text-muted text-sm">+</span></div>
             <div className="bg-bg-raised rounded-xl p-3">
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-text-muted">{selectedPool.token1}</span>
+                <span className="text-xs text-text-muted">{dispEthSym(selectedPool.token1)}</span>
                 <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal1.formatted !== '—' && handleAmount1Change(bal1.formatted.replace(',', ''))}>
                   Balance: {bal1.formatted}
                 </button>
               </div>
               <div className="flex items-center gap-2">
                 <input type="number" value={amount1} onChange={e => handleAmount1Change(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none" />
-                <span className="text-sm font-bold text-text-secondary">{selectedPool.token1}</span>
+                <span className="text-sm font-bold text-text-secondary">{dispEthSym(selectedPool.token1)}</span>
               </div>
             </div>
             {currentPrice && (
               <div className="text-2xs text-text-muted text-center font-mono">
-                1 {selectedPool.token0} = {currentPrice < 0.001 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} {selectedPool.token1}
+                1 {dispEthSym(selectedPool.token0)} = {currentPrice < 0.001 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} {dispEthSym(selectedPool.token1)}
               </div>
             )}
           </div>
@@ -1094,12 +1103,12 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
 
           {amount0Wei > 0n && bal0.raw > 0n && amount0Wei > bal0.raw && (
             <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
-              ⚠ Insufficient {selectedPool.token0} balance. You have {bal0.formatted}.
+              ⚠ Insufficient {dispEthSym(selectedPool.token0)} balance. You have {bal0.formatted}.
             </div>
           )}
           {amount1Wei > 0n && bal1.raw > 0n && amount1Wei > bal1.raw && (
             <div className="p-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-xs text-yellow-400">
-              ⚠ Insufficient {selectedPool.token1} balance. You have {bal1.formatted}.
+              ⚠ Insufficient {dispEthSym(selectedPool.token1)} balance. You have {bal1.formatted}.
             </div>
           )}
 
@@ -1139,11 +1148,11 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
                 <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">You Receive</div>
                 <div className="space-y-2">
                   <div className="flex justify-between">
-                    <span className="text-sm text-text-muted">{selectedPool.token0}</span>
+                    <span className="text-sm text-text-muted">{dispEthSym(selectedPool.token0)}</span>
                     <span className="font-mono text-text-primary">{lpBal > 0n ? parseFloat(formatUnits(recv0, token0Dec)).toFixed(6) : '—'}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-sm text-text-muted">{selectedPool.token1}</span>
+                    <span className="text-sm text-text-muted">{dispEthSym(selectedPool.token1)}</span>
                     <span className="font-mono text-text-primary">{lpBal > 0n ? parseFloat(formatUnits(recv1, token1Dec)).toFixed(6) : '—'}</span>
                   </div>
                 </div>
@@ -1632,12 +1641,12 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
     if (!isConnected) return 'Connect Wallet'
     if (!poolInitialized) return 'Pool not initialized'
     if (mintAmount0Wei === 0n && mintAmount1Wei === 0n) return 'Enter an amount'
-    if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
-    if (step === 'approve1' || step === 'approve1_wait') return `Approving ${selectedPool.token1}…`
+    if (step === 'approve0' || step === 'approve0_wait') return `Approving ${dispEthSym(selectedPool.token0)}…`
+    if (step === 'approve1' || step === 'approve1_wait') return `Approving ${dispEthSym(selectedPool.token1)}…`
     if (step === 'mint' || step === 'mint_wait') return 'Minting Position…'
     if (step === 'done') return '✓ Position Minted!'
-    if (needApprove0 && mintAmount0Wei > 0n) return `1. Approve ${selectedPool.token0}`
-    if (needApprove1 && mintAmount1Wei > 0n) return `2. Approve ${selectedPool.token1}`
+    if (needApprove0 && mintAmount0Wei > 0n) return `1. Approve ${dispEthSym(selectedPool.token0)}`
+    if (needApprove1 && mintAmount1Wei > 0n) return `2. Approve ${dispEthSym(selectedPool.token1)}`
     return 'Add Concentrated Liquidity'
   }
 
@@ -1717,7 +1726,7 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
             <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Price Range</div>
             {displayCurrentPrice !== null && (
               <div className="text-2xs text-text-muted text-center font-mono">
-                Current Price: 1 {selectedPool.token0} = {displayCurrentPrice < 0.001 ? displayCurrentPrice.toExponential(2) : displayCurrentPrice.toFixed(6)} {selectedPool.token1}
+                Current Price: 1 {dispEthSym(selectedPool.token0)} = {displayCurrentPrice < 0.001 ? displayCurrentPrice.toExponential(2) : displayCurrentPrice.toFixed(6)} {dispEthSym(selectedPool.token1)}
               </div>
             )}
             <div className="grid grid-cols-5 gap-2">
@@ -1736,7 +1745,7 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
             {isCustomRange && (
               <div className="grid grid-cols-2 gap-2 pt-1">
                 <div>
-                  <label className="text-2xs text-text-muted mb-1 block">Min Price ({selectedPool.token1} per {selectedPool.token0})</label>
+                  <label className="text-2xs text-text-muted mb-1 block">Min Price ({dispEthSym(selectedPool.token1)} per {dispEthSym(selectedPool.token0)})</label>
                   <div className="flex items-center gap-1.5">
                     <input type="number" value={customMin} onChange={e => setCustomMin(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2 font-mono" />
                     {displayCurrentPrice !== null && (
@@ -1745,7 +1754,7 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
                   </div>
                 </div>
                 <div>
-                  <label className="text-2xs text-text-muted mb-1 block">Max Price ({selectedPool.token1} per {selectedPool.token0})</label>
+                  <label className="text-2xs text-text-muted mb-1 block">Max Price ({dispEthSym(selectedPool.token1)} per {dispEthSym(selectedPool.token0)})</label>
                   <div className="flex items-center gap-1.5">
                     <input type="number" value={customMax} onChange={e => setCustomMax(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2 font-mono" />
                     {displayCurrentPrice !== null && (
@@ -1764,7 +1773,7 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
                   </div>
                 ) : rangeDisplayLow !== null && rangeDisplayHigh !== null ? (
                   <div className="text-sm font-mono font-semibold text-text-primary">
-                    {rangeDisplayLow.toPrecision(6)} <span className="text-text-muted">→</span> {rangeDisplayHigh.toPrecision(6)} {selectedPool.token1}
+                    {rangeDisplayLow.toPrecision(6)} <span className="text-text-muted">→</span> {rangeDisplayHigh.toPrecision(6)} {dispEthSym(selectedPool.token1)}
                   </div>
                 ) : null}
                 <div className="text-2xs text-text-muted font-mono mt-0.5">tick [{tickLower}, {tickUpper}] · current tick {currentTick}</div>
@@ -1783,27 +1792,27 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
             <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Deposit Amounts</div>
             <div className={clsx('bg-bg-raised rounded-xl p-3', displaySide === 'display1' && 'opacity-40')}>
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-text-muted">{selectedPool.token0}</span>
+                <span className="text-xs text-text-muted">{dispEthSym(selectedPool.token0)}</span>
                 <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal0.formatted !== '—' && handleAmount0Change(bal0.formatted.replace(',', ''))}>
                   Balance: {bal0.formatted}
                 </button>
               </div>
               <div className="flex items-center gap-2">
                 <input disabled={displaySide === 'display1'} type="number" value={amount0} onChange={e => handleAmount0Change(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:cursor-not-allowed" />
-                <span className="text-sm font-bold text-text-secondary">{selectedPool.token0}</span>
+                <span className="text-sm font-bold text-text-secondary">{dispEthSym(selectedPool.token0)}</span>
               </div>
             </div>
             <div className="flex justify-center"><span className="text-text-muted text-sm">+</span></div>
             <div className={clsx('bg-bg-raised rounded-xl p-3', displaySide === 'display0' && 'opacity-40')}>
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-text-muted">{selectedPool.token1}</span>
+                <span className="text-xs text-text-muted">{dispEthSym(selectedPool.token1)}</span>
                 <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal1.formatted !== '—' && handleAmount1Change(bal1.formatted.replace(',', ''))}>
                   Balance: {bal1.formatted}
                 </button>
               </div>
               <div className="flex items-center gap-2">
                 <input disabled={displaySide === 'display0'} type="number" value={amount1} onChange={e => handleAmount1Change(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:cursor-not-allowed" />
-                <span className="text-sm font-bold text-text-secondary">{selectedPool.token1}</span>
+                <span className="text-sm font-bold text-text-secondary">{dispEthSym(selectedPool.token1)}</span>
               </div>
             </div>
           </div>
@@ -1840,13 +1849,13 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
                 {(needApprove0 && mintAmount0Wei > 0n) && (
                   <div className="flex items-center gap-3">
                     {['approve1', 'approve1_wait', 'mint', 'mint_wait'].includes(step) ? <CheckCircle2 size={16} className="text-emerald-400 shrink-0" /> : <Loader2 size={16} className="text-aeon-400 animate-spin shrink-0" />}
-                    <span className="text-sm text-text-secondary">Approve {selectedPool.token0}</span>
+                    <span className="text-sm text-text-secondary">Approve {dispEthSym(selectedPool.token0)}</span>
                   </div>
                 )}
                 {(needApprove1 && mintAmount1Wei > 0n) && (
                   <div className="flex items-center gap-3">
                     {['mint', 'mint_wait'].includes(step) ? <CheckCircle2 size={16} className="text-emerald-400 shrink-0" /> : (step === 'approve1' || step === 'approve1_wait') ? <Loader2 size={16} className="text-aeon-400 animate-spin shrink-0" /> : <div className="w-4 h-4 rounded-full border border-bg-border shrink-0" />}
-                    <span className="text-sm text-text-secondary">Approve {selectedPool.token1}</span>
+                    <span className="text-sm text-text-secondary">Approve {dispEthSym(selectedPool.token1)}</span>
                   </div>
                 )}
                 <div className="flex items-center gap-3">
@@ -2285,12 +2294,12 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
   function stepLabel() {
     if (!isConnected) return 'Connect Wallet'
     if (amount0Wei === 0n && amount1Wei === 0n) return 'Enter amounts'
-    if (step === 'approve0' || step === 'approve0_wait') return `Approving ${selectedPool.token0}…`
-    if (step === 'approve1' || step === 'approve1_wait') return `Approving ${selectedPool.token1}…`
+    if (step === 'approve0' || step === 'approve0_wait') return `Approving ${dispEthSym(selectedPool.token0)}…`
+    if (step === 'approve1' || step === 'approve1_wait') return `Approving ${dispEthSym(selectedPool.token1)}…`
     if (step === 'addliq' || step === 'addliq_wait') return 'Adding Liquidity…'
     if (step === 'done') return '✓ Liquidity Added!'
-    if (needApprove0) return `1. Approve ${selectedPool.token0}`
-    if (needApprove1) return `2. Approve ${selectedPool.token1}`
+    if (needApprove0) return `1. Approve ${dispEthSym(selectedPool.token0)}`
+    if (needApprove1) return `2. Approve ${dispEthSym(selectedPool.token1)}`
     return 'Add Liquidity'
   }
 
@@ -2348,7 +2357,7 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
             <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Bin Range</div>
             {currentPrice !== null && (
               <div className="text-2xs text-text-muted text-center font-mono">
-                Current Price: 1 {selectedPool.token0} = {currentPrice < 0.001 || currentPrice >= 1_000_000_000 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} {selectedPool.token1} · active bin #{activeId}
+                Current Price: 1 {dispEthSym(selectedPool.token0)} = {currentPrice < 0.001 || currentPrice >= 1_000_000_000 ? currentPrice.toExponential(2) : currentPrice.toFixed(6)} {dispEthSym(selectedPool.token1)} · active bin #{activeId}
                 {(currentPrice < 1e-9 || currentPrice >= 1e9) && (
                   <span className="block mt-1 text-amber-400">⚠ This pool's active bin looks far from a realistic price — it may have been seeded incorrectly. Deposits here may not behave as expected.</span>
                 )}
@@ -2391,7 +2400,7 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
                   </div>
                 ) : rangeLowPrice !== null && rangeHighPrice !== null ? (
                   <div className="text-sm font-mono font-semibold text-text-primary">
-                    {rangeLowPrice.toPrecision(6)} <span className="text-text-muted">→</span> {rangeHighPrice.toPrecision(6)} {selectedPool.token1}
+                    {rangeLowPrice.toPrecision(6)} <span className="text-text-muted">→</span> {rangeHighPrice.toPrecision(6)} {dispEthSym(selectedPool.token1)}
                   </div>
                 ) : null}
                 <div className="text-2xs text-text-muted font-mono mt-0.5">
@@ -2410,27 +2419,27 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
             <div className="text-xs font-mono text-text-muted uppercase tracking-wider">Deposit Amounts</div>
             <div className={clsx('bg-bg-raised rounded-xl p-3', side === 'y' && 'opacity-40')}>
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-text-muted">{selectedPool.token0}</span>
+                <span className="text-xs text-text-muted">{dispEthSym(selectedPool.token0)}</span>
                 <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal0.formatted !== '—' && setAmount0(bal0.formatted.replace(',', ''))}>
                   Balance: {bal0.formatted}
                 </button>
               </div>
               <div className="flex items-center gap-2">
                 <input disabled={side === 'y'} type="number" value={amount0} onChange={e => setAmount0(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:cursor-not-allowed" />
-                <span className="text-sm font-bold text-text-secondary">{selectedPool.token0}</span>
+                <span className="text-sm font-bold text-text-secondary">{dispEthSym(selectedPool.token0)}</span>
               </div>
             </div>
             <div className="flex justify-center"><span className="text-text-muted text-sm">+</span></div>
             <div className={clsx('bg-bg-raised rounded-xl p-3', side === 'x' && 'opacity-40')}>
               <div className="flex justify-between mb-1">
-                <span className="text-xs text-text-muted">{selectedPool.token1}</span>
+                <span className="text-xs text-text-muted">{dispEthSym(selectedPool.token1)}</span>
                 <button className="text-xs text-text-muted font-mono hover:text-aeon-400" onClick={() => bal1.formatted !== '—' && setAmount1(bal1.formatted.replace(',', ''))}>
                   Balance: {bal1.formatted}
                 </button>
               </div>
               <div className="flex items-center gap-2">
                 <input disabled={side === 'x'} type="number" value={amount1} onChange={e => setAmount1(e.target.value)} placeholder="0.0" className="flex-1 bg-transparent text-xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:cursor-not-allowed" />
-                <span className="text-sm font-bold text-text-secondary">{selectedPool.token1}</span>
+                <span className="text-sm font-bold text-text-secondary">{dispEthSym(selectedPool.token1)}</span>
               </div>
             </div>
             <div className="text-2xs text-text-muted leading-relaxed pt-1">
@@ -2476,13 +2485,13 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
                 {needApprove0 && (
                   <div className="flex items-center gap-3">
                     {['approve1', 'approve1_wait', 'addliq', 'addliq_wait'].includes(step) ? <CheckCircle2 size={16} className="text-emerald-400 shrink-0" /> : <Loader2 size={16} className="text-aeon-400 animate-spin shrink-0" />}
-                    <span className="text-sm text-text-secondary">Approve {selectedPool.token0}</span>
+                    <span className="text-sm text-text-secondary">Approve {dispEthSym(selectedPool.token0)}</span>
                   </div>
                 )}
                 {needApprove1 && (
                   <div className="flex items-center gap-3">
                     {['addliq', 'addliq_wait'].includes(step) ? <CheckCircle2 size={16} className="text-emerald-400 shrink-0" /> : (step === 'approve1' || step === 'approve1_wait') ? <Loader2 size={16} className="text-aeon-400 animate-spin shrink-0" /> : <div className="w-4 h-4 rounded-full border border-bg-border shrink-0" />}
-                    <span className="text-sm text-text-secondary">Approve {selectedPool.token1}</span>
+                    <span className="text-sm text-text-secondary">Approve {dispEthSym(selectedPool.token1)}</span>
                   </div>
                 )}
                 <div className="flex items-center gap-3">
