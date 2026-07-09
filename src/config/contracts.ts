@@ -17,7 +17,23 @@ export const CONTRACTS = {
   EmissionsEngine:     '0xf34feaA8a05b81D8FC0c66cA8F0621475e88C8b6' as `0x${string}`,
   AeonOracle:          '0x5A1E28EE00C4e83De000C7ffa5b59B22B45BD9BD' as `0x${string}`,
   ConstantUsdFeed:     '0x182e8039659F8110D47a87BEad1FAAaEf981781d' as `0x${string}`,
+  // Old factory (2026-07-02 genesis deploy) has an AeonPoolRH baked into its
+  // createPool() bytecode from before fee accounting (poolFees/claimFees)
+  // existed -- confirmed via those calls reverting with no matching
+  // selector on all 9 pools it's ever created. Real third-party LP is
+  // staked in at least 2 of those pools' gauges, so migrating them isn't
+  // something to do without those users' own action -- left fully
+  // functional (swap/add/remove all still work), just kept for READS
+  // (existing-pool lookups, useAllPools discovery of its already-created
+  // pools) rather than new pool creation.
   AeonFactory:         '0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6' as `0x${string}`,
+  // Deployed 2026-07-09: fresh factory using the current AeonPoolRH (real
+  // fee accounting from pool #1) -- verified via fork test before
+  // deploying (poolFees() resolves to a real, nonzero companion contract).
+  // Create Pool now targets THIS factory exclusively, so every
+  // permissionlessly-created pool going forward has working fee routing
+  // to voters, without touching any existing pool or its LPs.
+  AeonFactoryV2:       '0xE27EA15dF9e69ce06aB8ee5a2029BD699f9cF9fC' as `0x${string}`,
   AeonRouter:          '0x4d188106175De919a971B0cB6F8A0e3E885a3410' as `0x${string}`,
   // Redeployed 2026-07-03: the original LiquidityHelperRH gated addLiquidity()
   // behind a 100 AEON whitelist payment. Removed entirely per product decision

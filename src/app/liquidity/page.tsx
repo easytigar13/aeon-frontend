@@ -518,11 +518,20 @@ function CreatePoolView({ onCreated }: { onCreated: (address: string) => void })
   const decimalsA = (decARaw as number | undefined) ?? 18
   const decimalsB = (decBRaw as number | undefined) ?? 18
 
-  const { data: existingPoolRaw } = useReadContract({
+  // Check BOTH factories -- the old one already has 9 real pools, the new
+  // one is where creation actually happens now. A pair could exist in
+  // either, and missing the old factory here would let someone create a
+  // duplicate/competing pool for a pair that already has real liquidity.
+  const dupCheckArgs = (validA && validB && !sameToken) ? [tokenA as `0x${string}`, tokenB as `0x${string}`, feeBps] as const : undefined
+  const { data: existingPoolOldRaw } = useReadContract({
     address: CONTRACTS.AeonFactory, abi: AEON_FACTORY_ABI, functionName: 'getPoolFor',
-    args: (validA && validB && !sameToken) ? [tokenA as `0x${string}`, tokenB as `0x${string}`, feeBps] : undefined,
-    query: { enabled: validA && validB && !sameToken },
+    args: dupCheckArgs, query: { enabled: !!dupCheckArgs },
   })
+  const { data: existingPoolNewRaw } = useReadContract({
+    address: CONTRACTS.AeonFactoryV2, abi: AEON_FACTORY_ABI, functionName: 'getPoolFor',
+    args: dupCheckArgs, query: { enabled: !!dupCheckArgs },
+  })
+  const existingPoolRaw = (existingPoolOldRaw && (existingPoolOldRaw as string) !== ZERO_ADDR) ? existingPoolOldRaw : existingPoolNewRaw
   const poolExists = existingPoolRaw && (existingPoolRaw as string) !== ZERO_ADDR
 
   function safeParseUnits(val: string, dec: number): bigint {
@@ -546,7 +555,7 @@ function CreatePoolView({ onCreated }: { onCreated: (address: string) => void })
   const { isSuccess: txSuccess } = useWaitForTransactionReceipt({ hash: txHash, query: { enabled: !!txHash } })
 
   const { data: poolLookup, refetch: refetchPoolLookup } = useReadContract({
-    address: CONTRACTS.AeonFactory, abi: AEON_FACTORY_ABI, functionName: 'getPoolFor',
+    address: CONTRACTS.AeonFactoryV2, abi: AEON_FACTORY_ABI, functionName: 'getPoolFor',
     args: (validA && validB) ? [tokenA as `0x${string}`, tokenB as `0x${string}`, feeBps] : undefined,
     query: { enabled: false },
   })
@@ -580,7 +589,7 @@ function CreatePoolView({ onCreated }: { onCreated: (address: string) => void })
     setErrMsg('')
     if (step === 'approveA') { writeContract({ address: tokenA as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [HELPER, amountAWei] }); setStep('approveA_wait') }
     if (step === 'approveB') { writeContract({ address: tokenB as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [HELPER, amountBWei] }); setStep('approveB_wait') }
-    if (step === 'create')   { writeContract({ address: CONTRACTS.AeonFactory, abi: AEON_FACTORY_ABI, functionName: 'createPool', args: [tokenA as `0x${string}`, tokenB as `0x${string}`, feeBps] }); setStep('create_wait') }
+    if (step === 'create')   { writeContract({ address: CONTRACTS.AeonFactoryV2, abi: AEON_FACTORY_ABI, functionName: 'createPool', args: [tokenA as `0x${string}`, tokenB as `0x${string}`, feeBps] }); setStep('create_wait') }
   }, [step])
 
   // addLiquidity needs the pool's real on-chain token0/token1 order, which

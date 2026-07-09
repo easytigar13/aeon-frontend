@@ -63,26 +63,40 @@ const STATIC_PAIR_FEE_KEYS = new Set(
     .filter((k): k is string => !!k),
 )
 
-/// Every real vAMM pool from AeonFactoryRH.allPools() that ISN'T already one
-/// of the hardcoded POOLS entries. Merge with POOLS yourself at the call site
-/// (`[...POOLS, ...discovered]`) -- kept separate here so existing static
-/// pool ordering/identity isn't disturbed for anything already relying on it.
+// Both factories -- the old one (genesis, pre-fee-accounting-fix) already
+// has 9 real pools registered; the new one (2026-07-09) is where creation
+// happens now. A pool could exist in either, so discovery has to scan both
+// or a pool someone creates via the new factory would stay invisible.
+const FACTORIES = [CONTRACTS.AeonFactory, CONTRACTS.AeonFactoryV2] as const
+
+/// Every real vAMM pool from either AeonFactoryRH's allPools() that ISN'T
+/// already one of the hardcoded POOLS entries. Merge with POOLS yourself at
+/// the call site (`[...POOLS, ...discovered]`) -- kept separate here so
+/// existing static pool ordering/identity isn't disturbed for anything
+/// already relying on it.
 export function useAllPools(): { discovered: DiscoveredPool[]; isLoading: boolean } {
-  const { data: len } = useReadContract({
-    address: CONTRACTS.AeonFactory,
-    abi: AEON_FACTORY_ABI,
-    functionName: 'allPoolsLength',
+  const { data: lenResults } = useReadContracts({
+    contracts: FACTORIES.map(f => ({ address: f, abi: AEON_FACTORY_ABI, functionName: 'allPoolsLength' as const })),
   })
 
-  const count = len !== undefined ? Number(len) : 0
+  const counts = useMemo(
+    () => FACTORIES.map((_, i) => {
+      const r = lenResults?.[i]
+      return r?.status === 'success' ? Number(r.result as bigint) : 0
+    }),
+    [lenResults],
+  )
+  const totalCount = counts.reduce((a, b) => a + b, 0)
 
   const idxContracts = useMemo(
-    () => Array.from({ length: count }, (_, i) => ({
-      address: CONTRACTS.AeonFactory, abi: AEON_FACTORY_ABI, functionName: 'allPools' as const, args: [BigInt(i)] as const,
-    })),
-    [count],
+    () => FACTORIES.flatMap((factory, fi) =>
+      Array.from({ length: counts[fi] }, (_, i) => ({
+        address: factory, abi: AEON_FACTORY_ABI, functionName: 'allPools' as const, args: [BigInt(i)] as const,
+      })),
+    ),
+    [counts],
   )
-  const { data: addrResults } = useReadContracts({ contracts: idxContracts, query: { enabled: count > 0 } })
+  const { data: addrResults } = useReadContracts({ contracts: idxContracts, query: { enabled: totalCount > 0 } })
 
   const poolAddrs = useMemo(
     () => (addrResults ?? [])
@@ -146,7 +160,7 @@ export function useAllPools(): { discovered: DiscoveredPool[]; isLoading: boolea
     return out
   }, [newAddrs, metaResults, unknownTokenAddrs, symbolResults])
 
-  const isLoading = count > 0 && (!addrResults || (newAddrs.length > 0 && !metaResults))
+  const isLoading = totalCount > 0 && (!addrResults || (newAddrs.length > 0 && !metaResults))
 
   return { discovered, isLoading }
 }
