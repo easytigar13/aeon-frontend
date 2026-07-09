@@ -204,7 +204,6 @@ export const POOLS = [
   { name: 'CASHCAT/USDG (Old)', token0: 'CASHCAT', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xb55dadbFb20912466F2961cF466f331Fe98706F1' as `0x${string}` },
   { name: 'ROBINFUN/ETH (Old)',  token0: 'ROBINFUN', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x0B499B8c6BA886090ADd7C21f8e1810BDDD8277D' as `0x${string}` },
   { name: 'ROBINFUN/USDG (Old)', token0: 'ROBINFUN', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xd4F8574d3bC25FE20195Ce58a47d61D79bA7504b' as `0x${string}` },
-  { name: 'SLEEP/AEON (Old)',    token0: 'SLEEP',    token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xDF769bF01Ee70e2F86adC0417E0717D32c4586be' as `0x${string}` },
   { name: 'CASHCAT/ROBINFUN (Old)', token0: 'CASHCAT', token1: 'ROBINFUN', type: 'vAMM', fee: '1%', address: '0x35Bd4b5d17192649098aec846c790178A84A982b' as `0x${string}` },
 
   // ── Fresh replacements, deployed 2026-07-09 via AeonFactoryV2
