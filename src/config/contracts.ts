@@ -201,6 +201,11 @@ export const TOKENS = {
   // no price/volume data yet elsewhere on this chain) — added 2026-07-08 at
   // the user's request, with an AEON vAMM pool
   SLEEP: { address: '0x84864dbA3e1dFffcaf3d39c44f12833897Cf5B06' as `0x${string}`, symbol: 'SLEEP', decimals: 18, name: "Don't Sleep" },
+  // real, independently-deployed token (verified via Blockscout: 106 holders;
+  // DexScreener: real Uniswap V3 SHERWOOD/WETH pair on this chain, ~$13K
+  // liquidity, ~$75K/24h volume) — added 2026-07-10 at the user's request,
+  // with an AEON vAMM pool
+  SHERWOOD: { address: '0xB3b78ca800C5327a21F03f0636d9A08A103787fD' as `0x${string}`, symbol: 'SHERWOOD', decimals: 18, name: 'Sherwood Online' },
 } as const
 
 // Migrated 2026-07-03: the genesis vAMM pools had no way to ever claim swap
@@ -233,6 +238,11 @@ export const POOLS = [
   { name: 'ROBINFUN/ETH',  token0: 'ROBINFUN', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x625fcD4CA1cA34Eb8ac74883748419De037d78DF' as `0x${string}` },
   { name: 'ROBINFUN/USDG', token0: 'ROBINFUN', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xB60d3Dea956204c6731cA22622bE2b8bEFac4029' as `0x${string}` },
   { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT', token1: 'ROBINFUN', type: 'vAMM', fee: '1%', address: '0x8Ca7acDe0218B5A905dC29CC9d650fadC706Fd9E' as `0x${string}` },
+  // Deployed 2026-07-10 via AeonFactoryV2 at the user's request (real gauge
+  // created too -- verified voter.gauges(pool) resolves to it on-chain).
+  // Empty until someone adds liquidity -- deployer wallet holds ~0.24 AEON
+  // and 0 SHERWOOD, not enough to seed it.
+  { name: 'SHERWOOD/AEON', token0: 'SHERWOOD', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xB4692A778E33fBA0B97Feaa863377C6322c83AA4' as `0x${string}` },
 ]
 
 // Real, working pools deliberately excluded from the Liquidity page's
