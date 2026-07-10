@@ -1284,12 +1284,15 @@ export default function EarnPage() {
   const tvlByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
   const volResult = useVolume24h(prices)
 
+  // Trailing-week average, not literal 24h -- see useVolume24h's byPoolWeek
+  // comment for why (a pool with real but sporadic trading shouldn't show
+  // "—%" just because nothing happened to trade in the exact last 24h).
   const aprByAddr: Record<string, number | null> = {}
   for (const pool of UNIQUE_POOLS) {
     const tvl = tvlByAddr[pool.address] ?? null
-    const vol = volResult.byPool[pool.address.toLowerCase()] ?? null
-    aprByAddr[pool.address] = (tvl && tvl > 0 && vol !== null)
-      ? (vol * parseFeeRate(pool.fee) * 365 / tvl) * 100
+    const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
+    aprByAddr[pool.address] = (tvl && tvl > 0 && volWeek !== null)
+      ? (volWeek * parseFeeRate(pool.fee) * (365 / 7) / tvl) * 100
       : null
   }
 

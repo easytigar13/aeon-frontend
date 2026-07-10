@@ -113,7 +113,9 @@ const DLMM_TOKENX_CONTRACTS = DLMM_ADDRESSES.map(addr => ({ address: addr, abi: 
 const SAMPLE_BLOCKS = 2000n
 const FALLBACK_BLOCKS_24H = 43200n // used only if the timestamp measurement itself fails
 
-async function blocksFor24h(client: NonNullable<ReturnType<typeof usePublicClient>>): Promise<bigint> {
+// Shared by both the 24h and 7d windows -- same block-time measurement,
+// just a different target duration in seconds.
+async function blocksForDuration(client: NonNullable<ReturnType<typeof usePublicClient>>, seconds: number, fallback: bigint): Promise<bigint> {
   try {
     const latest = await client.getBlockNumber()
     if (latest <= SAMPLE_BLOCKS) return latest
@@ -122,18 +124,33 @@ async function blocksFor24h(client: NonNullable<ReturnType<typeof usePublicClien
       client.getBlock({ blockNumber: latest - SAMPLE_BLOCKS }),
     ])
     const dtSeconds = Number(latestBlock.timestamp - oldBlock.timestamp)
-    if (dtSeconds <= 0) return FALLBACK_BLOCKS_24H
+    if (dtSeconds <= 0) return fallback
     const secondsPerBlock = dtSeconds / Number(SAMPLE_BLOCKS)
-    const blocks = BigInt(Math.ceil(86400 / secondsPerBlock))
+    const blocks = BigInt(Math.ceil(seconds / secondsPerBlock))
     return blocks < latest ? blocks : latest
   } catch {
-    return FALLBACK_BLOCKS_24H
+    return fallback
   }
+}
+
+const FALLBACK_BLOCKS_7D = FALLBACK_BLOCKS_24H * 7n
+
+async function blocksFor24h(client: NonNullable<ReturnType<typeof usePublicClient>>): Promise<bigint> {
+  return blocksForDuration(client, 86400, FALLBACK_BLOCKS_24H)
+}
+
+async function blocksFor7d(client: NonNullable<ReturnType<typeof usePublicClient>>): Promise<bigint> {
+  return blocksForDuration(client, 604800, FALLBACK_BLOCKS_7D)
 }
 
 export interface VolumeResult {
   total: number | null
   byPool: Record<string, number>
+  // Same real on-chain volume, just summed over a full trailing week instead
+  // of 24h -- used for APR so a pool with real-but-sporadic trading (nothing
+  // in the exact last 24h, but real swaps 2-3 days ago) doesn't show a
+  // misleading "—%" just because nothing happened to trade very recently.
+  byPoolWeek: Record<string, number>
   // token key -> chronological execution prices in USD, derived from real
   // Swap events on that token's direct USDG-paired vAMM pool (USDG ~= $1).
   // No third-party indexer involved — this is the same log fetch above,
@@ -163,48 +180,39 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
   })
   onChainToken0Ref.current = token0Map
 
-  const [result, setResult] = useState<VolumeResult>({ total: null, byPool: {}, priceHistory: {} })
+  const [result, setResult] = useState<VolumeResult>({ total: null, byPool: {}, byPoolWeek: {}, priceHistory: {} })
 
   useEffect(() => {
     if (!client) return
     let cancelled = false
 
-    async function fetchVolume() {
-      let logs: any[] = []
-      let succeeded  = false
-
-      try {
-        const currentBlock = await client!.getBlockNumber()
-        const primaryRange = await blocksFor24h(client!)
-        // Try the measured 24h range first; degrade to smaller windows only
-        // if the RPC itself rejects the range (e.g. a provider-side cap) —
-        // never silently accept a narrower window when the wide one just
-        // returned zero results, since "no real trades" and "range too
-        // small to see them" look identical otherwise.
-        const candidateRanges = [...new Set([primaryRange, 43200n, 10000n, 2048n, 512n])]
-
-        for (const range of candidateRanges) {
-          const fromBlock = currentBlock > range ? currentBlock - range : 0n
-          try {
-            logs = await (client as any).getLogs({
-              address: ALL_ADDRESSES,
-              topics:  [[SWAP_TOPIC, CL_SWAP_TOPIC, LB_SWAP_TOPIC]], // OR match on topic0
-              fromBlock,
-              toBlock: currentBlock,
-            })
-            succeeded = true
-            break
-          } catch {
-            // try next smaller range
-          }
+    // Shared candidate-range search: try the measured window first, degrade
+    // to smaller windows only if the RPC itself rejects the range (e.g. a
+    // provider-side cap) — never silently accept a narrower window when the
+    // wide one just returned zero results, since "no real trades" and
+    // "range too small to see them" look identical otherwise.
+    async function fetchLogsForRange(primaryRange: bigint, currentBlock: bigint): Promise<any[]> {
+      const candidateRanges = [...new Set([primaryRange, 43200n, 10000n, 2048n, 512n])]
+      for (const range of candidateRanges) {
+        const fromBlock = currentBlock > range ? currentBlock - range : 0n
+        try {
+          return await (client as any).getLogs({
+            address: ALL_ADDRESSES,
+            topics:  [[SWAP_TOPIC, CL_SWAP_TOPIC, LB_SWAP_TOPIC]], // OR match on topic0
+            fromBlock,
+            toBlock: currentBlock,
+          })
+        } catch {
+          // try next smaller range
         }
-      } catch (e) {
-        console.warn('useVolume24h: getBlockNumber failed', e)
       }
+      throw new Error('all candidate ranges failed')
+    }
 
-      if (!succeeded || cancelled) return
-
-      const p = pricesRef.current
+    // Decode a batch of logs into {totalUsd, byPool, priceHistory} — shared
+    // by both the 24h and 7d windows, since the decode logic doesn't care
+    // how wide the range was.
+    function processLogs(logs: any[], p: PriceMap) {
       let totalUsd = 0
       const byPool: Record<string, number> = {}
       const priceHistory: Record<string, number[]> = {}
@@ -303,7 +311,34 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
 
       priceHistory['ETH'] = priceHistory['WETH'] ?? []
 
-      setResult({ total: totalUsd, byPool, priceHistory })
+      return { totalUsd, byPool, priceHistory }
+    }
+
+    async function fetchVolume() {
+      const currentBlock = await client!.getBlockNumber().catch(() => undefined)
+      if (currentBlock === undefined || cancelled) return
+
+      const [range24h, range7d] = await Promise.all([blocksFor24h(client!), blocksFor7d(client!)])
+
+      const [logs24h, logs7d] = await Promise.all([
+        fetchLogsForRange(range24h, currentBlock).catch(e => { console.warn('useVolume24h: 24h getLogs failed', e); return null }),
+        fetchLogsForRange(range7d,  currentBlock).catch(e => { console.warn('useVolume24h: 7d getLogs failed', e);  return null }),
+      ])
+
+      if (cancelled) return
+
+      const p = pricesRef.current
+      const day  = logs24h ? processLogs(logs24h, p) : null
+      const week = logs7d  ? processLogs(logs7d,  p) : null
+
+      if (!day && !week) return
+
+      setResult({
+        total:      day?.totalUsd ?? null,
+        byPool:     day?.byPool ?? {},
+        byPoolWeek: week?.byPool ?? {},
+        priceHistory: day?.priceHistory ?? week?.priceHistory ?? {},
+      })
     }
 
     fetchVolume()

@@ -38,6 +38,7 @@ export default function DashboardPage() {
   const volResult     = useVolume24h(prices)
   const volume24h = volResult.total
   const volByAddr = volResult.byPool
+  const volByAddrWeek = volResult.byPoolWeek
   const statByAddr = Object.fromEntries(poolStats.map(s => [s.address, s]))
 
   // Matches usePoolStats (30s) / usePrices (15s) / useVolume24h (60s) below --
@@ -284,10 +285,13 @@ export default function DashboardPage() {
               {POOLS.map(pool => {
                 const stat    = statByAddr[pool.address]
                 const vol     = volByAddr[pool.address.toLowerCase()] ?? null
+                const volWeek = volByAddrWeek[pool.address.toLowerCase()] ?? null
                 const tvl     = stat?.tvlUsd ?? null
                 const feePct  = parseFloat(pool.fee) / 100
-                const feeApr  = (vol !== null && tvl && tvl > 0)
-                  ? ((vol * feePct * 365) / tvl * 100).toFixed(1) + '%'
+                // Trailing-week average, not literal 24h -- see useVolume24h's
+                // byPoolWeek comment for why.
+                const feeApr  = (volWeek !== null && tvl && tvl > 0)
+                  ? ((volWeek * feePct * (365 / 7)) / tvl * 100).toFixed(1) + '%'
                   : '—'
 
                 return (

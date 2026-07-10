@@ -225,13 +225,16 @@ export default function VotePage() {
   const votesByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.votesFormatted]))
   const volResult   = useVolume24h(prices)
 
-  // Fee APR per pool: vol24h × feeRate × 365 / TVL × 100
+  // Fee APR per pool: trailing-week volume, not literal 24h -- a pool with
+  // real but sporadic trading shouldn't show "—%" just because nothing
+  // happened to trade in the exact last 24h. volWeek -> daily avg (÷7) ->
+  // annualized (×365) = ×(365/7).
   const aprByAddr: Record<string, number | null> = {}
   for (const pool of POOLS) {
     const tvl = tvlByAddr[pool.address] ?? null
-    const vol = volResult.byPool[pool.address.toLowerCase()] ?? null
-    aprByAddr[pool.address] = (tvl && tvl > 0 && vol !== null)
-      ? (vol * parseFeeRate(pool.fee) * 365 / tvl) * 100
+    const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
+    aprByAddr[pool.address] = (tvl && tvl > 0 && volWeek !== null)
+      ? (volWeek * parseFeeRate(pool.fee) * (365 / 7) / tvl) * 100
       : null
   }
 
@@ -251,11 +254,15 @@ export default function VotePage() {
   })
   const aeonPrice = prices['AEON'] ?? null
 
-  const totalFeesUSD24h = POOLS.reduce((sum, pool) => {
-    const vol = volResult.byPool[pool.address.toLowerCase()] ?? null
-    return vol !== null ? sum + vol * parseFeeRate(pool.fee) : sum
+  // Uses the real trailing-week fee total directly rather than extrapolating
+  // a single day's volume ×7 -- the old approach zeroed out the whole
+  // week's projection whenever today specifically had no volume, even with
+  // real trading earlier in the week.
+  const totalFeesUSDWeek = POOLS.reduce((sum, pool) => {
+    const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
+    return volWeek !== null ? sum + volWeek * parseFeeRate(pool.fee) : sum
   }, 0)
-  const projectedWeeklyToVoterUSD = (totalFeesUSD24h * 7 / 10) * 0.95 // EMISSION_RATIO=10, TO_VOTER_BPS=9500
+  const projectedWeeklyToVoterUSD = (totalFeesUSDWeek / 10) * 0.95 // EMISSION_RATIO=10, TO_VOTER_BPS=9500
 
   const vaprByAddr: Record<string, number | null> = {}
   for (const pool of POOLS) {

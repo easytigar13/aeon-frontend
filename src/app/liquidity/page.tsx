@@ -193,10 +193,16 @@ function usePoolListData(): UnifiedPool[] {
   const vamm: UnifiedPool[] = POOLS.map(p => {
     const tvlUsd = poolStats.find(s => s.address === p.address)?.tvlUsd ?? null
     const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
+    const volUsdWeek = volResult.byPoolWeek[p.address.toLowerCase()] ?? null
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
-    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsd !== null)
-      ? (volUsd * feeRate * 365 / tvlUsd) * 100
+    // APR uses a trailing-week average, not literal 24h volume -- a pool
+    // with real but sporadic trading (nothing in the exact last 24h, but
+    // real swaps 2-3 days ago) would otherwise show a misleading "—%" just
+    // because nothing happened to trade very recently. Weekly total -> daily
+    // average (÷7) -> annualized (×365) is equivalent to ×(365/7).
+    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsdWeek !== null)
+      ? (volUsdWeek * feeRate * (365 / 7) / tvlUsd) * 100
       : null
     return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, aprPct }
   })
@@ -211,13 +217,17 @@ function usePoolListData(): UnifiedPool[] {
     feeLabel: p.fee, tvlUsd: null, volUsd: null, feesUsd: null, aprPct: null,
   }))
 
+  // CL_POOLS/DLMM_POOLS are currently empty (see contracts.ts comment), so
+  // these two always produce []. Kept consistent with vamm's byPoolWeek APR
+  // fix above in case CL/DLMM ever comes back.
   const cl: UnifiedPool[] = CL_POOLS.map(p => {
     const tvlUsd = clPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
     const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
+    const volUsdWeek = volResult.byPoolWeek[p.address.toLowerCase()] ?? null
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
-    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsd !== null)
-      ? (volUsd * feeRate * 365 / tvlUsd) * 100
+    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsdWeek !== null)
+      ? (volUsdWeek * feeRate * (365 / 7) / tvlUsd) * 100
       : null
     return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, aprPct }
   })
@@ -225,10 +235,11 @@ function usePoolListData(): UnifiedPool[] {
   const dlmm: UnifiedPool[] = DLMM_POOLS.map(p => {
     const tvlUsd = dlmmPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
     const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
+    const volUsdWeek = volResult.byPoolWeek[p.address.toLowerCase()] ?? null
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
-    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsd !== null)
-      ? (volUsd * feeRate * 365 / tvlUsd) * 100
+    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsdWeek !== null)
+      ? (volUsdWeek * feeRate * (365 / 7) / tvlUsd) * 100
       : null
     return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, aprPct }
   })
@@ -953,11 +964,12 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
 
   const showProgress = isProcessing || step === 'done'
 
-  // ── APR estimate ──
-  const tvlUsd    = poolStats.find(s => s.address === selectedPool.address)?.tvlUsd ?? null
-  const dayVolUsd = volResult.byPool[selectedPool.address.toLowerCase()] ?? null
-  const baseApr   = (tvlUsd !== null && tvlUsd > 0 && dayVolUsd !== null)
-    ? (dayVolUsd * parseFeeRate(selectedPool.fee) * 365 / tvlUsd) * 100
+  // ── APR estimate ── trailing-week volume, not literal 24h -- see
+  // useVolume24h's byPoolWeek comment for why.
+  const tvlUsd     = poolStats.find(s => s.address === selectedPool.address)?.tvlUsd ?? null
+  const weekVolUsd = volResult.byPoolWeek[selectedPool.address.toLowerCase()] ?? null
+  const baseApr    = (tvlUsd !== null && tvlUsd > 0 && weekVolUsd !== null)
+    ? (weekVolUsd * parseFeeRate(selectedPool.fee) * (365 / 7) / tvlUsd) * 100
     : null
   const p0 = prices[selectedPool.token0] ?? null
   const p1 = prices[selectedPool.token1] ?? null

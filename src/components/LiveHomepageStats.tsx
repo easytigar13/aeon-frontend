@@ -35,15 +35,17 @@ export function LiveHomepageStats() {
     ? parseFloat(formatUnits(totalBurnedRaw as bigint, 18))
     : null
 
-  // Best fee APR across all unique pools as a proxy for "Epoch APR"
+  // Best fee APR across all unique pools as a proxy for "Epoch APR" -- uses
+  // trailing-week volume (not literal 24h) so a pool doesn't drop out of
+  // this just because nothing traded in the exact last 24h.
   const UNIQUE_POOLS = POOLS.filter((p, _, arr) => arr.findIndex(x => x.address === p.address) === arr.indexOf(p))
   let bestApr: number | null = null
   for (const pool of UNIQUE_POOLS) {
     const tvl = poolStats.find(s => s.address === pool.address)?.tvlUsd ?? null
-    const vol = volResult.byPool[pool.address.toLowerCase()] ?? null
-    if (tvl && tvl > 0 && vol !== null) {
+    const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
+    if (tvl && tvl > 0 && volWeek !== null) {
       const feeRate = parseFloat(pool.fee.replace('%', '')) / 100
-      const apr = (vol * feeRate * 365 / tvl) * 100
+      const apr = (volWeek * feeRate * (365 / 7) / tvl) * 100
       if (!bestApr || apr > bestApr) bestApr = apr
     }
   }
