@@ -40,12 +40,18 @@ export default function DashboardPage() {
   const volByAddr = volResult.byPool
   const statByAddr = Object.fromEntries(poolStats.map(s => [s.address, s]))
 
-  const { data: aeonSupply }    = useReadContract({ address: CONTRACTS.AeonToken,        abi: ERC20_ABI,          functionName: 'totalSupply' })
-  const { data: totalBurned }   = useReadContract({ address: CONTRACTS.TheFurnace,       abi: FURNACE_ABI,        functionName: 'totalBurned' })
-  const { data: veTokenCount }  = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId' })
-  const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight' })
-  const { data: weeklyEmissions } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount' })
-  const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.FeeDistributor,  abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD' })
+  // Matches usePoolStats (30s) / usePrices (15s) / useVolume24h (60s) below --
+  // these 6 reads used to fire once on mount and never again, so the top
+  // summary panels (Epoch Status, AEON Token, VotingEscrow, Furnace) went
+  // stale until a manual page reload while everything else on the page kept
+  // refreshing live.
+  const LIVE = { query: { refetchInterval: 60_000 } }
+  const { data: aeonSupply }    = useReadContract({ address: CONTRACTS.AeonToken,        abi: ERC20_ABI,          functionName: 'totalSupply', ...LIVE })
+  const { data: totalBurned }   = useReadContract({ address: CONTRACTS.TheFurnace,       abi: FURNACE_ABI,        functionName: 'totalBurned', ...LIVE })
+  const { data: veTokenCount }  = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId', ...LIVE })
+  const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight', ...LIVE })
+  const { data: weeklyEmissions } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount', ...LIVE })
+  const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.FeeDistributor,  abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD', ...LIVE })
 
   const WEEK_MS       = 7 * 24 * 60 * 60 * 1000
   const WEEK_S        = 7 * 24 * 60 * 60
