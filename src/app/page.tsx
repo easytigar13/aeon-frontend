@@ -3,6 +3,12 @@ import { ArrowRight, Flame, Lock, TrendingUp, Zap, Shield, Crown, AlertTriangle,
 import { LiveHomepageStats } from '@/components/LiveHomepageStats'
 import { FlywheelDiagram } from '@/components/FlywheelDiagram'
 import { Reveal } from '@/components/Reveal'
+import { POOLS } from '@/config/contracts'
+
+// Derived from POOLS instead of hardcoded -- the literal "11 Trading Pairs"
+// here already went stale once (the pool count grew from later additions
+// without this text being updated) before the 40 stock pools took it to 52.
+const uniquePoolCount = new Set(POOLS.map(p => p.address)).size
 
 export default function HomePage() {
   return (
@@ -425,7 +431,7 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 py-16">
         <Reveal className="text-center mb-12">
           <h2 className="font-display font-bold text-3xl text-text-primary mb-3">
-            11 Trading Pairs
+            {uniquePoolCount} Trading Pairs
           </h2>
           <p className="text-text-secondary">Standard vAMM pools — full-range liquidity, zero management, real fee-anchored emissions</p>
         </Reveal>
