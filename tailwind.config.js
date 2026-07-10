@@ -69,6 +69,10 @@ module.exports = {
         'count-up':     'countUp 0.5s ease-out forwards',
         'slide-up':     'slideUp 0.3s ease-out forwards',
         'fade-in':      'fadeIn 0.2s ease-out forwards',
+        'drift-a':      'driftA 26s ease-in-out infinite',
+        'drift-b':      'driftB 32s ease-in-out infinite',
+        'drift-c':      'driftC 22s ease-in-out infinite',
+        'shimmer':      'shimmer 2.5s linear infinite',
       },
       keyframes: {
         glow: {
@@ -82,6 +86,22 @@ module.exports = {
         fadeIn: {
           '0%':   { opacity: '0' },
           '100%': { opacity: '1' },
+        },
+        driftA: {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '50%':      { transform: 'translate(60px, 40px) scale(1.08)' },
+        },
+        driftB: {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '50%':      { transform: 'translate(-50px, 60px) scale(1.1)' },
+        },
+        driftC: {
+          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
+          '50%':      { transform: 'translate(40px, -50px) scale(1.06)' },
+        },
+        shimmer: {
+          '0%':   { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
         },
       },
       borderRadius: {

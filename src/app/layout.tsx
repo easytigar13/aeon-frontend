@@ -3,6 +3,7 @@ import { Inter, Space_Grotesk, Space_Mono } from 'next/font/google'
 import './globals.css'
 import { Providers } from './providers'
 import { Navbar } from '@/components/layout/Navbar'
+import { SiteBackdrop } from '@/components/layout/SiteBackdrop'
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ['latin'],
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`${spaceGrotesk.variable} ${inter.variable} ${spaceMono.variable}`}>
       <body className="bg-bg-base text-text-primary antialiased">
         <Providers>
+          <SiteBackdrop />
           <div className="min-h-screen flex flex-col">
             <Navbar />
             <main className="flex-1">
