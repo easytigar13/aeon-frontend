@@ -8,6 +8,17 @@ import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/h
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { CountUp } from '@/components/CountUp'
 
+// Same accent language as the dashboard's KPI cards (see dashboard/page.tsx's
+// ACCENT table) -- distinct color per stat instead of every card getting the
+// same flat gold hover glow. Full literal class strings (not built from a
+// template) since Tailwind's JIT scanner needs them present verbatim.
+const STAT_ACCENT = [
+  'hover:border-emerald-500/30 hover:shadow-[0_0_24px_-8px_rgba(16,185,129,0.4)]',  // TVL
+  'hover:border-aeon-400/30 hover:shadow-[0_0_24px_-8px_rgba(255,184,0,0.4)]',      // Price
+  'hover:border-red-500/30 hover:shadow-[0_0_24px_-8px_rgba(239,68,68,0.4)]',       // Burned
+  'hover:border-violet-500/30 hover:shadow-[0_0_24px_-8px_rgba(139,92,246,0.4)]',   // Best APR
+]
+
 function fmtUsd(n: number): string {
   if (n <= 0) return '$0'
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
@@ -81,7 +92,7 @@ export function LiveHomepageStats() {
       {stats.map((stat, i) => (
         <div
           key={stat.label}
-          className="card p-4 text-center transition-all duration-300 hover:border-aeon-400/30 hover:-translate-y-0.5 hover:shadow-[0_0_24px_rgba(255,184,0,0.08)] animate-fade-in"
+          className={`card p-4 text-center transition-all duration-300 hover:-translate-y-0.5 animate-fade-in ${STAT_ACCENT[i]}`}
           style={{ animationDelay: `${i * 80}ms`, animationFillMode: 'backwards' }}
         >
           <div className="stat-value text-2xl mb-1">{stat.node}</div>

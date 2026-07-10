@@ -121,10 +121,20 @@ export default function TokensPage() {
               ? (sparkline.length < 2 || sparkline[sparkline.length - 1] >= sparkline[0])
               : (change === null || change >= 0)
 
+            // Glow direction matches price change when we have one; falls back
+            // to a neutral gold glow (not red/green) for tokens with no
+            // price-change data yet, so "no data" doesn't visually read as
+            // "down".
+            const glowClass = change !== null
+              ? (positive
+                  ? 'hover:border-emerald-400/40 hover:shadow-[0_0_32px_-14px_rgba(16,185,129,0.4)]'
+                  : 'hover:border-red-400/40 hover:shadow-[0_0_32px_-14px_rgba(248,113,113,0.4)]')
+              : 'hover:border-aeon-400/40 hover:shadow-[0_0_32px_-14px_rgba(255,184,0,0.35)]'
+
             return (
               <div
                 key={key}
-                className="group flex flex-col bg-bg-surface border border-bg-border rounded-xl2 hover:border-aeon-400/40 hover:bg-aeon-glow transition-all duration-150 overflow-hidden"
+                className={`group flex flex-col bg-bg-surface border border-bg-border rounded-xl2 transition-all duration-200 hover:-translate-y-0.5 overflow-hidden ${glowClass}`}
               >
                 {/* Main info row */}
                 <div className="flex items-start justify-between p-4 pb-3">
@@ -178,7 +188,7 @@ export default function TokensPage() {
                     <AddToWalletButton tokenKey={key as keyof typeof TOKENS} />
                     <Link
                       href={`/swap?from=${key}`}
-                      className="text-2xs font-medium px-2.5 py-1 rounded-lg bg-aeon-400/10 text-aeon-400 hover:bg-aeon-400/20 transition-colors"
+                      className="text-2xs font-medium px-2.5 py-1 rounded-lg bg-aeon-400/10 text-aeon-400 hover:bg-aeon-400/20 hover:scale-110 active:scale-95 transition-all"
                     >
                       Trade
                     </Link>

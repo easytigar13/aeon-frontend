@@ -1141,7 +1141,7 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
 
   return (
     <div className="space-y-8">
-      <div className="card p-6 bg-gradient-to-r from-aeon-400/5 to-transparent">
+      <div className="card p-6 bg-gradient-to-r from-aeon-400/5 to-transparent transition-shadow duration-500 hover:shadow-[0_0_40px_-16px_rgba(255,184,0,0.35)]">
         <div className="flex items-center gap-3 mb-3">
           <BarChart3 size={18} className="text-aeon-400" />
           <span className="text-sm text-text-muted">Total Wallet Value</span>
@@ -1184,7 +1184,7 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
             {tokens.filter(t => t.balance && t.balance > 0.000001).map(t => {
               const usdVal = t.balance && t.price ? t.balance * t.price : null
               return (
-                <div key={t.key} className="card px-4 py-3 flex items-center justify-between hover:border-bg-hover transition-colors">
+                <div key={t.key} className="card px-4 py-3 flex items-center justify-between transition-all duration-200 hover:-translate-y-0.5 hover:border-aeon-400/30 hover:shadow-[0_0_24px_-12px_rgba(255,184,0,0.4)]">
                   <div className="flex items-center gap-3">
                     <TokenIcon symbol={t.symbol} size={40} />
                     <div>
@@ -1210,7 +1210,7 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
           <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">LP Positions</div>
           <div className="space-y-2">
             {lpPositions.map(({ pool, lpUnstaked, lpStaked }) => (
-              <div key={pool.address} className="card px-4 py-3 flex items-center justify-between">
+              <div key={pool.address} className="card px-4 py-3 flex items-center justify-between transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-400/30 hover:shadow-[0_0_24px_-12px_rgba(96,165,250,0.4)]">
                 <div className="flex items-center gap-3">
                   <div className="flex -space-x-2">
                     <TokenIcon symbol={pool.token0} size={36} />
@@ -1322,7 +1322,7 @@ export default function EarnPage() {
         {(['earn', 'portfolio'] as const).map(t => (
           <button key={t} onClick={() => setMainTab(t)}
             className={clsx(
-              'flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium transition-all',
+              'flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium transition-all hover:scale-105 active:scale-95',
               mainTab === t ? 'bg-bg-base text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
             )}>
             {t === 'earn' ? <><Coins size={14} /> Earn</> : <><BarChart3 size={14} /> Portfolio</>}

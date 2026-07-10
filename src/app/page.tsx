@@ -93,7 +93,7 @@ export default function HomePage() {
         {/* The flip */}
         <div className="grid md:grid-cols-2 gap-6 mb-16">
           {/* AEON model — left side */}
-          <Reveal className="card p-8 border-emerald-400/20 bg-emerald-400/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
+          <Reveal className="card p-8 border-emerald-400/20 bg-emerald-400/5 relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_0_36px_-14px_rgba(16,185,129,0.4)]">
             <div className="absolute top-4 right-4 text-xs font-mono text-emerald-400/40 font-bold uppercase tracking-widest">AEON</div>
             <div className="w-10 h-10 rounded-xl bg-emerald-400/10 flex items-center justify-center mb-5">
               <Crown size={20} className="text-emerald-400" />
@@ -121,7 +121,7 @@ export default function HomePage() {
           </Reveal>
 
           {/* Before / broken model — right side */}
-          <Reveal delay={120} className="card p-8 border-yellow-500/20 bg-yellow-500/5 relative overflow-hidden transition-transform duration-300 hover:-translate-y-1">
+          <Reveal delay={120} className="card p-8 border-yellow-500/20 bg-yellow-500/5 relative overflow-hidden transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_0_36px_-14px_rgba(234,179,8,0.4)]">
             <div className="absolute top-4 right-4 text-xs font-mono text-yellow-400/50 font-bold uppercase tracking-widest">Every other ve(3,3)</div>
             <div className="w-10 h-10 rounded-xl bg-yellow-500/10 flex items-center justify-center mb-5">
               <AlertTriangle size={20} className="text-yellow-400" />
@@ -150,7 +150,7 @@ export default function HomePage() {
         </div>
 
         {/* The big insight */}
-        <Reveal className="card-raised border-gradient p-10 md:p-14 text-center relative overflow-hidden mb-16">
+        <Reveal className="card-raised border-gradient p-10 md:p-14 text-center relative overflow-hidden mb-16 transition-shadow duration-500 hover:shadow-[0_0_60px_-20px_rgba(255,184,0,0.35)]">
           <div className="absolute inset-0 bg-gradient-to-br from-aeon-400/5 via-transparent to-violet-500/5 pointer-events-none" />
           <div className="relative">
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-aeon-400/10 border border-aeon-400/20 mb-6">
@@ -184,22 +184,22 @@ export default function HomePage() {
               icon: <TrendingUp size={20} className="text-aeon-400" />,
               title: 'APR with a floor',
               body: 'If APR is 20% and price is $1, price is defended for the entire year — every emission is paid for by fees that already exist. No dilution from thin air.',
-              color: 'aeon',
+              cardClass: 'border-aeon-400/10 hover:border-aeon-400/40 hover:shadow-[0_0_36px_-14px_rgba(255,184,0,0.4)]',
             },
             {
               icon: <Crown size={20} className="text-violet-400" />,
               title: 'Sticky LP magnet',
               body: 'LPs who earn real fees don\'t leave. Holders who earn from those fees don\'t sell. Both groups reinforce each other. That\'s the magnet.',
-              color: 'violet',
+              cardClass: 'border-violet-400/10 hover:border-violet-400/40 hover:shadow-[0_0_36px_-14px_rgba(139,92,246,0.4)]',
             },
             {
               icon: <Flame size={20} className="text-emerald-400" />,
               title: 'Flywheel, not spiral',
               body: 'Once the loop is running, more LP → more fees → more holder yield → higher price → better APR for everyone. Upward only.',
-              color: 'emerald',
+              cardClass: 'border-emerald-400/10 hover:border-emerald-400/40 hover:shadow-[0_0_36px_-14px_rgba(16,185,129,0.4)]',
             },
           ].map((item, i) => (
-            <Reveal key={item.title} delay={i * 100} className={`card p-6 border-${item.color === 'aeon' ? 'aeon-400' : item.color === 'violet' ? 'violet-400' : 'emerald-400'}/10 transition-all duration-300 hover:-translate-y-1 hover:border-opacity-40`}>
+            <Reveal key={item.title} delay={i * 100} className={`card p-6 transition-all duration-300 hover:-translate-y-1 ${item.cardClass}`}>
               <div className="w-10 h-10 rounded-xl bg-bg-raised flex items-center justify-center mb-4">
                 {item.icon}
               </div>
@@ -255,7 +255,7 @@ export default function HomePage() {
               body: 'veAEON votes decide which pools get emissions and fee share — a vote with direct financial consequences, not a symbolic poll.',
             },
           ].map((item, i) => (
-            <Reveal key={item.title} delay={i * 80} className="card p-6 transition-all duration-300 hover:border-aeon-400/30 hover:-translate-y-1">
+            <Reveal key={item.title} delay={i * 80} className="card p-6 transition-all duration-300 hover:border-aeon-400/30 hover:-translate-y-1 hover:shadow-[0_0_36px_-14px_rgba(255,184,0,0.4)]">
               <div className="w-10 h-10 rounded-xl bg-aeon-400/10 flex items-center justify-center mb-4">
                 {item.icon}
               </div>
@@ -287,22 +287,22 @@ export default function HomePage() {
               icon: <TrendingUp className="text-aeon-400" size={24} />,
               title: 'Trade & Generate Fees',
               body: '3 pools at genesis — AEON/ETH, AEON/USDG, ETH/USDG. 80% of every fee goes straight to veNFT voters of that pool.',
-              accent: 'aeon',
+              cardClass: 'hover:border-aeon-400/30 hover:shadow-[0_0_36px_-14px_rgba(255,184,0,0.4)]',
             },
             {
               icon: <Lock className="text-violet-400" size={24} />,
               title: 'Lock AEON, Vote, Earn',
               body: 'Lock AEON for up to 4 years to get a veNFT. Vote for gauges to direct emissions and earn trading fees from voted pools.',
-              accent: 'violet',
+              cardClass: 'hover:border-violet-400/30 hover:shadow-[0_0_36px_-14px_rgba(139,92,246,0.4)]',
             },
             {
               icon: <Flame className="text-emerald-400" size={24} />,
               title: 'Buybacks Burn & Reward',
               body: '20% of fees route to the buyback engine — half swapped to AEON and burned forever, half redistributed in liquid AEON to Furnace burners.',
-              accent: 'emerald',
+              cardClass: 'hover:border-emerald-400/30 hover:shadow-[0_0_36px_-14px_rgba(16,185,129,0.4)]',
             },
           ].map((item, i) => (
-            <Reveal key={item.title} delay={i * 100} className="card p-6 transition-all duration-300 hover:border-bg-hover hover:-translate-y-1">
+            <Reveal key={item.title} delay={i * 100} className={`card p-6 transition-all duration-300 hover:-translate-y-1 ${item.cardClass}`}>
               <div className="w-10 h-10 rounded-xl bg-bg-raised flex items-center justify-center mb-4">
                 {item.icon}
               </div>
@@ -336,7 +336,7 @@ export default function HomePage() {
 
       {/* The Furnace */}
       <section className="max-w-7xl mx-auto px-4 py-16">
-        <Reveal className="card-raised border-gradient p-8 md:p-12 text-center relative overflow-hidden">
+        <Reveal className="card-raised border-gradient p-8 md:p-12 text-center relative overflow-hidden transition-shadow duration-500 hover:shadow-[0_0_60px_-20px_rgba(255,184,0,0.35)]">
           <div className="absolute inset-0 bg-gradient-to-br from-aeon-400/5 via-transparent to-violet-500/5 pointer-events-none" />
           <div className="relative">
             <div className="inline-flex items-center gap-2 mb-6">
@@ -416,7 +416,7 @@ export default function HomePage() {
               body: 'Swaps search every path across every vAMM pool and execute whichever route pays out the most — liquidity you provide actually gets used.',
             },
           ].map((item, i) => (
-            <Reveal key={item.title} delay={i * 80} className="card p-6 transition-all duration-300 hover:border-violet-400/30 hover:-translate-y-1">
+            <Reveal key={item.title} delay={i * 80} className="card p-6 transition-all duration-300 hover:border-violet-400/30 hover:-translate-y-1 hover:shadow-[0_0_36px_-14px_rgba(139,92,246,0.4)]">
               <div className="w-10 h-10 rounded-xl bg-violet-400/10 flex items-center justify-center mb-4">
                 {item.icon}
               </div>
@@ -442,7 +442,7 @@ export default function HomePage() {
             { name: 'Earn trading fees', desc: 'Same audited-pattern fee accounting as Aerodrome/Velodrome, permissionless to claim.' },
             { name: 'Stake for AEON emissions', desc: 'Every vAMM pool is eligible for weekly vote-weighted AEON emissions on top of fees.' },
           ].map((item, i) => (
-            <Reveal key={item.name} delay={i * 100} className="card p-6 transition-all duration-300 hover:-translate-y-1 hover:border-bg-hover">
+            <Reveal key={item.name} delay={i * 100} className="card p-6 transition-all duration-300 hover:-translate-y-1 hover:border-blue-400/30 hover:shadow-[0_0_36px_-14px_rgba(96,165,250,0.4)]">
               <span className="pool-type-vamm mb-4 inline-block">vAMM</span>
               <h3 className="font-display font-semibold text-text-primary mb-2">{item.name}</h3>
               <p className="text-text-secondary text-sm leading-relaxed">{item.desc}</p>
@@ -458,7 +458,7 @@ export default function HomePage() {
 
       {/* Genesis Epoch */}
       <section className="max-w-7xl mx-auto px-4 py-8">
-        <Reveal className="card p-8 border-aeon-400/20 bg-gradient-to-r from-aeon-400/5 to-transparent">
+        <Reveal className="card p-8 border-aeon-400/20 bg-gradient-to-r from-aeon-400/5 to-transparent transition-shadow duration-500 hover:shadow-[0_0_40px_-16px_rgba(255,184,0,0.35)]">
           <div className="flex flex-col md:flex-row items-start md:items-center gap-6">
             <div className="w-14 h-14 rounded-2xl bg-aeon-400/15 flex items-center justify-center shrink-0">
               <TrendingUp size={24} className="text-aeon-400" />

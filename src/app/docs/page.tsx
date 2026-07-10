@@ -52,7 +52,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
 }
 function Addr({ label, address }: { label: string; address: string }) {
   return (
-    <div className="flex items-center justify-between py-3 border-b border-bg-border last:border-0">
+    <div className="flex items-center justify-between py-3 px-2 -mx-2 rounded-lg border-b border-bg-border last:border-0 hover:bg-bg-raised transition-colors">
       <span className="text-sm text-text-secondary">{label}</span>
       <span className="text-xs font-mono text-aeon-400">{address.slice(0, 8)}…{address.slice(-6)}</span>
     </div>
@@ -92,11 +92,11 @@ export default function DocsPage() {
                 key={id}
                 href={`#${id}`}
                 className={clsx(
-                  'block px-3 py-2 rounded-lg text-sm transition-all',
+                  'block px-3 py-2 rounded-lg text-sm transition-all border-l-2',
                   indent ? 'ml-3 text-xs' : '',
                   active === id
-                    ? 'bg-aeon-400/10 text-aeon-400 font-medium'
-                    : 'text-text-muted hover:text-text-secondary hover:bg-bg-raised'
+                    ? 'bg-aeon-400/10 text-aeon-400 font-medium border-aeon-400 shadow-[0_0_16px_-6px_rgba(255,184,0,0.5)]'
+                    : 'text-text-muted hover:text-text-secondary hover:bg-bg-raised border-transparent'
                 )}
               >
                 {label}
@@ -214,7 +214,12 @@ export default function DocsPage() {
               { title: 'Lock (veNFT)', items: ['Power decays over time', 'Transferable', 'Can withdraw after lock expires', `Earn ${EPOCH_CONFIG.feeVoterSplit}% of fees from voted pools`], color: 'violet' },
               { title: 'Furnace (Burn)', items: ['Power never decays', 'Soulbound — non-transferable', 'Cannot withdraw — permanent', 'Earn emission bonus + buyback redistribution'], color: 'aeon', highlight: true },
             ].map(col => (
-              <div key={col.title} className={clsx('card p-4', col.highlight && 'border-aeon-400/20')}>
+              <div key={col.title} className={clsx(
+                'card p-4 transition-shadow duration-300',
+                col.color === 'aeon'
+                  ? 'border-aeon-400/20 hover:shadow-[0_0_28px_-12px_rgba(255,184,0,0.4)]'
+                  : 'hover:border-violet-400/30 hover:shadow-[0_0_28px_-12px_rgba(139,92,246,0.4)]'
+              )}>
                 <div className={clsx('text-sm font-display font-semibold mb-3', col.color === 'aeon' ? 'text-aeon-400' : 'text-violet-400')}>{col.title}</div>
                 <ul className="space-y-1.5">
                   {col.items.map(i => <li key={i} className="text-xs text-text-secondary flex gap-1.5"><span>·</span>{i}</li>)}
@@ -351,7 +356,7 @@ export default function DocsPage() {
           <H2 id="contracts">Contract Addresses</H2>
           <P>All contracts are deployed on Robinhood Chain (chain ID 4663).</P>
 
-          <div className="card p-4 mb-6">
+          <div className="card p-4 mb-6 transition-shadow duration-300 hover:shadow-[0_0_32px_-16px_rgba(255,184,0,0.35)]">
             <Addr label="AEON Token"          address={CONTRACTS.AeonToken} />
             <Addr label="Minter Proxy"        address={CONTRACTS.MinterProxy} />
             <Addr label="VotingEscrow (veNFT)" address={CONTRACTS.AeonVotingEscrow} />
@@ -375,7 +380,7 @@ export default function DocsPage() {
           </Note>
 
           <H3>Token Addresses</H3>
-          <div className="card p-4">
+          <div className="card p-4 transition-shadow duration-300 hover:shadow-[0_0_32px_-16px_rgba(255,184,0,0.35)]">
             {Object.entries(TOKENS).filter(([, t]) => t.symbol !== 'ETH').map(([sym, t]) => (
               <Addr key={sym} label={`${t.name} (${t.symbol})`} address={t.address} />
             ))}
@@ -390,7 +395,7 @@ export default function DocsPage() {
             {[
               ['DEX Screener Adapter', 'Full spec implementation (/latest-block, /asset, /pair, /events) at /api/dexscreener/* — live, real-time, on-chain-verified. Covers all vAMM pools.'],
               ['Machine-readable pool list', '/api/v1/pools — live reserves + token metadata for every pool, for aggregators and custom bots.'],
-              ['1inch aggregation', 'Wired in as a 4th swap venue on the Swap page — AEON compares its own routing against 1inch\'s pathfinding and uses whichever quote is better.'],
+              ['1inch + OpenOcean aggregation', 'Both wired in as competing swap venues on the Swap page — AEON compares its own routing against both aggregators\' pathfinding and uses whichever quote is better.'],
             ].map(([title, desc]) => (
               <li key={title} className="text-sm">
                 <span className="font-mono text-aeon-400">{title}</span>
