@@ -396,8 +396,8 @@ export default function HomePage() {
             },
             {
               icon: <Layers size={20} className="text-violet-400" />,
-              title: 'Pick your liquidity style',
-              body: "Full-range vAMM, concentrated CL ranges, or discrete DLMM bins — same pairs, three shapes. You're never locked into one strategy.",
+              title: 'Full-range, no management',
+              body: "Deposit both tokens and earn across the entire price curve — no ranges to pick, no rebalancing, no position that stops earning if price moves.",
             },
             {
               icon: <Rocket size={20} className="text-violet-400" />,
@@ -425,21 +425,20 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 py-16">
         <Reveal className="text-center mb-12">
           <h2 className="font-display font-bold text-3xl text-text-primary mb-3">
-            11 Pairs, 3 Pool Types Each
+            11 Trading Pairs
           </h2>
-          <p className="text-text-secondary">Every pair trades across vAMM, Concentrated Liquidity, and DLMM simultaneously — 33 pools total</p>
+          <p className="text-text-secondary">Standard vAMM pools — full-range liquidity, zero management, real fee-anchored emissions</p>
         </Reveal>
 
         <div className="grid md:grid-cols-3 gap-6">
           {[
-            { name: 'vAMM', desc: 'Full-range, zero management. Deposit both tokens, earn fees across the entire price curve — the same audited-pattern accounting as Aerodrome/Velodrome.', badge: 'pool-type-vamm' },
-            { name: 'Concentrated Liquidity', desc: 'Algebra Integral. Pick a price range to concentrate your liquidity in for higher capital efficiency and fee share within that range.', badge: 'pool-type-cl' },
-            { name: 'DLMM', desc: 'Trader Joe Liquidity Book. Liquidity split into discrete price bins — zero-slippage swaps within the active bin.', badge: 'pool-type-dlmm' },
+            { name: 'Deposit both tokens', desc: 'Full-range liquidity across the entire price curve — no range management, no rebalancing.' },
+            { name: 'Earn trading fees', desc: 'Same audited-pattern fee accounting as Aerodrome/Velodrome, permissionless to claim.' },
+            { name: 'Stake for AEON emissions', desc: 'Every vAMM pool is eligible for weekly vote-weighted AEON emissions on top of fees.' },
           ].map((item, i) => (
             <Reveal key={item.name} delay={i * 100} className="card p-6 transition-all duration-300 hover:-translate-y-1 hover:border-bg-hover">
-              <div className="flex items-center justify-between mb-4">
-                <span className={item.badge}>{item.name}</span>
-              </div>
+              <span className="pool-type-vamm mb-4 inline-block">vAMM</span>
+              <h3 className="font-display font-semibold text-text-primary mb-2">{item.name}</h3>
               <p className="text-text-secondary text-sm leading-relaxed">{item.desc}</p>
             </Reveal>
           ))}

@@ -192,23 +192,10 @@ export default function DocsPage() {
           {/* Pool Architectures */}
           <H2 id="pool-architectures">Pool Architectures</H2>
           <P>
-            Every trading pair on AEON is available across three independent pool architectures at once — LPs pick whichever fits their strategy, and the swap router automatically searches all three (plus real external venues) and executes whichever route gives the best price, splitting a single trade across multiple routes when that's better than any single one.
+            AEON's pools are standard vAMM (constant-product, x*y=k) — deposit both tokens, earn fees across the entire price curve, zero management. Same audited-pattern fee accounting as Aerodrome/Velodrome, and the only architecture that feeds AEON's official vote-weighted emissions (veNFT holders vote for vAMM gauges specifically, and LPs staked there earn AEON on top of trading fees).
           </P>
-          <div className="my-6 grid md:grid-cols-3 gap-4">
-            {[
-              { title: 'vAMM', sub: 'Full-range, x*y=k', body: 'The default. Deposit both tokens, earn fees across the entire price curve, zero management. Same audited-pattern fee accounting as Aerodrome/Velodrome.' },
-              { title: 'Concentrated Liquidity', sub: 'Algebra Integral', body: 'Pick a price range for your liquidity to concentrate in. Higher capital efficiency and fee share within that range, but your position stops earning if price moves outside it.' },
-              { title: 'DLMM', sub: 'Trader Joe Liquidity Book', body: 'Liquidity is split into discrete price bins instead of a continuous curve. Zero-slippage swaps within a single active bin, and LPs can target specific price levels precisely.' },
-            ].map(col => (
-              <div key={col.title} className="card p-4">
-                <div className="text-sm font-display font-semibold text-aeon-400 mb-1">{col.title}</div>
-                <div className="text-2xs font-mono text-text-muted mb-3 uppercase tracking-wider">{col.sub}</div>
-                <p className="text-xs text-text-secondary leading-relaxed">{col.body}</p>
-              </div>
-            ))}
-          </div>
           <Note>
-            Only vAMM pools feed AEON's official gauge-voting emissions (veNFT holders vote for vAMM gauges specifically). CL and DLMM positions earn trading fees the same as any LP, plus a separate governor-funded AEON reward stream via their own dedicated gauges — visible on the <Link href="/earn" className="text-aeon-400 hover:underline">Earn</Link> page alongside vAMM gauges.
+            Concentrated Liquidity (Algebra Integral) and DLMM (Trader Joe Liquidity Book) pools also exist on-chain for some pairs, but aren't currently available to deposit into through this app — their reward model (a separate, manually-funded AEON stream rather than the automatic weekly vote-weighted emissions vAMM pools get) isn't ready for general use yet. If you already hold a CL or DLMM position from before, it remains fully yours and safe on-chain; management through this UI is temporarily limited while this gets sorted out.
           </Note>
 
           {/* The Furnace */}

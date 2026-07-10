@@ -1,11 +1,14 @@
 'use client'
 import { useReadContracts } from 'wagmi'
-import { TOKENS, POOLS, CL_POOLS } from '@/config/contracts'
-import { PAIR_ABI, ALGEBRA_POOL_ABI } from '@/config/abis'
+import { TOKENS, POOLS } from '@/config/contracts'
+import { PAIR_ABI } from '@/config/abis'
 
 const POOL_AEON_USDG     = POOLS.find(p => p.name === 'AEON/USDG')!.address
 const POOL_ETH_USDG      = POOLS.find(p => p.name === 'ETH/USDG')!.address
-const POOL_VIRTUAL_AEON  = CL_POOLS.find(p => p.name === 'VIRTUAL/AEON')!.address
+// Was sourced from the CL pool's sqrtPriceX96 -- switched to the vAMM pool
+// 2026-07-10 when CL_POOLS was emptied (see contracts.ts comment for why).
+// Same derivation ROBINFUN already uses (deriveViaAeonPool, reserves-based).
+const POOL_VIRTUAL_AEON  = POOLS.find(p => p.name === 'VIRTUAL/AEON')!.address
 const POOL_ROBINFUN_AEON = POOLS.find(p => p.name === 'ROBINFUN/AEON')!.address
 const POOL_CASHCAT_USDG  = POOLS.find(p => p.name === 'CASHCAT/USDG')!.address
 
@@ -17,7 +20,7 @@ const PRICE_CONTRACTS = [
   { address: POOL_AEON_USDG,     abi: PAIR_ABI,         functionName: 'token0' },
   { address: POOL_ETH_USDG,      abi: PAIR_ABI,         functionName: 'getReserves' },
   { address: POOL_ETH_USDG,      abi: PAIR_ABI,         functionName: 'token0' },
-  { address: POOL_VIRTUAL_AEON,  abi: ALGEBRA_POOL_ABI, functionName: 'globalState' },
+  { address: POOL_VIRTUAL_AEON,  abi: PAIR_ABI,         functionName: 'getReserves' },
   { address: POOL_VIRTUAL_AEON,  abi: PAIR_ABI,         functionName: 'token0' },
   { address: POOL_ROBINFUN_AEON, abi: PAIR_ABI,         functionName: 'getReserves' },
   { address: POOL_ROBINFUN_AEON, abi: PAIR_ABI,         functionName: 'token0' },
@@ -42,18 +45,6 @@ function deriveUsdPrice(
   const rTarget = Number(isUsdg0 ? r1 : r0)
   // price_target = (rUsdg / 1e6) / (rTarget / 10^targetDec)
   return (rUsdg * 10 ** targetDec) / (rTarget * 1e6)
-}
-
-// Derive USD price of VIRTUAL from its CL pool's sqrtPriceX96 (both legs are
-// 18-decimal tokens so no decimal scaling is needed) cross-multiplied by AEON's
-// own USD price — the CL pool only prices VIRTUAL in AEON terms, not USD.
-function deriveVirtualUsdPrice(sqrtPriceX96: bigint | undefined, token0: string | undefined, aeonUsd: number | null): number | null {
-  if (!sqrtPriceX96 || !token0 || aeonUsd === null || sqrtPriceX96 === 0n) return null
-  const Q96 = 2 ** 96
-  const ratio = (Number(sqrtPriceX96) / Q96) ** 2 // token1 per token0
-  const isVirtual0 = token0.toLowerCase() === TOKENS.VIRTUAL.address.toLowerCase()
-  const aeonPerVirtual = isVirtual0 ? ratio : 1 / ratio
-  return aeonPerVirtual * aeonUsd
 }
 
 // Derive USD price of a token from its own vAMM pool against AEON (both
@@ -85,8 +76,7 @@ export function usePrices(): PriceMap {
 
   const aeon = deriveUsdPrice(get(0) as Reserves | undefined, get(1) as string | undefined, TOKENS.USDG.address, TOKENS.AEON.decimals)
   const weth = deriveUsdPrice(get(2) as Reserves | undefined, get(3) as string | undefined, TOKENS.USDG.address, TOKENS.WETH.decimals)
-  const virtualGlobalState = get(4) as readonly [bigint, number, number, number, number, boolean] | undefined
-  const virtual  = deriveVirtualUsdPrice(virtualGlobalState?.[0], get(5) as string | undefined, aeon)
+  const virtual  = deriveViaAeonPool(get(4) as Reserves | undefined, get(5) as string | undefined, TOKENS.VIRTUAL.address, aeon)
   const robinfun = deriveViaAeonPool(get(6) as Reserves | undefined, get(7) as string | undefined, TOKENS.ROBINFUN.address, aeon)
   // CASHCAT/USDG is a direct USDG pair (unlike VIRTUAL/ROBINFUN), so this
   // uses the same direct derivation as AEON/WETH -- returns null while the

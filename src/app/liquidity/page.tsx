@@ -145,25 +145,17 @@ export default function LiquidityPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display font-bold text-2xl text-text-primary">Liquidity</h1>
-          <p className="text-sm text-text-muted mt-0.5">
-            {mode === 'vAMM' ? "Provide liquidity to AEON's vAMM pools" : mode === 'CL' ? 'Provide concentrated liquidity via Algebra Integral' : 'Provide bin-based liquidity via Liquidity Book (DLMM)'}
-          </p>
+          <p className="text-sm text-text-muted mt-0.5">Provide liquidity to AEON's vAMM pools</p>
         </div>
       </div>
 
-      <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4">
-        <button onClick={() => setMode('vAMM')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', mode === 'vAMM' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
-          <Waves size={14} /> vAMM
-        </button>
-        <button onClick={() => setMode('CL')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', mode === 'CL' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
-          <Layers size={14} /> Concentrated
-        </button>
-        <button onClick={() => setMode('DLMM')} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', mode === 'DLMM' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
-          <Grid3x3 size={14} /> DLMM
-        </button>
-      </div>
-
-      {mode === 'vAMM' ? <VammLiquidity initialPool={initialPool} /> : mode === 'CL' ? <ClLiquidity initialPool={initialPool} /> : <DlmmLiquidity initialPool={initialPool} />}
+      {/* CL/DLMM mode buttons removed 2026-07-10 -- see CL_POOLS/DLMM_POOLS
+          comment in contracts.ts for why. mode can now only ever be 'vAMM'
+          (handleDeposit/handleCreated never set it to CL/DLMM either, since
+          PoolListView no longer produces any CL/DLMM rows to click Deposit
+          on), so this renders VammLiquidity unconditionally rather than
+          leaving dead ClLiquidity/DlmmLiquidity branches reachable. */}
+      <VammLiquidity initialPool={initialPool} />
     </div>
   )
 }
@@ -289,14 +281,17 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
         </div>
       </div>
 
+      {/* CL/DLMM filter options removed 2026-07-10 alongside CL_POOLS/DLMM_POOLS
+          -- see that comment in contracts.ts for why. Only ALL/vAMM remain
+          since CL/DLMM pools can never appear in `pools` now. */}
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4 w-fit">
-        {(['ALL', 'vAMM', 'CL', 'DLMM'] as ListFilter[]).map(f => (
+        {(['ALL', 'vAMM'] as ListFilter[]).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
             className={clsx('px-4 py-2 rounded-lg text-sm font-medium transition-all', filter === f ? 'bg-bg-base text-text-primary' : 'text-text-muted hover:text-text-primary')}
           >
-            {f === 'ALL' ? 'All' : f === 'CL' ? 'Concentrated' : f}
+            {f === 'ALL' ? 'All' : f}
           </button>
         ))}
       </div>

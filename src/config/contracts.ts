@@ -258,21 +258,31 @@ export const ALGEBRA_CONTRACTS = {
   quoterV2:                    '0x0fC2Ac0217FC9dF2577Be3519be07e6612775Eab' as `0x${string}`,
 } as const
 
-export const CL_POOLS = [
-  { name: 'AEON/ETH',     token0: 'AEON', token1: 'WETH',    type: 'CL', fee: '0.25%', address: '0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e' as `0x${string}` },
-  { name: 'AEON/USDG',    token0: 'AEON', token1: 'USDG',    type: 'CL', fee: '0.25%', address: '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6' as `0x${string}` },
-  { name: 'ETH/USDG',     token0: 'WETH', token1: 'USDG',    type: 'CL', fee: '0.25%', address: '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3' as `0x${string}` },
-  { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
-  // Added 2026-07-09 -- see CL_GAUGES above for how these got created.
-  // defaultFee() confirmed 2500 (0.25%) on-chain, same tier as the 4 above.
-  { name: 'ROBINFUN/AEON',    token0: 'ROBINFUN', token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B' as `0x${string}` },
-  { name: 'CASHCAT/AEON',     token0: 'CASHCAT',  token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0xbCD1Bf0d9F25503DDfEd0b663827811637B27B80' as `0x${string}` },
-  { name: 'CASHCAT/USDG',     token0: 'CASHCAT',  token1: 'USDG',     type: 'CL', fee: '0.25%', address: '0x9ebd1C556967d8e3f6f1C043D57eb7762047D60D' as `0x${string}` },
-  { name: 'CASHCAT/ETH',      token0: 'CASHCAT',  token1: 'WETH',     type: 'CL', fee: '0.25%', address: '0x09e729D9e077EB1Ad10aDccDE4D18C143035fe04' as `0x${string}` },
-  { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT',  token1: 'ROBINFUN', type: 'CL', fee: '0.25%', address: '0x14E266508d68107509487DE6Ead5ded5764C5F20' as `0x${string}` },
-  { name: 'ROBINFUN/ETH',     token0: 'WETH',     token1: 'ROBINFUN', type: 'CL', fee: '0.25%', address: '0xC6b5b34133E290e5c28B19844970cee783DD9b40' as `0x${string}` },
-  { name: 'ROBINFUN/USDG',    token0: 'ROBINFUN', token1: 'USDG',     type: 'CL', fee: '0.25%', address: '0xBb6aA9914f53afb8e7C89Bf05D4DD2525aF4E4ce' as `0x${string}` },
-]
+// Removed from the frontend entirely 2026-07-10, per explicit user request:
+// CL rewards are governor-funded-discretionary, not the automatic
+// vote-weighted emissions vAMM gauges get (see AeonClGauge.sol header / the
+// declined project_unified_voting_plan memory for why that can't be fixed
+// without migrating every vAMM staker too). User wants this hidden before
+// anyone deposits expecting the same reward guarantee vAMM pools have.
+// On-chain pools/gauges are untouched -- 4 of the 11 pairs below have real
+// staked positions (AEON/ETH, AEON/USDG, ETH/USDG, VIRTUAL/AEON; the other
+// 7 are empty). "We will deal with this later" -- don't delete this list,
+// it's the reference for whatever comes next.
+//
+// { name: 'AEON/ETH',         token0: 'AEON',     token1: 'WETH',     type: 'CL', fee: '0.25%', address: '0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e' as `0x${string}` },
+// { name: 'AEON/USDG',        token0: 'AEON',     token1: 'USDG',     type: 'CL', fee: '0.25%', address: '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6' as `0x${string}` },
+// { name: 'ETH/USDG',         token0: 'WETH',     token1: 'USDG',     type: 'CL', fee: '0.25%', address: '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3' as `0x${string}` },
+// { name: 'VIRTUAL/AEON',     token0: 'VIRTUAL',  token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
+// { name: 'ROBINFUN/AEON',    token0: 'ROBINFUN', token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B' as `0x${string}` },
+// { name: 'CASHCAT/AEON',     token0: 'CASHCAT',  token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0xbCD1Bf0d9F25503DDfEd0b663827811637B27B80' as `0x${string}` },
+// { name: 'CASHCAT/USDG',     token0: 'CASHCAT',  token1: 'USDG',     type: 'CL', fee: '0.25%', address: '0x9ebd1C556967d8e3f6f1C043D57eb7762047D60D' as `0x${string}` },
+// { name: 'CASHCAT/ETH',      token0: 'CASHCAT',  token1: 'WETH',     type: 'CL', fee: '0.25%', address: '0x09e729D9e077EB1Ad10aDccDE4D18C143035fe04' as `0x${string}` },
+// { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT',  token1: 'ROBINFUN', type: 'CL', fee: '0.25%', address: '0x14E266508d68107509487DE6Ead5ded5764C5F20' as `0x${string}` },
+// { name: 'ROBINFUN/ETH',     token0: 'WETH',     token1: 'ROBINFUN', type: 'CL', fee: '0.25%', address: '0xC6b5b34133E290e5c28B19844970cee783DD9b40' as `0x${string}` },
+// { name: 'ROBINFUN/USDG',    token0: 'ROBINFUN', token1: 'USDG',     type: 'CL', fee: '0.25%', address: '0xBb6aA9914f53afb8e7C89Bf05D4DD2525aF4E4ce' as `0x${string}` },
+export const CL_POOLS: {
+  name: string; token0: string; token1: string; type: 'CL'; fee: string; address: `0x${string}`
+}[] = []
 
 export const CL_RANGE_PRESETS = [
   { key: 'narrow', label: 'Narrow',     desc: '±2.5%',   pctLow: -2.5,   pctHigh: 2.5    },
@@ -295,23 +305,26 @@ export const DLMM_CONTRACTS = {
 // 1e10, in 18-decimal fraction terms) — all 4 pools share baseFactor=5000, so
 // fee = 5000 * binStep / 1e8. Verified directly against each pool on-chain
 // (all read baseFactor=5000) rather than assumed.
-export const DLMM_POOLS = [
-  { name: 'AEON/ETH',     token0: 'AEON',    token1: 'WETH', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x736d8E418673253b2CDE1ef3Df6205Fc9780816b' as `0x${string}` },
-  { name: 'AEON/USDG',    token0: 'AEON',    token1: 'USDG', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x8bCCec714f42eeb73954172C253F84f649599E3B' as `0x${string}` },
-  { name: 'ETH/USDG',     token0: 'WETH',    token1: 'USDG', type: 'DLMM', binStep: 10, fee: '0.05%',  address: '0x6E3772afbef845Ef4a3aD23a6eEEf65776375bC6' as `0x${string}` },
-  { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xcC62C85794F652ee257cf00c87530fF860755892' as `0x${string}` },
-  // Added 2026-07-09 -- one per remaining vAMM pair, activeId chosen to
-  // match each pair's live vAMM price at creation time (computed from
-  // getReserves(), not guessed) so the pool doesn't open instantly
-  // arbitrageable. baseFactor=5000 confirmed on-chain, same as the 4 above.
-  { name: 'ROBINFUN/AEON',    token0: 'ROBINFUN', token1: 'AEON',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xfD32dBb36B7873cCd9a1547AFf8341240Ebd1904' as `0x${string}` },
-  { name: 'CASHCAT/AEON',     token0: 'CASHCAT',  token1: 'AEON',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x754EDCcEdd8F27A6ba7874052760f42e801be172' as `0x${string}` },
-  { name: 'CASHCAT/USDG',     token0: 'CASHCAT',  token1: 'USDG',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xBEe641E8d7EAe49Cae27832dBf33dFd9F4AACb17' as `0x${string}` },
-  { name: 'CASHCAT/ETH',      token0: 'CASHCAT',  token1: 'WETH',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xaF6cd582516C69BD2FDE8803f277b64D6d0A1247' as `0x${string}` },
-  { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT',  token1: 'ROBINFUN', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x513768a47297f8ab6e843c853f60d0dd360ec4c1' as `0x${string}` },
-  { name: 'ROBINFUN/ETH',     token0: 'WETH',     token1: 'ROBINFUN', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x6a035f314de5ac12383a9698b000dbd7ee7c71db' as `0x${string}` },
-  { name: 'ROBINFUN/USDG',    token0: 'ROBINFUN', token1: 'USDG',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xA41bf62FbD1EeDa210C65F7fE2B82B4f71bF819F' as `0x${string}` },
-]
+// Removed from the frontend entirely 2026-07-10, same reasoning as CL_POOLS
+// above -- DLMM rewards are also governor-funded-discretionary, not
+// automatic vote-weighted emissions. 4 of these 11 pairs have real staked
+// positions (AEON/ETH, AEON/USDG, ETH/USDG, VIRTUAL/AEON); the other 7 are
+// empty. On-chain pools/gauges untouched. "We will deal with this later."
+//
+// { name: 'AEON/ETH',         token0: 'AEON',     token1: 'WETH',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x736d8E418673253b2CDE1ef3Df6205Fc9780816b' as `0x${string}` },
+// { name: 'AEON/USDG',        token0: 'AEON',     token1: 'USDG',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x8bCCec714f42eeb73954172C253F84f649599E3B' as `0x${string}` },
+// { name: 'ETH/USDG',         token0: 'WETH',     token1: 'USDG',     type: 'DLMM', binStep: 10, fee: '0.05%',  address: '0x6E3772afbef845Ef4a3aD23a6eEEf65776375bC6' as `0x${string}` },
+// { name: 'VIRTUAL/AEON',     token0: 'VIRTUAL',  token1: 'AEON',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xcC62C85794F652ee257cf00c87530fF860755892' as `0x${string}` },
+// { name: 'ROBINFUN/AEON',    token0: 'ROBINFUN', token1: 'AEON',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xfD32dBb36B7873cCd9a1547AFf8341240Ebd1904' as `0x${string}` },
+// { name: 'CASHCAT/AEON',     token0: 'CASHCAT',  token1: 'AEON',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x754EDCcEdd8F27A6ba7874052760f42e801be172' as `0x${string}` },
+// { name: 'CASHCAT/USDG',     token0: 'CASHCAT',  token1: 'USDG',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xBEe641E8d7EAe49Cae27832dBf33dFd9F4AACb17' as `0x${string}` },
+// { name: 'CASHCAT/ETH',      token0: 'CASHCAT',  token1: 'WETH',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xaF6cd582516C69BD2FDE8803f277b64D6d0A1247' as `0x${string}` },
+// { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT',  token1: 'ROBINFUN', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x513768a47297f8ab6e843c853f60d0dd360ec4c1' as `0x${string}` },
+// { name: 'ROBINFUN/ETH',     token0: 'WETH',     token1: 'ROBINFUN', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x6a035f314de5ac12383a9698b000dbd7ee7c71db' as `0x${string}` },
+// { name: 'ROBINFUN/USDG',    token0: 'ROBINFUN', token1: 'USDG',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xA41bf62FbD1EeDa210C65F7fE2B82B4f71bF819F' as `0x${string}` },
+export const DLMM_POOLS: {
+  name: string; token0: string; token1: string; type: 'DLMM'; binStep: number; fee: string; address: `0x${string}`
+}[] = []
 
 // Real, independently-deployed Uniswap V2 pairs already live on Robinhood
 // Chain (factory 0x8bcEaA40B9AcdfAedF85AdF4FF01F5Ad6517937f, 898 total pairs
