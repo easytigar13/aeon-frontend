@@ -206,6 +206,31 @@ export const TOKENS = {
   // liquidity, ~$75K/24h volume) — added 2026-07-10 at the user's request,
   // with an AEON vAMM pool
   SHERWOOD: { address: '0xB3b78ca800C5327a21F03f0636d9A08A103787fD' as `0x${string}`, symbol: 'SHERWOOD', decimals: 18, name: 'Sherwood Online' },
+  // Robinhood's own official tokenized stocks, per
+  // https://docs.robinhood.com/chain/contracts -- all 20 addresses verified
+  // directly on-chain (name()/symbol()/decimals() all resolve, matching the
+  // docs page exactly) before wiring in, added 2026-07-10 at the user's
+  // request, each with AEON and USDG vAMM pools.
+  AAPL:  { address: '0xaF3D76f1834A1d425780943C99Ea8A608f8a93f9' as `0x${string}`, symbol: 'AAPL',  decimals: 18, name: 'Apple — Robinhood Token' },
+  AMD:   { address: '0x86923f96303D656E4aa86D9d42D1e57ad2023fdC' as `0x${string}`, symbol: 'AMD',   decimals: 18, name: 'AMD — Robinhood Token' },
+  AMZN:  { address: '0x12f190a9F9d7D37a250758b26824B97CE941bF54' as `0x${string}`, symbol: 'AMZN',  decimals: 18, name: 'Amazon — Robinhood Token' },
+  BABA:  { address: '0xad25Ac6C84D497db898fa1E8387bf6Af3532a1c4' as `0x${string}`, symbol: 'BABA',  decimals: 18, name: 'Alibaba — Robinhood Token' },
+  BE:    { address: '0x822CC93fFD030293E9842c30BBD678F530701867' as `0x${string}`, symbol: 'BE',    decimals: 18, name: 'Bloom Energy — Robinhood Token' },
+  COIN:  { address: '0x6330D8C3178a418788dF01a47479c0ce7CCF450b' as `0x${string}`, symbol: 'COIN',  decimals: 18, name: 'Coinbase — Robinhood Token' },
+  CRCL:  { address: '0xdF0992E440dD0be65BD8439b609d6D4366bf1CB5' as `0x${string}`, symbol: 'CRCL',  decimals: 18, name: 'Circle Internet Group — Robinhood Token' },
+  CRWV:  { address: '0x5f10A1C971B69e47e059e1dC91901B59b3fB49C3' as `0x${string}`, symbol: 'CRWV',  decimals: 18, name: 'CoreWeave — Robinhood Token' },
+  GOOGL: { address: '0x2e0847E8910a9732eB3fb1bb4b70a580ADAD4FE3' as `0x${string}`, symbol: 'GOOGL', decimals: 18, name: 'Alphabet Class A — Robinhood Token' },
+  INTC:  { address: '0xc72b96e0E48ecd4DC75E1e45396e26300BC39681' as `0x${string}`, symbol: 'INTC',  decimals: 18, name: 'Intel — Robinhood Token' },
+  META:  { address: '0xc0D6457C16Cc70d6790Dd43521C899C87ce02f35' as `0x${string}`, symbol: 'META',  decimals: 18, name: 'Meta Platforms — Robinhood Token' },
+  MSFT:  { address: '0xe93237C50D904957Cf27E7B1133b510C669c2e74' as `0x${string}`, symbol: 'MSFT',  decimals: 18, name: 'Microsoft — Robinhood Token' },
+  MU:    { address: '0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD' as `0x${string}`, symbol: 'MU',    decimals: 18, name: 'Micron Technology — Robinhood Token' },
+  NVDA:  { address: '0xd0601CE157Db5bdC3162BbaC2a2C8aF5320D9EEC' as `0x${string}`, symbol: 'NVDA',  decimals: 18, name: 'NVIDIA — Robinhood Token' },
+  ORCL:  { address: '0xb0992820E760d836549ba69BC7598b4af75dEE03' as `0x${string}`, symbol: 'ORCL',  decimals: 18, name: 'Oracle — Robinhood Token' },
+  PLTR:  { address: '0x894E1EC2D74FFE5AEF8Dc8A9e84686acCB964F2A' as `0x${string}`, symbol: 'PLTR',  decimals: 18, name: 'Palantir Technologies — Robinhood Token' },
+  SNDK:  { address: '0xB90A19fF0Af67f7779afF50A882A9CfF42446400' as `0x${string}`, symbol: 'SNDK',  decimals: 18, name: 'Sandisk Corporation — Robinhood Token' },
+  SPCX:  { address: '0x4a0E65A3EcceC6dBe60AE065F2e7bb85Fae35eEa' as `0x${string}`, symbol: 'SPCX',  decimals: 18, name: 'Space Exploration Technologies (SpaceX) — Robinhood Token' },
+  TSLA:  { address: '0x322F0929c4625eD5bAd873c95208D54E1c003b2d' as `0x${string}`, symbol: 'TSLA',  decimals: 18, name: 'Tesla — Robinhood Token' },
+  USAR:  { address: '0xd917B029C761D264c6A312BBbcDA868658eF86a6' as `0x${string}`, symbol: 'USAR',  decimals: 18, name: 'USA Rare Earth — Robinhood Token' },
 } as const
 
 // Migrated 2026-07-03: the genesis vAMM pools had no way to ever claim swap
@@ -243,6 +268,51 @@ export const POOLS = [
   // Empty until someone adds liquidity -- deployer wallet holds ~0.24 AEON
   // and 0 SHERWOOD, not enough to seed it.
   { name: 'SHERWOOD/AEON', token0: 'SHERWOOD', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xB4692A778E33fBA0B97Feaa863377C6322c83AA4' as `0x${string}` },
+  // Deployed 2026-07-10 via AeonFactoryV2, all 40 pools + real gauges (real
+  // 80-tx batch, ~0.0068 ETH total gas) -- one AEON pair + one USDG pair for
+  // each of Robinhood's 20 official tokenized stocks. Every pool verified
+  // on-chain (getPoolFor resolves it, voter.gauges(pool) resolves a real
+  // gauge) after deploying. All empty until someone adds liquidity.
+  { name: 'AAPL/AEON',  token0: 'AAPL',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x6dCA20911C85f8f9F0382f7355CB944C4CeE45A8' as `0x${string}` },
+  { name: 'AAPL/USDG',  token0: 'AAPL',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x2b6809F19dEA50782bE6eFFD59D09b5256d9fe2c' as `0x${string}` },
+  { name: 'AMD/AEON',   token0: 'AMD',   token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x44CA8d2896d58A6896DcA5e4AC5d139A596A82e3' as `0x${string}` },
+  { name: 'AMD/USDG',   token0: 'AMD',   token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x249f4F9a89A7C270eFc90F2e58Aac2E73b1Bc9F3' as `0x${string}` },
+  { name: 'AMZN/AEON',  token0: 'AMZN',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x430B3c1BeA4Bd105AC9dFD88F7B9117eECF3637a' as `0x${string}` },
+  { name: 'AMZN/USDG',  token0: 'AMZN',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x6c8D348F3D16629935e0Fd77FfB96EC4816dA435' as `0x${string}` },
+  { name: 'BABA/AEON',  token0: 'BABA',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x5e161a8840d6375753731d20dA603A6aB4aC2748' as `0x${string}` },
+  { name: 'BABA/USDG',  token0: 'BABA',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x86B60A1C025b159B1aA891061beDEAAD2A62b52e' as `0x${string}` },
+  { name: 'BE/AEON',    token0: 'BE',    token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x90f6056da5E516f2a4CF7971A40D40D9525FD3C7' as `0x${string}` },
+  { name: 'BE/USDG',    token0: 'BE',    token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xB3e467F7F3930d1FAC1b1dBD5a377fEc38763048' as `0x${string}` },
+  { name: 'COIN/AEON',  token0: 'COIN',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x68BAA1cD558417A71f99B13B4E3255DF017D5951' as `0x${string}` },
+  { name: 'COIN/USDG',  token0: 'COIN',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x6012917b57ADd4400D5Dc2C3090fd01905BDC1AD' as `0x${string}` },
+  { name: 'CRCL/AEON',  token0: 'CRCL',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x5651Dbe9F3F730B05e904cd302449045d650d27f' as `0x${string}` },
+  { name: 'CRCL/USDG',  token0: 'CRCL',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xD107B9Ff4BCa85473d5F1C90858A266702F4Bb2B' as `0x${string}` },
+  { name: 'CRWV/AEON',  token0: 'CRWV',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x774e1DbBb1F7aa76EB83052C1E205799BBC90b60' as `0x${string}` },
+  { name: 'CRWV/USDG',  token0: 'CRWV',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xd0D5C6b8b715511f38798c7fb9a5CF2b7F4eCD79' as `0x${string}` },
+  { name: 'GOOGL/AEON', token0: 'GOOGL', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xEC63E87D41C088837aE825Fc0ffFd5d54e22e9ad' as `0x${string}` },
+  { name: 'GOOGL/USDG', token0: 'GOOGL', token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xBfE163398FEB32e6cFE9cB9bBa0f3a791F0E2AEE' as `0x${string}` },
+  { name: 'INTC/AEON',  token0: 'INTC',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xaaB08fF301dD07108cc92abdAAb26eF33b3128b3' as `0x${string}` },
+  { name: 'INTC/USDG',  token0: 'INTC',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x3B2C6c865144aFacD19E0A94664fD069217B9080' as `0x${string}` },
+  { name: 'META/AEON',  token0: 'META',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x5Df191615Bf75Fac0a7EAa6Ca9004540B986bEc3' as `0x${string}` },
+  { name: 'META/USDG',  token0: 'META',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x35D17334D60e2d66Fc7Bd8134FcD04de6327E478' as `0x${string}` },
+  { name: 'MSFT/AEON',  token0: 'MSFT',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x7fd17741539566d9952fA0E1c15577354ba84599' as `0x${string}` },
+  { name: 'MSFT/USDG',  token0: 'MSFT',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x2f6A06d63AE74adB9D7B93e7A5BE570921Ac0576' as `0x${string}` },
+  { name: 'MU/AEON',    token0: 'MU',    token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xAdeC4dcFe2FcB21e30327368Ac71f0232A2CD5f9' as `0x${string}` },
+  { name: 'MU/USDG',    token0: 'MU',    token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x13Fc57D534F6385A5a8298A863f9841D6448a281' as `0x${string}` },
+  { name: 'NVDA/AEON',  token0: 'NVDA',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xD3698bD92C892F21638eaCa8070d2A05865586A8' as `0x${string}` },
+  { name: 'NVDA/USDG',  token0: 'NVDA',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x5B7C1440aD8C1e10E6c36C8851F6b6F787C39d2B' as `0x${string}` },
+  { name: 'ORCL/AEON',  token0: 'ORCL',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x0D43C803bA52490a171faF76A58C8f4Df3450c47' as `0x${string}` },
+  { name: 'ORCL/USDG',  token0: 'ORCL',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x8Ea29453b524a8C1325C82FD24e38956a65A7042' as `0x${string}` },
+  { name: 'PLTR/AEON',  token0: 'PLTR',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x1142b85486e6D5D7f04DDd08DD40FEAaC1Bc41ff' as `0x${string}` },
+  { name: 'PLTR/USDG',  token0: 'PLTR',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xae54382e114BC6965942Ce8A3DbE8E3aF904779C' as `0x${string}` },
+  { name: 'SNDK/AEON',  token0: 'SNDK',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x1424A2e6634707B8b15c98E9F7B00611366dcFbe' as `0x${string}` },
+  { name: 'SNDK/USDG',  token0: 'SNDK',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0xE39f94A16743BA530bCF97d9f2D6324be4C451Fa' as `0x${string}` },
+  { name: 'SPCX/AEON',  token0: 'SPCX',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x603D32172a7A47676Caed0c37b8D8c368f519479' as `0x${string}` },
+  { name: 'SPCX/USDG',  token0: 'SPCX',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x0DeDE83443efFeE1CCF69276beC826502C6d70Ba' as `0x${string}` },
+  { name: 'TSLA/AEON',  token0: 'TSLA',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xa1B57937edA1F8ed3a151F3F676bAc3eC19959ef' as `0x${string}` },
+  { name: 'TSLA/USDG',  token0: 'TSLA',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x079C008EAADaFD62AeE351D61660AF64b5b022DC' as `0x${string}` },
+  { name: 'USAR/AEON',  token0: 'USAR',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x329860B303B5816239594D3D367ea5B8f2314eB2' as `0x${string}` },
+  { name: 'USAR/USDG',  token0: 'USAR',  token1: 'USDG', type: 'vAMM', fee: '1%', address: '0x8B016c5Ed32296D68068F3176Fa2CF2a32F2d406' as `0x${string}` },
 ]
 
 // Real, working pools deliberately excluded from the Liquidity page's
