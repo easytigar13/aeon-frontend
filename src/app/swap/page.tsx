@@ -17,6 +17,7 @@ import { useDexScreenerPairs, dexTokenStats } from '@/hooks/useDexScreener'
 import { TokenIcon } from '@/components/TokenIcon'
 import { Sparkline } from '@/components/Sparkline'
 import { AddToWalletButton } from '@/components/AddToWalletButton'
+import { ConfettiBurst } from '@/components/ConfettiBurst'
 
 type TokenKey = keyof typeof TOKENS
 
@@ -100,6 +101,8 @@ export default function SwapPage() {
   const [showTokenOutModal, setShowTokenOutModal] = useState(false)
   const [step, setStep] = useState<Step>('idle')
   const [manualErrMsg, setErrMsgState] = useState('')
+  const [celebrate, setCelebrate] = useState(false)
+  const [flipSpin, setFlipSpin] = useState(0)
 
   const balanceIn  = useTokenBalance(tokenIn,  address)
   const balanceOut = useTokenBalance(tokenOut, address)
@@ -179,10 +182,23 @@ export default function SwapPage() {
   const { isLoading: isApproveConfirming, isSuccess: approveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash })
   const { isLoading: isActionConfirming, isSuccess: actionSuccess }   = useWaitForTransactionReceipt({ hash: actionTxHash })
 
-  const flip = useCallback(() => { setTokenIn(tokenOut); setTokenOut(tokenIn); setAmountIn(''); setStep('idle') }, [tokenIn, tokenOut])
+  const flip = useCallback(() => {
+    setTokenIn(tokenOut); setTokenOut(tokenIn); setAmountIn(''); setStep('idle')
+    setFlipSpin(s => s + 180)
+  }, [tokenIn, tokenOut])
 
   // Reset the flow whenever the pair changes so a stale step never carries over.
   useEffect(() => { setStep('idle') }, [tokenIn, tokenOut])
+
+  // Celebration burst -- fires once per completed swap, not on every render
+  // while step stays 'done' (confetti replaying on unrelated re-renders would
+  // get old fast).
+  useEffect(() => {
+    if (step !== 'done') return
+    setCelebrate(true)
+    const t = setTimeout(() => setCelebrate(false), 50)
+    return () => clearTimeout(t)
+  }, [step])
 
   // Determine final amountOut
   let amountOutWei  = 0n
@@ -475,7 +491,11 @@ export default function SwapPage() {
         </div>
       )}
 
-      <div className="card p-1">
+      <div
+        className={clsx('card p-1 relative transition-shadow duration-500', step === 'done' && 'ring-1 ring-emerald-400/40')}
+        style={{ boxShadow: step === 'done' ? '0 0 40px -12px rgba(52,211,153,0.4)' : isBusy ? '0 0 40px -14px rgba(255,184,0,0.35)' : '0 0 30px -18px rgba(255,184,0,0.2)' }}
+      >
+        <ConfettiBurst trigger={celebrate} />
         {/* Token In */}
         <div className="bg-bg-raised rounded-xl p-4 mb-1">
           <div className="flex items-center justify-between mb-2">
@@ -485,7 +505,7 @@ export default function SwapPage() {
           <div className="flex items-center gap-3">
             <input type="number" value={amountIn} onChange={e => setAmountIn(e.target.value)} disabled={isFlowLocked} placeholder="0.0" className="flex-1 bg-transparent text-2xl font-mono text-text-primary placeholder-text-muted focus:outline-none disabled:opacity-60" />
             <div className="flex flex-col items-end gap-0.5 shrink-0">
-              <button onClick={() => !isFlowLocked && setShowTokenInModal(true)} disabled={isFlowLocked} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all disabled:opacity-60">
+              <button onClick={() => !isFlowLocked && setShowTokenInModal(true)} disabled={isFlowLocked} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover hover:enabled:scale-105 active:enabled:scale-95 transition-all disabled:opacity-60">
                 <TokenIcon symbol={tokenIn} size={28} />
                 <span className="font-display font-semibold text-base">{TOKENS[tokenIn].symbol}</span>
                 <ChevronDown size={15} className="text-text-muted" />
@@ -505,7 +525,7 @@ export default function SwapPage() {
             <span className="text-xs text-text-muted font-mono">{valueIn ? fmtUsd(valueIn) : '≈ $—'}</span>
             <div className="flex gap-1">
               {(['25', '50', 'MAX'] as const).map(label => (
-                <button key={label} onClick={() => setPercent(label === 'MAX' ? 100 : parseInt(label))} disabled={!isConnected || isFlowLocked} className="text-2xs text-text-muted hover:text-aeon-400 px-1.5 py-0.5 rounded border border-bg-border hover:border-aeon-400/30 transition-all font-mono disabled:opacity-40">
+                <button key={label} onClick={() => setPercent(label === 'MAX' ? 100 : parseInt(label))} disabled={!isConnected || isFlowLocked} className="text-2xs text-text-muted hover:text-aeon-400 px-1.5 py-0.5 rounded border border-bg-border hover:border-aeon-400/30 hover:enabled:scale-110 transition-all font-mono disabled:opacity-40">
                   {label === '25' ? '25%' : label === '50' ? '50%' : 'MAX'}
                 </button>
               ))}
@@ -515,8 +535,12 @@ export default function SwapPage() {
 
         {/* Flip */}
         <div className="flex justify-center -my-0.5 relative z-10">
-          <button onClick={flip} disabled={isFlowLocked} className="w-9 h-9 rounded-xl bg-bg-base border border-bg-border hover:border-aeon-400/50 hover:text-aeon-400 transition-all flex items-center justify-center text-text-muted disabled:opacity-60">
-            <ArrowUpDown size={16} />
+          <button
+            onClick={flip}
+            disabled={isFlowLocked}
+            className="w-9 h-9 rounded-xl bg-bg-base border border-bg-border hover:border-aeon-400/50 hover:text-aeon-400 hover:scale-110 active:scale-95 transition-all flex items-center justify-center text-text-muted disabled:opacity-60 disabled:hover:scale-100"
+          >
+            <ArrowUpDown size={16} style={{ transform: `rotate(${flipSpin}deg)`, transition: 'transform 0.4s ease' }} />
           </button>
         </div>
 
@@ -527,11 +551,11 @@ export default function SwapPage() {
             <span className="text-xs text-text-muted font-mono">Balance: {balanceOut.formatted}</span>
           </div>
           <div className="flex items-center gap-3">
-            <div className="flex-1 text-2xl font-mono text-text-primary">
+            <div key={amountOutFormatted} className="flex-1 text-2xl font-mono text-text-primary animate-fade-in">
               {amountOutFormatted || <span className="text-text-muted">0.0</span>}
             </div>
             <div className="flex flex-col items-end gap-0.5 shrink-0">
-              <button onClick={() => !isFlowLocked && setShowTokenOutModal(true)} disabled={isFlowLocked} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover transition-all disabled:opacity-60">
+              <button onClick={() => !isFlowLocked && setShowTokenOutModal(true)} disabled={isFlowLocked} className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl bg-bg-base border border-bg-border hover:border-bg-hover hover:enabled:scale-105 active:enabled:scale-95 transition-all disabled:opacity-60">
                 <TokenIcon symbol={tokenOut} size={28} />
                 <span className="font-display font-semibold text-base">{TOKENS[tokenOut].symbol}</span>
                 <ChevronDown size={15} className="text-text-muted" />
@@ -691,17 +715,27 @@ function TokenInfoCard({ tokenKey, info, price, onChainSparkline, dexStats }: {
   dexStats: ReturnType<typeof dexTokenStats>
 }) {
   const token = TOKENS[tokenKey]
-  const geckoSparkline = info?.sparkline ?? []
-  const chainSparkline = onChainSparkline ?? []
+
+  // Live price/volume/sparkline data can already be warm in the client's
+  // cache (from a previous page visit) before this component's first paint,
+  // while the server-rendered pass necessarily has none of it yet -- a
+  // hydration mismatch. Gate display of anything price-derived behind mount
+  // (same pattern SwapPage itself already uses for isConnected) so the
+  // server and client's first paint agree, then swap in the real numbers
+  // once mounted instead of fighting a server value that was never real.
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
 
   // DexScreener actually indexes this chain (GeckoTerminal doesn't — confirmed
   // 404 on every lookup), so prefer its price/change/volume when it has the
   // token; GeckoTerminal's hourly chart is still the best chart source when
   // present, otherwise fall back to a live chart built from this token's own
   // real on-chain trades (useVolume24h's priceHistory) rather than nothing.
-  const displayPrice  = dexStats.priceUsd ?? price
-  const change        = dexStats.priceChange24h ?? info?.priceChange24h ?? null
-  const volume24h     = dexStats.volume24h
+  const displayPrice  = mounted ? (dexStats.priceUsd ?? price) : null
+  const change        = mounted ? (dexStats.priceChange24h ?? info?.priceChange24h ?? null) : null
+  const volume24h     = mounted ? dexStats.volume24h : null
+  const geckoSparkline = mounted ? (info?.sparkline ?? []) : []
+  const chainSparkline = mounted ? (onChainSparkline ?? []) : []
 
   const usingGecko = geckoSparkline.length >= 2
   const usingChain = !usingGecko && chainSparkline.length >= 2
@@ -715,7 +749,10 @@ function TokenInfoCard({ tokenKey, info, price, onChainSparkline, dexStats }: {
   const isNative = token.address === NATIVE_SENTINEL
 
   return (
-    <div className="card p-4">
+    <div
+      className="card p-4 transition-shadow duration-500"
+      style={{ boxShadow: change !== null ? `0 0 30px -20px ${positive ? 'rgba(52,211,153,0.5)' : 'rgba(248,113,113,0.5)'}` : undefined }}
+    >
       <div className="flex items-start gap-3">
         <TokenIcon symbol={tokenKey} size={36} imageUrl={info?.imageUrl} />
         <div className="min-w-0">

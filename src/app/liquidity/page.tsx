@@ -17,6 +17,7 @@ import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { TokenIcon } from '@/components/TokenIcon'
 import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, amountsForLiquidity, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
 import { binIdToPrice, dlmmRangeSide, computeSpotDistribution } from '@/lib/dlmmMath'
+import { ConfettiBurst } from '@/components/ConfettiBurst'
 
 type PoolMode = 'vAMM' | 'CL' | 'DLMM'
 type Tab = 'add' | 'remove' | 'swap'
@@ -331,7 +332,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
           </thead>
           <tbody>
             {filtered.map(p => (
-              <tr key={`${p.type}-${p.address}`} className="border-b border-bg-border last:border-0 hover:bg-bg-raised/50 transition-colors">
+              <tr key={`${p.type}-${p.address}`} className="border-b border-bg-border last:border-0 hover:bg-bg-raised/50 hover:shadow-[inset_2px_0_0_0_rgba(255,184,0,0.4)] transition-all">
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-3">
                     <div className="flex -space-x-2">
@@ -356,7 +357,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => onDeposit(p.type, p.address)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-aeon-400 text-bg-base hover:bg-aeon-300 transition-colors"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-aeon-400 text-bg-base hover:bg-aeon-300 hover:scale-110 active:scale-95 transition-all"
                   >
                     DEPOSIT
                   </button>
@@ -761,6 +762,16 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   const [showPoolPicker, setShowPoolPicker] = useState(false)
   const [step,           setStep]           = useState<Step>('idle')
   const [errMsg,         setErrMsg]         = useState('')
+  const [celebrate,      setCelebrate]      = useState(false)
+
+  // Celebration burst -- fires once when either flow (add or remove) lands
+  // on its success step, not on every re-render while step stays there.
+  useEffect(() => {
+    if (step !== 'done' && step !== 'remove_done') return
+    setCelebrate(true)
+    const t = setTimeout(() => setCelebrate(false), 50)
+    return () => clearTimeout(t)
+  }, [step])
 
   // Once discovered pools load in (they arrive a beat after the static
   // list on first render), pick up a match for initialPool if we didn't
@@ -995,7 +1006,8 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   const yearlyEarn = dilutedApr !== null && depositUsd > 0 ? depositUsd * dilutedApr / 100 : null
 
   return (
-    <>
+    <div className="relative">
+      <ConfettiBurst trigger={celebrate} />
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4">
         <button onClick={() => { setTab('add'); setStep('idle') }} className={clsx('flex-1 py-2 rounded-lg text-sm font-medium flex items-center justify-center gap-1.5 transition-all', tab === 'add' ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
           <Plus size={14} /> Add
@@ -1008,7 +1020,7 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
       {/* Pool selector */}
       <div className="card p-4 mb-4">
         <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-2">Pool</div>
-        <button onClick={() => setShowPoolPicker(!showPoolPicker)} className="w-full flex items-center justify-between p-3 bg-bg-raised rounded-xl border border-bg-border hover:border-bg-hover transition-all">
+        <button onClick={() => setShowPoolPicker(!showPoolPicker)} className="w-full flex items-center justify-between p-3 bg-bg-raised rounded-xl border border-bg-border hover:border-bg-hover hover:scale-[1.01] active:scale-[0.99] transition-all">
           <div className="flex items-center gap-3">
             <div className="flex -space-x-1">
               <TokenIcon symbol={selectedPool.token0} size={28} />
@@ -1145,7 +1157,8 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
           <button
             onClick={startAddLiquidity}
             disabled={isConnected && (isProcessing || !amount0 || !amount1)}
-            className="btn-primary w-full py-4 flex items-center justify-center gap-2"
+            className={clsx('btn-primary w-full py-4 flex items-center justify-center gap-2 transition-shadow duration-500', step === 'done' && 'ring-1 ring-emerald-400/40')}
+            style={{ boxShadow: step === 'done' ? '0 0 40px -12px rgba(52,211,153,0.5)' : undefined }}
           >
             {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}
             {stepLabel()}
@@ -1162,7 +1175,7 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
             <input type="range" min={0} max={100} value={removeAmount} onChange={e => setRemoveAmount(parseInt(e.target.value))} className="w-full accent-aeon-400 mb-3" />
             <div className="flex gap-2">
               {[25, 50, 75, 100].map(p => (
-                <button key={p} onClick={() => setRemoveAmount(p)} className={clsx('flex-1 py-2 rounded-xl text-sm font-medium transition-all', removeAmount === p ? 'bg-aeon-400/15 text-aeon-400 border border-aeon-400/30' : 'bg-bg-raised text-text-muted border border-bg-border hover:border-bg-hover')}>
+                <button key={p} onClick={() => setRemoveAmount(p)} className={clsx('flex-1 py-2 rounded-xl text-sm font-medium hover:scale-105 active:scale-95 transition-all', removeAmount === p ? 'bg-aeon-400/15 text-aeon-400 border border-aeon-400/30' : 'bg-bg-raised text-text-muted border border-bg-border hover:border-bg-hover')}>
                   {p === 100 ? 'MAX' : `${p}%`}
                 </button>
               ))}
@@ -1218,7 +1231,8 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
               }
             }}
             disabled={isConnected && (lpBal === 0n || ['approve_lp', 'approve_lp_wait', 'remove', 'remove_wait'].includes(step))}
-            className="btn-primary w-full py-4 flex items-center justify-center gap-2"
+            className={clsx('btn-primary w-full py-4 flex items-center justify-center gap-2 transition-shadow duration-500', step === 'remove_done' && 'ring-1 ring-emerald-400/40')}
+            style={{ boxShadow: step === 'remove_done' ? '0 0 40px -12px rgba(52,211,153,0.5)' : undefined }}
           >
             <Minus size={16} />
             {!isConnected ? 'Connect Wallet'
@@ -1229,7 +1243,7 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
           </button>
         </div>
       )}
-    </>
+    </div>
   )
 }
 
@@ -1720,7 +1734,7 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
 
       <div className="card p-4 mb-4">
         <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-2">Pool</div>
-        <button onClick={() => setShowPoolPicker(!showPoolPicker)} className="w-full flex items-center justify-between p-3 bg-bg-raised rounded-xl border border-bg-border hover:border-bg-hover transition-all">
+        <button onClick={() => setShowPoolPicker(!showPoolPicker)} className="w-full flex items-center justify-between p-3 bg-bg-raised rounded-xl border border-bg-border hover:border-bg-hover hover:scale-[1.01] active:scale-[0.99] transition-all">
           <div className="flex items-center gap-3">
             <div className="flex -space-x-1">
               <TokenIcon symbol={selectedPool.token0} size={28} />
@@ -2351,7 +2365,7 @@ function DlmmLiquidity({ initialPool }: { initialPool?: string }) {
 
       <div className="card p-4 mb-4">
         <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-2">Pool</div>
-        <button onClick={() => setShowPoolPicker(!showPoolPicker)} className="w-full flex items-center justify-between p-3 bg-bg-raised rounded-xl border border-bg-border hover:border-bg-hover transition-all">
+        <button onClick={() => setShowPoolPicker(!showPoolPicker)} className="w-full flex items-center justify-between p-3 bg-bg-raised rounded-xl border border-bg-border hover:border-bg-hover hover:scale-[1.01] active:scale-[0.99] transition-all">
           <div className="flex items-center gap-3">
             <div className="flex -space-x-1">
               <TokenIcon symbol={selectedPool.token0} size={28} />

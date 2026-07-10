@@ -59,7 +59,7 @@
     @apply bg-aeon-400 hover:bg-aeon-300 text-bg-base font-semibold
            rounded-xl px-6 py-3 transition-all duration-200
            disabled:opacity-40 disabled:cursor-not-allowed
-           active:scale-[0.98];
+           hover:enabled:scale-[1.015] active:enabled:scale-[0.98];
   }
 
   .btn-secondary {

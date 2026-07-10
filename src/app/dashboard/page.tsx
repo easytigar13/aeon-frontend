@@ -77,6 +77,7 @@ function RadialGauge({ percent, size = 152, stroke = 10, color, children }: { pe
         <circle
           cx={size / 2} cy={size / 2} r={r} stroke={color} strokeWidth={stroke} fill="none"
           strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
+          suppressHydrationWarning
           style={{ filter: `drop-shadow(0 0 6px ${color})`, transition: 'stroke-dashoffset 0.6s ease' }}
         />
       </svg>
