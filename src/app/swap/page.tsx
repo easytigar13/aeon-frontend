@@ -10,6 +10,7 @@ import { robinhoodChain } from '@/config/chain'
 import { AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, AEON_SWAP_UNWRAP_HELPER_ABI, ERC20_ABI, WETH_ABI } from '@/config/abis'
 import { useRouting, type RouteStep } from '@/hooks/useRouting'
 import { useOneInchQuote } from '@/hooks/useOneInchQuote'
+import { useOpenOceanQuote } from '@/hooks/useOpenOceanQuote'
 import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -48,6 +49,12 @@ const ZERO_ADDR = '0x0000000000000000000000000000000000000000' as `0x${string}`
 // confirmed deployed + verified here (real 1inch source, not a coincidental
 // address collision) before wiring this in.
 const ONEINCH_ROUTER = '0x111111125421cA6dc452d289314280a0f8842A65' as `0x${string}`
+// OpenOcean's ExchangeProxy -- also a canonical cross-chain address, verified
+// deployed here (real bytecode) and confirmed OpenOcean's off-chain API
+// actually routes on this chain (live quote returning real UniswapV2/V3/V4 +
+// PancakeV2/V3 routes, not just a coincidental address match) before wiring
+// this in.
+const OPENOCEAN_ROUTER = '0x6352a56caadC4F1E25CD6c75970Fa768A3304e64' as `0x${string}`
 
 // symbol → number of pools (across all 3 pool types) that hold it
 const POOL_COUNT_BY_SYMBOL: Record<string, number> = {}
@@ -139,29 +146,40 @@ export default function SwapPage() {
   const route = needsUnwrapStep ? routing.vammOnly : routing.best
   const hasNonVammHop = !!route && route.steps.some(s => s.poolType !== 0)
 
-  // 1inch as a 4th venue, competing against our own routing -- only for
-  // plain ERC20<->ERC20 pairs (skipped whenever native ETH wrap/unwrap would
-  // be involved, to keep those already-proven flows untouched). Silently
-  // unavailable (never an error) whenever ONEINCH_API_KEY isn't configured
-  // server-side, or 1inch simply doesn't have a route -- falls back to our
-  // own routing either way.
+  // 1inch and OpenOcean as competing venues against our own routing -- only
+  // for plain ERC20<->ERC20 pairs (skipped whenever native ETH wrap/unwrap
+  // would be involved, to keep those already-proven flows untouched). Each
+  // is silently unavailable (never an error) whenever its API has no route
+  // (or, for 1inch, no server-side key) -- falls back to our own routing, or
+  // to whichever of the two external venues does have a route, either way.
   const oneInchEligible = !isWrapUnwrap && !needsWrapStep && !needsUnwrapStep
   const oneInch = useOneInchQuote(
     oneInchEligible ? tokenIn : '',
     oneInchEligible ? tokenOut : '',
     oneInchEligible ? parsedAmountIn : 0n,
   )
-  const use1inch = oneInchEligible && oneInch.configured && oneInch.amountOut !== null
-    && oneInch.amountOut > (route?.amountOut ?? 0n)
+  const openOcean = useOpenOceanQuote(
+    oneInchEligible ? tokenIn : '',
+    oneInchEligible ? tokenOut : '',
+    oneInchEligible ? parsedAmountIn : 0n,
+  )
+  const oneInchAmount    = (oneInchEligible && oneInch.configured && oneInch.amountOut !== null) ? oneInch.amountOut : null
+  const openOceanAmount  = (oneInchEligible && openOcean.configured && openOcean.amountOut !== null) ? openOcean.amountOut : null
+  const bestExternalAmount = oneInchAmount !== null && openOceanAmount !== null
+    ? (oneInchAmount > openOceanAmount ? oneInchAmount : openOceanAmount)
+    : (oneInchAmount ?? openOceanAmount)
+  const beatsOwnRoute = bestExternalAmount !== null && bestExternalAmount > (route?.amountOut ?? 0n)
+  const use1inch     = beatsOwnRoute && oneInchAmount !== null && bestExternalAmount === oneInchAmount
+  const useOpenOcean = beatsOwnRoute && !use1inch && openOceanAmount !== null && bestExternalAmount === openOceanAmount
 
   // The address actually approved/spent for this swap — WETH when starting
-  // from native ETH. Spender is 1inch's own router when its quote wins; the
-  // unwrap helper when the output is native ETH (that contract pulls the
-  // input tokens for that path); the universal router when the best route
-  // crosses pool types; otherwise the plain vAMM-only router, unchanged from
-  // before.
+  // from native ETH. Spender is whichever external aggregator's own router
+  // when its quote wins; the unwrap helper when the output is native ETH
+  // (that contract pulls the input tokens for that path); the universal
+  // router when the best route crosses pool types; otherwise the plain
+  // vAMM-only router, unchanged from before.
   const swapTokenInAddr = needsWrapStep ? WETH_ADDR : TOKENS[tokenIn].address
-  const swapSpender     = use1inch ? ONEINCH_ROUTER : needsUnwrapStep ? CONTRACTS.SwapUnwrapHelper : hasNonVammHop ? CONTRACTS.UniversalRouter : CONTRACTS.AeonRouter
+  const swapSpender     = use1inch ? ONEINCH_ROUTER : useOpenOcean ? OPENOCEAN_ROUTER : needsUnwrapStep ? CONTRACTS.SwapUnwrapHelper : hasNonVammHop ? CONTRACTS.UniversalRouter : CONTRACTS.AeonRouter
 
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: swapTokenInAddr,
@@ -175,10 +193,13 @@ export default function SwapPage() {
   const { writeContract: writeAction, data: writeActionTxHash, isPending: isWriteActing, error: actionError } = useWriteContract()
   // 1inch returns raw router calldata (not a call through one of our own
   // ABIs), so its swap needs a plain sendTransaction instead of writeContract.
-  // At most one of these two ever fires per swap, so merging them below is safe.
-  const { sendTransaction, data: send1inchTxHash, isPending: isSending1inch, error: send1inchError } = useSendTransaction()
-  const actionTxHash = writeActionTxHash ?? send1inchTxHash
-  const isActing = isWriteActing || isSending1inch
+  // OpenOcean's /swap_quote is the same shape (ready-to-send { to, data,
+  // value }), so it reuses this same sendTransaction call rather than a
+  // second hook instance. At most one of writeAction/sendTransaction ever
+  // fires per swap, so merging them below is safe.
+  const { sendTransaction, data: sendTxHash, isPending: isSending, error: sendError } = useSendTransaction()
+  const actionTxHash = writeActionTxHash ?? sendTxHash
+  const isActing = isWriteActing || isSending
   const { isLoading: isApproveConfirming, isSuccess: approveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash })
   const { isLoading: isActionConfirming, isSuccess: actionSuccess }   = useWaitForTransactionReceipt({ hash: actionTxHash })
 
@@ -208,6 +229,9 @@ export default function SwapPage() {
   } else if (use1inch) {
     amountOutWei = oneInch.amountOut!
     // 1inch doesn't expose a price-impact figure via /quote; not shown for this route.
+  } else if (useOpenOcean) {
+    amountOutWei = openOcean.amountOut!
+    // OpenOcean's /quote doesn't expose a price-impact figure either; not shown for this route.
   } else if (route) {
     amountOutWei = route.amountOut
     priceImpact  = route.priceImpact
@@ -321,9 +345,34 @@ export default function SwapPage() {
     }
   }
 
+  // OpenOcean's /swap_quote is the same shape as 1inch's /swap -- ready-to-send
+  // { to, data, value } for their own router, sent as a plain transaction.
+  async function fireOpenOceanSwap() {
+    if (!address) return
+    try {
+      const params = new URLSearchParams({
+        src: tokenIn === 'ETH' ? NATIVE_SENTINEL : TOKENS[tokenIn].address,
+        dst: tokenOut === 'ETH' ? NATIVE_SENTINEL : TOKENS[tokenOut].address,
+        amount: parsedAmountIn.toString(),
+        decimalsIn: TOKENS[tokenIn].decimals.toString(),
+        from: address,
+        slippage: String(slippageSafe),
+      })
+      const res = await fetch(`/api/openocean/swap?${params.toString()}`)
+      const body = await res.json()
+      if (!body.configured || body.error) throw new Error(body.error ?? 'OpenOcean swap unavailable')
+      sendTransaction({ to: body.tx.to as `0x${string}`, data: body.tx.data as `0x${string}`, value: BigInt(body.tx.value) })
+      setStep('swap_wait')
+    } catch (e: any) {
+      setErrMsgState(e?.message ?? 'OpenOcean swap failed')
+      setStep('idle')
+    }
+  }
+
   function fireSwap() {
     if (!address) return
     if (use1inch) { fire1inchSwap(); return }
+    if (useOpenOcean) { fireOpenOceanSwap(); return }
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200)
     if (needsUnwrapStep) {
       const steps = buildLegacySteps()
@@ -355,7 +404,7 @@ export default function SwapPage() {
       return
     }
 
-    if (!route && !use1inch) return
+    if (!route && !use1inch && !useOpenOcean) return
 
     if (needsWrapStep) {
       writeAction({ address: WETH_ADDR, abi: WETH_ABI, functionName: 'deposit', args: [], value: parsedAmountIn })
@@ -397,7 +446,7 @@ export default function SwapPage() {
 
   useEffect(() => { if (approveError) { setErrMsgState(approveError.message); setStep('idle') } }, [approveError])
   useEffect(() => { if (actionError)  { setErrMsgState(actionError.message);  setStep('idle') } }, [actionError])
-  useEffect(() => { if (send1inchError) { setErrMsgState(send1inchError.message); setStep('idle') } }, [send1inchError])
+  useEffect(() => { if (sendError) { setErrMsgState(sendError.message); setStep('idle') } }, [sendError])
   useEffect(() => { if (hasAmount) setErrMsgState('') }, [amountIn, tokenIn, tokenOut])
 
   const isBusy  = isApproving || isApproveConfirming || isActing || isActionConfirming || (step !== 'idle' && step !== 'done')
@@ -410,9 +459,9 @@ export default function SwapPage() {
   }
   const errMsg  = sanitizeErr(manualErrMsg)
 
-  const noRoute     = hasAmount && !route && !use1inch && !isWrapUnwrap
+  const noRoute     = hasAmount && !route && !use1inch && !useOpenOcean && !isWrapUnwrap
   const overBal     = hasAmount && balanceIn.raw > 0n && parsedAmountIn > balanceIn.raw
-  const noLiquidity = hasAmount && route && route.amountOut === 0n && !use1inch
+  const noLiquidity = hasAmount && route && route.amountOut === 0n && !use1inch && !useOpenOcean
 
   function buttonLabel() {
     if (!isConnected)  return 'Connect Wallet to Swap'
@@ -458,9 +507,9 @@ export default function SwapPage() {
   // Route label for display
   const routeLabel = isWrapUnwrap
     ? `${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
-    : use1inch ? `${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
+    : (use1inch || useOpenOcean) ? `${TOKENS[tokenIn].symbol} → ${TOKENS[tokenOut].symbol}`
     : route?.label ?? ''
-  const routeVia = use1inch ? '1inch aggregator' : route?.via ?? ''
+  const routeVia = use1inch ? '1inch aggregator' : useOpenOcean ? 'OpenOcean aggregator' : route?.via ?? ''
 
   return (
     <div className="max-w-lg mx-auto px-4 py-12">
@@ -576,13 +625,16 @@ export default function SwapPage() {
             {use1inch && (
               <span className="text-2xs font-mono text-amber-400">1inch</span>
             )}
-            {!use1inch && route?.split && (
+            {useOpenOcean && (
+              <span className="text-2xs font-mono text-cyan-400">OpenOcean</span>
+            )}
+            {!use1inch && !useOpenOcean && route?.split && (
               <span className="text-2xs font-mono text-emerald-400">Split</span>
             )}
-            {!use1inch && route && !route.split && route.steps.length > 1 && (
+            {!use1inch && !useOpenOcean && route && !route.split && route.steps.length > 1 && (
               <span className="text-2xs font-mono text-violet-400">Multi-hop</span>
             )}
-            {!use1inch && route && !route.split && route.steps.length === 1 && (
+            {!use1inch && !useOpenOcean && route && !route.split && route.steps.length === 1 && (
               <span className="text-2xs font-mono text-blue-400">Direct</span>
             )}
           </div>
@@ -623,7 +675,7 @@ export default function SwapPage() {
         )}
 
         {/* Pool price vs market warning */}
-        {badPrice && hasAmount && (route || use1inch) && amountOutWei > 0n && (
+        {badPrice && hasAmount && (route || use1inch || useOpenOcean) && amountOutWei > 0n && (
           <div className="mt-3 mx-1 p-3 rounded-xl bg-orange-500/10 border border-orange-500/30 text-xs text-orange-400 space-y-1">
             <div className="font-semibold">⚠ Pool price is {marketDeviation.toFixed(1)}% below market</div>
             <div className="text-orange-400/80">
@@ -635,11 +687,11 @@ export default function SwapPage() {
         )}
 
         {/* Quote info */}
-        {hasAmount && (route || use1inch) && amountOutWei > 0n && (
+        {hasAmount && (route || use1inch || useOpenOcean) && amountOutWei > 0n && (
           <div className="mt-3 mx-1 p-3 bg-bg-base rounded-xl space-y-1.5">
             {[
               { label: 'Rate',         value: spotRate > 0 ? `1 ${TOKENS[tokenIn].symbol} = ${spotRate.toFixed(6)} ${TOKENS[tokenOut].symbol}` : '—' },
-              ...(use1inch ? [] : [{ label: 'Price Impact', value: priceImpact < 0.01 ? '< 0.01%' : `${priceImpact.toFixed(2)}%`, warn: priceImpact > 2 }]),
+              ...((use1inch || useOpenOcean) ? [] : [{ label: 'Price Impact', value: priceImpact < 0.01 ? '< 0.01%' : `${priceImpact.toFixed(2)}%`, warn: priceImpact > 2 }]),
               { label: 'Min Received', value: `${parseFloat(formatUnits(amountOutMin, TOKENS[tokenOut].decimals)).toFixed(6)} ${TOKENS[tokenOut].symbol}` },
               { label: 'Route',        value: routeLabel },
               { label: 'Via',          value: routeVia },
