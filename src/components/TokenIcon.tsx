@@ -6,6 +6,36 @@ const TRUSTWALLET_LOGOS: Record<string, string> = {
   WETH: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png',
 }
 
+// TradingView's public per-company symbol-logo CDN -- real company logos for
+// Robinhood's tokenized stocks (AAPL, TSLA, etc. are real, recognizable
+// public companies, unlike the small independently-deployed tokens above,
+// so a plain letter avatar undersells them). Every slug below verified to
+// return 200 before wiring in (TradingView's URL scheme isn't just
+// ticker-based, so a few needed the company's actual slug, not a guess from
+// the ticker).
+const STOCK_LOGOS: Record<string, string> = {
+  AAPL:  'https://s3-symbol-logo.tradingview.com/apple--big.svg',
+  AMD:   'https://s3-symbol-logo.tradingview.com/advanced-micro-devices--big.svg',
+  AMZN:  'https://s3-symbol-logo.tradingview.com/amazon--big.svg',
+  BABA:  'https://s3-symbol-logo.tradingview.com/alibaba--big.svg',
+  BE:    'https://s3-symbol-logo.tradingview.com/bloom-energy--big.svg',
+  COIN:  'https://s3-symbol-logo.tradingview.com/coinbase--big.svg',
+  CRCL:  'https://s3-symbol-logo.tradingview.com/circle--big.svg',
+  CRWV:  'https://s3-symbol-logo.tradingview.com/coreweave--big.svg',
+  GOOGL: 'https://s3-symbol-logo.tradingview.com/alphabet--big.svg',
+  INTC:  'https://s3-symbol-logo.tradingview.com/intel--big.svg',
+  META:  'https://s3-symbol-logo.tradingview.com/meta-platforms--big.svg',
+  MSFT:  'https://s3-symbol-logo.tradingview.com/microsoft--big.svg',
+  MU:    'https://s3-symbol-logo.tradingview.com/micron-technology--big.svg',
+  NVDA:  'https://s3-symbol-logo.tradingview.com/nvidia--big.svg',
+  ORCL:  'https://s3-symbol-logo.tradingview.com/oracle--big.svg',
+  PLTR:  'https://s3-symbol-logo.tradingview.com/palantir--big.svg',
+  SNDK:  'https://s3-symbol-logo.tradingview.com/sandisk--big.svg',
+  SPCX:  'https://s3-symbol-logo.tradingview.com/spacex--big.svg',
+  TSLA:  'https://s3-symbol-logo.tradingview.com/tesla--big.svg',
+  USAR:  'https://s3-symbol-logo.tradingview.com/usa-rare-earth--big.svg',
+}
+
 const AVATAR_COLORS: Record<string, string> = {
   AEON:     '#FFB800',
   ETH:      '#627EEA',
@@ -15,6 +45,30 @@ const AVATAR_COLORS: Record<string, string> = {
   ROBINFUN: '#EC4899',
   CASHCAT:  '#22D3EE',
   SLEEP:    '#6366F1',
+  SHERWOOD: '#10B981',
+  // Real (approximate) brand colors -- only ever shown if the TradingView
+  // logo above fails to load, but picked to still look intentional rather
+  // than falling back to the generic gold used for everything else.
+  AAPL:  '#A2AAAD',
+  AMD:   '#ED1C24',
+  AMZN:  '#FF9900',
+  BABA:  '#FF6A00',
+  BE:    '#0A8A5F',
+  COIN:  '#0052FF',
+  CRCL:  '#7B61FF',
+  CRWV:  '#4C6EF5',
+  GOOGL: '#4285F4',
+  INTC:  '#0071C5',
+  META:  '#0866FF',
+  MSFT:  '#00A4EF',
+  MU:    '#7A1FA2',
+  NVDA:  '#76B900',
+  ORCL:  '#F80000',
+  PLTR:  '#4C566A',
+  SNDK:  '#E4002B',
+  SPCX:  '#005288',
+  TSLA:  '#CC0000',
+  USAR:  '#B8860B',
 }
 
 // Optional imageUrl from an external source (e.g. GeckoTerminal) takes priority
@@ -31,9 +85,10 @@ export function TokenIcon({
   const [fallbackFailed, setFallbackFailed] = useState(false)
 
   const primaryUrl = imageUrl && !primaryFailed ? imageUrl : null
+  const stockUrl = STOCK_LOGOS[symbol] && !fallbackFailed ? STOCK_LOGOS[symbol] : null
   const twUrl = TRUSTWALLET_LOGOS[symbol] && !fallbackFailed ? TRUSTWALLET_LOGOS[symbol] : null
   const aeonUrl = symbol === 'AEON' && !fallbackFailed ? '/logo.jpg' : null
-  const activeUrl = primaryUrl ?? twUrl ?? aeonUrl
+  const activeUrl = primaryUrl ?? stockUrl ?? twUrl ?? aeonUrl
 
   const color = AVATAR_COLORS[symbol] ?? '#FFB800'
   const letter = symbol.replace(/^W/, '')[0]
