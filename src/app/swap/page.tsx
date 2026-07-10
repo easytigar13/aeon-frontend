@@ -4,7 +4,7 @@ import { ArrowUpDown, Settings, ChevronDown, Loader2, TrendingUp, TrendingDown, 
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useWriteContract, useWaitForTransactionReceipt, useReadContract, useSendTransaction } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { formatUnits, parseUnits, maxUint256 } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
 import { TOKENS, POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
 import { robinhoodChain } from '@/config/chain'
 import { AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, AEON_SWAP_UNWRAP_HELPER_ABI, ERC20_ABI, WETH_ABI } from '@/config/abis'
@@ -348,7 +348,7 @@ export default function SwapPage() {
     }
 
     if (needsApproval) {
-      writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [swapSpender, maxUint256] })
+      writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [swapSpender, parsedAmountIn] })
       setStep('approve_wait')
       return
     }
@@ -362,7 +362,7 @@ export default function SwapPage() {
     if (step === 'wrap_wait') {
       refetchAllowance().then(res => {
         if ((res.data ?? 0n) < parsedAmountIn) {
-          writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [swapSpender, maxUint256] })
+          writeContract({ address: swapTokenInAddr, abi: ERC20_ABI, functionName: 'approve', args: [swapSpender, parsedAmountIn] })
           setStep('approve_wait')
         } else {
           fireSwap()

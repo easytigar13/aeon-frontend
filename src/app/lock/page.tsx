@@ -4,7 +4,7 @@ import { Lock, Flame, Info } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { formatUnits, parseUnits, maxUint256 } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
 import { CONTRACTS, TOKENS } from '@/config/contracts'
 import { VOTING_ESCROW_ABI, FURNACE_ABI, ERC20_ABI } from '@/config/abis'
 
@@ -152,7 +152,7 @@ export default function LockPage() {
     if (!isConnected) { openConnectModal?.(); return }
     if (!lockAmount || parseFloat(lockAmount) <= 0) return
     if (needsVeApproval) {
-      writeContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonVotingEscrow, maxUint256] })
+      writeContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonVotingEscrow, parsedLockAmount] })
       return
     }
     writeContract({
@@ -168,7 +168,7 @@ export default function LockPage() {
     if (!isConnected) { openConnectModal?.(); return }
     if (!burnAmount || parseFloat(burnAmount) <= 0) return
     if (needsFurnaceApproval) {
-      writeContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.TheFurnace, maxUint256] })
+      writeContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.TheFurnace, parsedBurnAmount] })
       return
     }
     writeContract({ address: CONTRACTS.TheFurnace, abi: FURNACE_ABI, functionName: 'burn', args: [parsedBurnAmount] })
@@ -192,7 +192,7 @@ export default function LockPage() {
     const amt = safeParseUnits18(increaseAmt)
     if (!id || amt === 0n) return
     if (needsVeApproval || (veAllowance !== undefined && veAllowance < amt)) {
-      writeContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonVotingEscrow, maxUint256] })
+      writeContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonVotingEscrow, amt] })
       return
     }
     writeContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'increaseAmount', args: [id, amt], gas: ESCROW_GAS_LIMIT })

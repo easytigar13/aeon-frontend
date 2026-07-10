@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useWriteContract, useWaitForTransactionReceipt, useSignMessage } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { formatUnits, maxUint256, decodeEventLog } from 'viem'
+import { formatUnits, decodeEventLog } from 'viem'
 import { CONTRACTS, TOKENS } from '@/config/contracts'
 import { TOWER_DEFENSE_ARENA_ABI, ERC20_ABI } from '@/config/abis'
 import { TowerDefenseCanvas, GameEndResult } from '@/components/games/TowerDefenseCanvas'
@@ -57,7 +57,7 @@ export default function TowerDefensePage() {
     setErrMsg('')
     if (needsApproval) {
       setStakedStep('approve')
-      writeApprove({ address: TOKENS.AEON.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.TowerDefenseArena, maxUint256] })
+      writeApprove({ address: TOKENS.AEON.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.TowerDefenseArena, entryFee] })
       setStakedStep('approve_wait')
     } else {
       setStakedStep('starting')

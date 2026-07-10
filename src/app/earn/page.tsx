@@ -5,7 +5,7 @@ import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, BarChart3 } from 'lucid
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { formatUnits, parseUnits, maxUint256 } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, CL_GAUGES, DLMM_GAUGES, ALGEBRA_CONTRACTS, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
 import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, CL_GAUGE_ABI, DLMM_GAUGE_ABI, ERC721_APPROVE_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
@@ -157,8 +157,8 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   useEffect(() => {
     if (!t0 || !t1) return
     setLiqErr('')
-    if (liqStep === 'app0')    { liqWrite({ address: t0.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, maxUint256] }); setLiqStep('app0_wait') }
-    if (liqStep === 'app1')    { liqWrite({ address: t1.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, maxUint256] }); setLiqStep('app1_wait') }
+    if (liqStep === 'app0')    { liqWrite({ address: t0.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, parseUnits(amt0 || '0', t0.decimals)] }); setLiqStep('app0_wait') }
+    if (liqStep === 'app1')    { liqWrite({ address: t1.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, parseUnits(amt1 || '0', t1.decimals)] }); setLiqStep('app1_wait') }
     if (liqStep === 'adding')  {
       const a0 = parseUnits(amt0 || '0', t0.decimals)
       const a1 = parseUnits(amt1 || '0', t1.decimals)
@@ -327,7 +327,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
     if (!wallet || !gauge) return
     setErrMsg('')
     if (step === 'approving') {
-      writeContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [gauge, maxUint256] })
+      writeContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [gauge, parseUnits(stakeAmt || '0', 18)] })
       setStep('approve_wait')
     }
     if (step === 'staking') {
@@ -1291,8 +1291,9 @@ export default function EarnPage() {
   for (const pool of UNIQUE_POOLS) {
     const tvl = tvlByAddr[pool.address] ?? null
     const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
-    aprByAddr[pool.address] = (tvl && tvl > 0 && volWeek !== null)
-      ? (volWeek * parseFeeRate(pool.fee) * (365 / 7) / tvl) * 100
+    const feesWeek = volWeek !== null ? volWeek * parseFeeRate(pool.fee) : null
+    aprByAddr[pool.address] = (tvl && tvl > 0 && feesWeek !== null)
+      ? (feesWeek * (365 / 7) / tvl) * 100
       : null
   }
 

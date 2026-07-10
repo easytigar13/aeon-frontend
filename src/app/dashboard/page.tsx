@@ -27,6 +27,8 @@ function tokenIcon(symbol: string) {
   return symbol.startsWith('WBTC') ? '₿' : symbol[0]
 }
 
+function parseFeeRate(fee: string): number { return parseFloat(fee.replace('%', '')) / 100 }
+
 export default function DashboardPage() {
   const [chartTab, setChartTab] = useState<'tvl' | 'volume'>('tvl')
 
@@ -40,6 +42,13 @@ export default function DashboardPage() {
   const volByAddr = volResult.byPool
   const volByAddrWeek = volResult.byPoolWeek
   const statByAddr = Object.fromEntries(poolStats.map(s => [s.address, s]))
+
+  const seenAddrs = new Set<string>()
+  const uniquePools = POOLS.filter(p => {
+    if (seenAddrs.has(p.address)) return false
+    seenAddrs.add(p.address)
+    return true
+  })
 
   // Matches usePoolStats (30s) / usePrices (15s) / useVolume24h (60s) below --
   // these 6 reads used to fire once on mount and never again, so the top
@@ -80,12 +89,27 @@ export default function DashboardPage() {
       ? (volume24h * 7 * blendedFeePct) / 10 / aeonPrice
       : null
 
-  // Fees this epoch — FeeDistributorV3.lastEpochFeesUSD is already USD-denominated (18 dec)
-  const feesThisEpoch = epochFeesRaw
-    ? parseFloat(formatUnits(epochFeesRaw as bigint, 18))
-    : (volume24h !== null)
-      ? volume24h * elapsedDays * blendedFeePct
-      : null
+  // Fees this epoch — FeeDistributorV3.lastEpochFeesUSD only updates once per
+  // epoch (on distribute()), so mid-epoch it's still reporting the PREVIOUS
+  // epoch's already-finalized total, not what's actually accrued so far this
+  // epoch. Real per-pool volume (byPoolWeek, a genuinely-measured trailing
+  // 7-day window) at each pool's real fee tier, scaled to how far into the
+  // current epoch we are, tracks live activity instead -- same fix pattern
+  // as the APR calc above (real trailing average, not a stale/blended guess).
+  const realFeesThisEpoch = uniquePools.reduce((sum, p) => {
+    const volWeek = volByAddrWeek[p.address.toLowerCase()]
+    if (volWeek === undefined || volWeek === null) return sum
+    return sum + (volWeek / 7) * elapsedDays * parseFeeRate(p.fee)
+  }, 0)
+  const hasLiveVolumeData = Object.keys(volByAddrWeek).length > 0
+
+  const feesThisEpoch = hasLiveVolumeData
+    ? realFeesThisEpoch
+    : epochFeesRaw
+      ? parseFloat(formatUnits(epochFeesRaw as bigint, 18))
+      : (volume24h !== null)
+        ? volume24h * elapsedDays * blendedFeePct
+        : null
 
   const burnedPct = aeonSupply && totalBurned && aeonSupply > 0n
     ? ((Number(totalBurned) / Number(aeonSupply)) * 100).toFixed(2)
@@ -100,13 +124,6 @@ export default function DashboardPage() {
   const lockRate = aeonSupply && totalVotes && aeonSupply > 0n
     ? ((Number(totalVotes) / Number(aeonSupply)) * 100).toFixed(1)
     : '—'
-
-  const seenAddrs = new Set<string>()
-  const uniquePools = POOLS.filter(p => {
-    if (seenAddrs.has(p.address)) return false
-    seenAddrs.add(p.address)
-    return true
-  })
 
   const tvlChartData = uniquePools
     .map(p => ({ name: p.name, value: statByAddr[p.address]?.tvlUsd ?? 0 }))
@@ -287,11 +304,14 @@ export default function DashboardPage() {
                 const vol     = volByAddr[pool.address.toLowerCase()] ?? null
                 const volWeek = volByAddrWeek[pool.address.toLowerCase()] ?? null
                 const tvl     = stat?.tvlUsd ?? null
-                const feePct  = parseFloat(pool.fee) / 100
+                const feePct  = parseFeeRate(pool.fee)
                 // Trailing-week average, not literal 24h -- see useVolume24h's
-                // byPoolWeek comment for why.
-                const feeApr  = (volWeek !== null && tvl && tvl > 0)
-                  ? ((volWeek * feePct * (365 / 7)) / tvl * 100).toFixed(1) + '%'
+                // byPoolWeek comment for why. Fees-first (feesWeek, then
+                // annualized) so this always matches the real Fees This
+                // Epoch number above -- not a separately-derived estimate.
+                const feesWeek = volWeek !== null ? volWeek * feePct : null
+                const feeApr  = (feesWeek !== null && tvl && tvl > 0)
+                  ? ((feesWeek * (365 / 7)) / tvl * 100).toFixed(1) + '%'
                   : '—'
 
                 return (

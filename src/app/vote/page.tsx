@@ -233,8 +233,9 @@ export default function VotePage() {
   for (const pool of POOLS) {
     const tvl = tvlByAddr[pool.address] ?? null
     const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
-    aprByAddr[pool.address] = (tvl && tvl > 0 && volWeek !== null)
-      ? (volWeek * parseFeeRate(pool.fee) * (365 / 7) / tvl) * 100
+    const feesWeek = volWeek !== null ? volWeek * parseFeeRate(pool.fee) : null
+    aprByAddr[pool.address] = (tvl && tvl > 0 && feesWeek !== null)
+      ? (feesWeek * (365 / 7) / tvl) * 100
       : null
   }
 

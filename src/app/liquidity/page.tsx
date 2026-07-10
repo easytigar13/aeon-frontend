@@ -5,7 +5,7 @@ import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Layers, Waves, Grid3x3
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { formatUnits, parseUnits, maxUint256 } from 'viem'
+import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
 import { ERC20_ABI, LIQUIDITY_HELPER_V2_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WHITELIST_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
@@ -177,6 +177,8 @@ interface UnifiedPool {
   tvlUsd: number | null
   volUsd: number | null
   feesUsd: number | null
+  volUsdWeek: number | null
+  feesUsdWeek: number | null
   aprPct: number | null
 }
 
@@ -196,15 +198,19 @@ function usePoolListData(): UnifiedPool[] {
     const volUsdWeek = volResult.byPoolWeek[p.address.toLowerCase()] ?? null
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
-    // APR uses a trailing-week average, not literal 24h volume -- a pool
-    // with real but sporadic trading (nothing in the exact last 24h, but
-    // real swaps 2-3 days ago) would otherwise show a misleading "—%" just
-    // because nothing happened to trade very recently. Weekly total -> daily
-    // average (÷7) -> annualized (×365) is equivalent to ×(365/7).
-    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsdWeek !== null)
-      ? (volUsdWeek * feeRate * (365 / 7) / tvlUsd) * 100
+    const feesUsdWeek = volUsdWeek !== null ? volUsdWeek * feeRate : null
+    // Derived directly from feesUsdWeek (the same number shown in the Fees
+    // (7d) column) rather than recomputed from volume*feeRate independently
+    // -- guarantees the displayed APR can never drift from the displayed
+    // fees. Weekly fees -> daily average (÷7) -> annualized (×365) is
+    // equivalent to ×(365/7). Uses a trailing-week average, not literal 24h
+    // volume, so a pool with real but sporadic trading (nothing in the exact
+    // last 24h, but real swaps 2-3 days ago) doesn't show a misleading "—%"
+    // just because nothing happened to trade very recently.
+    const aprPct = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
+      ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
-    return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, aprPct }
+    return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct }
   })
 
   // Pools anyone created themselves via Create Pool, discovered live from
@@ -214,7 +220,7 @@ function usePoolListData(): UnifiedPool[] {
   // someone manually wires them into contracts.ts.
   const vammDiscovered: UnifiedPool[] = discovered.map(p => ({
     type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address,
-    feeLabel: p.fee, tvlUsd: null, volUsd: null, feesUsd: null, aprPct: null,
+    feeLabel: p.fee, tvlUsd: null, volUsd: null, feesUsd: null, volUsdWeek: null, feesUsdWeek: null, aprPct: null,
   }))
 
   // CL_POOLS/DLMM_POOLS are currently empty (see contracts.ts comment), so
@@ -226,10 +232,11 @@ function usePoolListData(): UnifiedPool[] {
     const volUsdWeek = volResult.byPoolWeek[p.address.toLowerCase()] ?? null
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
-    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsdWeek !== null)
-      ? (volUsdWeek * feeRate * (365 / 7) / tvlUsd) * 100
+    const feesUsdWeek = volUsdWeek !== null ? volUsdWeek * feeRate : null
+    const aprPct = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
+      ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
-    return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, aprPct }
+    return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct }
   })
 
   const dlmm: UnifiedPool[] = DLMM_POOLS.map(p => {
@@ -238,10 +245,11 @@ function usePoolListData(): UnifiedPool[] {
     const volUsdWeek = volResult.byPoolWeek[p.address.toLowerCase()] ?? null
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
-    const aprPct = (tvlUsd !== null && tvlUsd > 0 && volUsdWeek !== null)
-      ? (volUsdWeek * feeRate * (365 / 7) / tvlUsd) * 100
+    const feesUsdWeek = volUsdWeek !== null ? volUsdWeek * feeRate : null
+    const aprPct = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
+      ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
-    return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, aprPct }
+    return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct }
   })
 
   return [...vamm, ...vammDiscovered, ...cl, ...dlmm]
@@ -308,7 +316,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
       </div>
 
       <div className="card overflow-x-auto">
-        <table className="w-full text-sm min-w-[760px]">
+        <table className="w-full text-sm min-w-[980px]">
           <thead>
             <tr className="border-b border-bg-border text-left text-xs font-mono text-text-muted uppercase tracking-wider">
               <th className="px-4 py-3 font-medium">Liquidity Pool</th>
@@ -316,6 +324,8 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
               <th className="px-4 py-3 font-medium text-right">TVL</th>
               <th className="px-4 py-3 font-medium text-right">Volume (24h)</th>
               <th className="px-4 py-3 font-medium text-right">Fees (24h)</th>
+              <th className="px-4 py-3 font-medium text-right">Volume (7d)</th>
+              <th className="px-4 py-3 font-medium text-right">Fees (7d)</th>
               <th className="px-4 py-3 font-medium text-right"></th>
             </tr>
           </thead>
@@ -341,6 +351,8 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
                 <td className="px-4 py-3 text-right font-mono text-text-primary">{fmtUsd(p.tvlUsd)}</td>
                 <td className="px-4 py-3 text-right font-mono text-text-muted">{fmtUsd(p.volUsd)}</td>
                 <td className="px-4 py-3 text-right font-mono text-text-muted">{fmtUsd(p.feesUsd)}</td>
+                <td className="px-4 py-3 text-right font-mono text-text-muted">{fmtUsd(p.volUsdWeek)}</td>
+                <td className="px-4 py-3 text-right font-mono text-text-muted">{fmtUsd(p.feesUsdWeek)}</td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => onDeposit(p.type, p.address)}
@@ -353,7 +365,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-text-muted text-sm">No pools match your search.</td>
+                <td colSpan={8} className="px-4 py-8 text-center text-text-muted text-sm">No pools match your search.</td>
               </tr>
             )}
           </tbody>
@@ -965,11 +977,14 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   const showProgress = isProcessing || step === 'done'
 
   // ── APR estimate ── trailing-week volume, not literal 24h -- see
-  // useVolume24h's byPoolWeek comment for why.
-  const tvlUsd     = poolStats.find(s => s.address === selectedPool.address)?.tvlUsd ?? null
-  const weekVolUsd = volResult.byPoolWeek[selectedPool.address.toLowerCase()] ?? null
-  const baseApr    = (tvlUsd !== null && tvlUsd > 0 && weekVolUsd !== null)
-    ? (weekVolUsd * parseFeeRate(selectedPool.fee) * (365 / 7) / tvlUsd) * 100
+  // useVolume24h's byPoolWeek comment for why. Derived via feesUsdWeek (not
+  // volume*feeRate inlined into the APR expression) so this always matches
+  // the same fees-first derivation used on the pool list table.
+  const tvlUsd       = poolStats.find(s => s.address === selectedPool.address)?.tvlUsd ?? null
+  const weekVolUsd    = volResult.byPoolWeek[selectedPool.address.toLowerCase()] ?? null
+  const feesUsdWeek   = weekVolUsd !== null ? weekVolUsd * parseFeeRate(selectedPool.fee) : null
+  const baseApr    = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
+    ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
     : null
   const p0 = prices[selectedPool.token0] ?? null
   const p1 = prices[selectedPool.token1] ?? null
@@ -1364,7 +1379,7 @@ function ClSwapPanel({ pool, wallet }: { pool: typeof CL_POOLS[number]; wallet: 
     if (!wallet) return
     setErrMsg('')
     if (step === 'approve') {
-      writeContract({ address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [ALGEBRA_CONTRACTS.swapRouter, maxUint256] })
+      writeContract({ address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [ALGEBRA_CONTRACTS.swapRouter, amountInWei] })
       setStep('approve_wait')
     }
     if (step === 'swap') {
@@ -2065,7 +2080,7 @@ function DlmmSwapPanel({ pool, wallet }: { pool: typeof DLMM_POOLS[number]; wall
     if (!wallet) return
     setErrMsg('')
     if (step === 'approve') {
-      writeContract({ address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [DLMM_ROUTER, maxUint256] })
+      writeContract({ address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [DLMM_ROUTER, amountInWei] })
       setStep('approve_wait')
     }
     if (step === 'swap') {

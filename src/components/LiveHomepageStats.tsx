@@ -45,7 +45,8 @@ export function LiveHomepageStats() {
     const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
     if (tvl && tvl > 0 && volWeek !== null) {
       const feeRate = parseFloat(pool.fee.replace('%', '')) / 100
-      const apr = (volWeek * feeRate * (365 / 7) / tvl) * 100
+      const feesWeek = volWeek * feeRate
+      const apr = (feesWeek * (365 / 7) / tvl) * 100
       if (!bestApr || apr > bestApr) bestApr = apr
     }
   }
