@@ -75,6 +75,7 @@ import { POOLS, TOKENS, CONTRACTS } from '../src/config/contracts'
 import { ERC20_ABI, AEON_ROUTER_ABI, WETH_ABI } from '../src/config/abis'
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
+import { writeBotStatus, appendTrade, isBotStoreConfigured } from '../src/lib/botStore'
 
 const envPath      = fileURLToPath(new URL('.env', import.meta.url))
 dotenv.config({ path: envPath })
@@ -592,15 +593,23 @@ try {
   totalFailed = prior.totalArbsFailed ?? 0
 } catch { /* no prior status file -- fresh start */ }
 
-// Records a trade both in the capped in-memory list (what status.json shows
-// for the live view) and as one line appended to trades.log -- the
-// never-truncated full history behind /api/bot/trades and /bot/trades.
+// Records a trade in the capped in-memory list (what status.json shows for
+// the live view), as one line appended to trades.log (the never-truncated
+// local history behind /api/bot/trades when the website runs on this same
+// machine), AND -- if KV_REST_API_URL/KV_REST_API_TOKEN are set -- pushed to
+// the shared Upstash store so a website deployed elsewhere (e.g. Vercel)
+// sees it too. The store push is fire-and-forget: trades are infrequent
+// enough to sync immediately rather than on the status-sync throttle below,
+// but a Redis hiccup must never block or fail real trading.
 function recordArb(arb: ExecutedArb) {
   recentArbs = [arb, ...recentArbs].slice(0, 30)
   try {
     fs.appendFileSync(tradesLogPath, JSON.stringify(arb) + '\n')
   } catch (err: any) {
     console.error(`[trade log error] failed to append to trades.log: ${err?.message ?? err}`)
+  }
+  if (isBotStoreConfigured()) {
+    appendTrade(arb).catch(err => console.error(`[bot store error] failed to sync trade: ${err?.message ?? err}`))
   }
 }
 
@@ -632,7 +641,19 @@ async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Reco
   }
 
   fs.writeFileSync(statusPath, JSON.stringify(status, null, 2))
+
+  // Throttled, fire-and-forget push to the shared store -- status changes
+  // every tick (every 1s by default) but a live dashboard doesn't need
+  // sub-second freshness, and pushing every tick would burn through
+  // Upstash's free-tier command budget fast (86,400+/day at 1s intervals).
+  if (isBotStoreConfigured() && Date.now() - lastRedisStatusSync >= REDIS_STATUS_SYNC_INTERVAL_MS) {
+    lastRedisStatusSync = Date.now()
+    writeBotStatus(status).catch(err => console.error(`[bot store error] failed to sync status: ${err?.message ?? err}`))
+  }
 }
+
+let lastRedisStatusSync = 0
+const REDIS_STATUS_SYNC_INTERVAL_MS = parseInt(process.env.REDIS_STATUS_SYNC_INTERVAL_MS ?? '15000')
 
 // ─── Execution ────────────────────────────────────────────────────────────────
 
