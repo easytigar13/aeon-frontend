@@ -51,15 +51,19 @@ function KpiCard({ label, value, icon, delta, accent }: { label: string; value: 
   const a = ACCENT[accent]
   return (
     <div
-      className={clsx('relative overflow-hidden rounded-2xl border bg-bg-surface p-4 transition-all duration-200 hover:-translate-y-0.5', a.border)}
-      style={{ boxShadow: `0 0 24px -10px ${a.glow}` }}
+      className={clsx('group relative overflow-hidden rounded-2xl border bg-bg-surface p-4 transition-all duration-300 hover:-translate-y-1', a.border)}
+      style={{ boxShadow: `0 0 32px -12px ${a.glow}` }}
     >
-      <div className="absolute inset-x-0 top-0 h-16 opacity-50 pointer-events-none" style={{ background: `linear-gradient(to bottom, ${a.glow}, transparent)` }} />
+      <div className="absolute inset-x-0 top-0 h-20 opacity-60 pointer-events-none" style={{ background: `linear-gradient(to bottom, ${a.glow}, transparent)` }} />
+      <div
+        className="absolute inset-0 opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity duration-300 animate-shimmer"
+        style={{ background: `linear-gradient(115deg, transparent 30%, ${a.glow} 50%, transparent 70%)`, backgroundSize: '200% 100%' }}
+      />
       <div className="relative flex items-center justify-between mb-3">
         <span className="stat-label">{label}</span>
-        <div className={clsx('w-7 h-7 rounded-lg flex items-center justify-center border', a.iconBg, a.border)}>{icon}</div>
+        <div className={clsx('w-7 h-7 rounded-lg flex items-center justify-center border transition-transform duration-300 group-hover:scale-110', a.iconBg, a.border)}>{icon}</div>
       </div>
-      <div className="relative stat-value text-xl mb-1">{value}</div>
+      <div className="relative stat-value text-2xl mb-1 tracking-tight" style={{ textShadow: `0 0 24px ${a.glow}` }}>{value}</div>
       <div className={clsx('relative text-2xs font-mono', a.text)}>{delta}</div>
     </div>
   )

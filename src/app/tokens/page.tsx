@@ -134,7 +134,7 @@ export default function TokensPage() {
             return (
               <div
                 key={key}
-                className={`group flex flex-col bg-bg-surface border border-bg-border rounded-xl2 transition-all duration-200 hover:-translate-y-0.5 overflow-hidden ${glowClass}`}
+                className={`card group flex flex-col overflow-hidden ${glowClass}`}
               >
                 {/* Main info row */}
                 <div className="flex items-start justify-between p-4 pb-3">

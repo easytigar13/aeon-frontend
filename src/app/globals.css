@@ -37,13 +37,46 @@
 }
 
 @layer components {
-  /* Card variants */
+  /* Card variants -- glass surface, gradient hairline edge, ambient lift on
+     hover. This is the single most-used class in the app (every page's
+     panels, tables, and form containers), so upgrading it here is what
+     actually makes the whole site feel elevated, not just the Dashboard. */
   .card {
-    @apply bg-bg-surface border border-bg-border rounded-xl2;
+    @apply relative rounded-xl2 border;
+    background: linear-gradient(165deg, rgba(26,26,34,0.94) 0%, rgba(15,15,21,0.9) 100%);
+    border-color: rgba(255,255,255,0.07);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 20px 50px -24px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.05);
+    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+  }
+
+  .card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(255,184,0,0.22), transparent 35%, transparent 65%, rgba(139,92,246,0.16));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+
+  .card:hover {
+    border-color: rgba(255,184,0,0.28);
+    box-shadow: 0 24px 60px -24px rgba(0,0,0,0.7), 0 0 44px -14px rgba(255,184,0,0.2), inset 0 1px 0 rgba(255,255,255,0.07);
+    transform: translateY(-2px);
   }
 
   .card-raised {
-    @apply bg-bg-raised border border-bg-border rounded-xl2;
+    @apply relative rounded-xl2 border;
+    background: linear-gradient(165deg, rgba(34,34,44,0.94) 0%, rgba(20,20,28,0.9) 100%);
+    border-color: rgba(255,255,255,0.08);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 16px 40px -20px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
   }
 
   /* Input */
@@ -86,19 +119,23 @@
 
   .badge-aeon {
     @apply badge bg-aeon-400/15 text-aeon-400 border border-aeon-400/20;
+    box-shadow: 0 0 12px -5px rgba(255,184,0,0.6);
   }
 
   .badge-violet {
     @apply badge bg-violet-500/15 text-violet-400 border border-violet-500/20;
+    box-shadow: 0 0 12px -5px rgba(139,92,246,0.6);
   }
 
   .badge-green {
     @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/20;
+    box-shadow: 0 0 12px -5px rgba(16,185,129,0.6);
   }
 
   /* Stat display */
   .stat-value {
     @apply font-display font-bold text-text-primary;
+    letter-spacing: -0.015em;
   }
 
   .stat-label {
@@ -106,9 +143,9 @@
   }
 
   /* Pool type pill */
-  .pool-type-vamm { @apply badge bg-blue-500/15 text-blue-400 border border-blue-500/20; }
-  .pool-type-cl   { @apply badge bg-violet-500/15 text-violet-400 border border-violet-500/20; }
-  .pool-type-dlmm { @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/20; }
+  .pool-type-vamm { @apply badge bg-blue-500/15 text-blue-400 border border-blue-500/20; box-shadow: 0 0 10px -5px rgba(59,130,246,0.6); }
+  .pool-type-cl   { @apply badge bg-violet-500/15 text-violet-400 border border-violet-500/20; box-shadow: 0 0 10px -5px rgba(139,92,246,0.6); }
+  .pool-type-dlmm { @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/20; box-shadow: 0 0 10px -5px rgba(16,185,129,0.6); }
 
   /* Glow effect */
   .aeon-glow {
