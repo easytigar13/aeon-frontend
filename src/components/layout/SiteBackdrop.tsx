@@ -9,23 +9,27 @@ export function SiteBackdrop() {
     <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
       <div className="absolute inset-0 bg-bg-base" />
       <div
-        className="absolute w-[1100px] h-[1100px] rounded-full blur-[150px] opacity-[0.22] animate-drift-a"
-        style={{ background: '#FFB800', top: '-25%', left: '-15%' }}
+        className="absolute w-[1150px] h-[1150px] rounded-full blur-[150px] opacity-[0.26] animate-drift-a"
+        style={{ background: '#10B981', top: '-25%', left: '-15%' }}
       />
       <div
-        className="absolute w-[850px] h-[850px] rounded-full blur-[150px] opacity-[0.18] animate-drift-b"
-        style={{ background: '#8B5CF6', top: '25%', right: '-20%' }}
+        className="absolute w-[900px] h-[900px] rounded-full blur-[150px] opacity-[0.2] animate-drift-c"
+        style={{ background: '#34D399', bottom: '-20%', left: '10%' }}
       />
       <div
-        className="absolute w-[750px] h-[750px] rounded-full blur-[150px] opacity-[0.14] animate-drift-c"
-        style={{ background: '#10B981', bottom: '-20%', left: '15%' }}
+        className="absolute w-[800px] h-[800px] rounded-full blur-[150px] opacity-[0.13] animate-drift-b"
+        style={{ background: '#8B5CF6', top: '20%', right: '-20%' }}
+      />
+      <div
+        className="absolute w-[600px] h-[600px] rounded-full blur-[150px] opacity-[0.1] animate-drift-b"
+        style={{ background: '#FFB800', top: '45%', left: '35%' }}
       />
       <div
         className="absolute inset-0"
         style={{
           backgroundImage:
-            'linear-gradient(rgba(255,184,0,0.035) 1px, transparent 1px),' +
-            'linear-gradient(90deg, rgba(255,184,0,0.035) 1px, transparent 1px)',
+            'linear-gradient(rgba(16,185,129,0.04) 1px, transparent 1px),' +
+            'linear-gradient(90deg, rgba(16,185,129,0.04) 1px, transparent 1px)',
           backgroundSize: '48px 48px',
           maskImage: 'radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 75%)',
           WebkitMaskImage: 'radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 75%)',
