@@ -43,7 +43,7 @@
      actually makes the whole site feel elevated, not just the Dashboard. */
   .card {
     @apply relative rounded-xl2 border;
-    background: linear-gradient(165deg, rgba(26,26,34,0.94) 0%, rgba(15,15,21,0.9) 100%);
+    background: linear-gradient(165deg, rgba(26,26,34,0.55) 0%, rgba(15,15,21,0.5) 100%);
     border-color: rgba(255,255,255,0.07);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
@@ -72,7 +72,7 @@
 
   .card-raised {
     @apply relative rounded-xl2 border;
-    background: linear-gradient(165deg, rgba(34,34,44,0.94) 0%, rgba(20,20,28,0.9) 100%);
+    background: linear-gradient(165deg, rgba(34,34,44,0.6) 0%, rgba(20,20,28,0.55) 100%);
     border-color: rgba(255,255,255,0.08);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);

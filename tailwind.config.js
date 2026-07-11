@@ -7,11 +7,11 @@ module.exports = {
         // AEON Design System
         // Deep space black with warm undertone — not cold tech blue
         bg: {
-          base:    '#0A0A0F',   // true deep background
-          surface: '#111118',   // cards, panels
-          raised:  '#18181F',   // elevated elements
-          border:  '#23232D',   // borders
-          hover:   '#1E1E28',   // hover states
+          base:    '#0A0A0F',                  // true deep background -- stays opaque, it IS the backdrop
+          surface: 'rgba(17,17,24,0.55)',       // cards, panels -- translucent so the backdrop shows through
+          raised:  'rgba(24,24,31,0.55)',       // elevated/nested elements -- same translucency
+          border:  '#23232D',                   // borders
+          hover:   'rgba(30,30,40,0.65)',        // hover states -- a bit more opaque for contrast
         },
         // AEON signature: amber-gold, not generic blue/green
         aeon: {
