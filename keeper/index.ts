@@ -93,7 +93,7 @@ const tradesLogPath = process.env.TRADES_LOG_FILE ?? fileURLToPath(new URL('trad
 
 const RPC          = process.env.RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'
 const PK            = (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`
-const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT ?? '0.05')  // skip arbs below this %
+const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT ?? '1')  // skip arbs below this % -- a cheap first-pass filter; the real profit-after-gas gate is still gasCostFloorInToken + MIN_NET_PROFIT_USD
 const INTERVAL_MS    = parseInt(process.env.INTERVAL_MS ?? '1000')
 const DRY_RUN         = process.env.DRY_RUN === 'true'
 const DEADLINE_SECONDS = 120  // execution must land within 2 min of being sized, else it just reverts (no funds lost)
