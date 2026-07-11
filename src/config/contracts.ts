@@ -211,6 +211,12 @@ export const TOKENS = {
   // 100,000,000,000) — added 2026-07-11 at the user's request, AEON-only
   // (no USDG pair, unlike the Robinhood stock tokens)
   HOODIE: { address: '0xC72c01AAB5f5678dc1d6f5C6d2B417d91D402Ba3' as `0x${string}`, symbol: 'HOODIE', decimals: 18, name: 'HOODIE' },
+  // real, independently-deployed token -- verified on-chain directly: real
+  // name() is "RobinhoodTrumpGMEShrekNokia4663Doge" (18 decimals, 1B supply),
+  // symbol() is "NASDAQ" -- clearly a meme/joke token riding on the NASDAQ
+  // name, not an official listing. Added 2026-07-11 at the user's explicit
+  // request after flagging this, AEON-only.
+  NASDAQ: { address: '0x2E897ABb6BF1d77c61eB3fa6c093ae71DE0Efd2D' as `0x${string}`, symbol: 'NASDAQ', decimals: 18, name: 'RobinhoodTrumpGMEShrekNokia4663Doge' },
   // Robinhood's own official tokenized stocks, per
   // https://docs.robinhood.com/chain/contracts -- all 20 addresses verified
   // directly on-chain (name()/symbol()/decimals() all resolve, matching the
@@ -278,6 +284,11 @@ export const POOLS = [
   // Empty until someone adds liquidity -- deployer wallet holds ~0.24 AEON
   // and 0 HOODIE, not enough to seed it.
   { name: 'HOODIE/AEON', token0: 'HOODIE', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x3C643F22F0b24795710638CdEf2296eA12896317' as `0x${string}` },
+  // Deployed 2026-07-11 via AeonFactoryV2 at the user's request (real gauge
+  // created too -- verified voter.gauges(pool) resolves to it on-chain).
+  // Empty until someone adds liquidity -- deployer wallet holds ~0.24 AEON
+  // and 0 of this token, not enough to seed it.
+  { name: 'NASDAQ/AEON', token0: 'NASDAQ', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xbf5FCFF8e5604b3ba404a4Cb5Be49EF230e0dA76' as `0x${string}` },
   // Deployed 2026-07-10 via AeonFactoryV2, all 40 pools + real gauges (real
   // 80-tx batch, ~0.0068 ETH total gas) -- one AEON pair + one USDG pair for
   // each of Robinhood's 20 official tokenized stocks. Every pool verified
