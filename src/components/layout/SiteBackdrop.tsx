@@ -28,11 +28,9 @@ export function SiteBackdrop() {
         className="absolute inset-0"
         style={{
           backgroundImage:
-            'linear-gradient(rgba(16,185,129,0.04) 1px, transparent 1px),' +
-            'linear-gradient(90deg, rgba(16,185,129,0.04) 1px, transparent 1px)',
+            'linear-gradient(rgba(16,185,129,0.045) 1px, transparent 1px),' +
+            'linear-gradient(90deg, rgba(16,185,129,0.045) 1px, transparent 1px)',
           backgroundSize: '48px 48px',
-          maskImage: 'radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 75%)',
-          WebkitMaskImage: 'radial-gradient(ellipse 80% 60% at 50% 0%, black 0%, transparent 75%)',
         }}
       />
       <div
@@ -46,7 +44,6 @@ export function SiteBackdrop() {
           backgroundSize: '220px 220px',
         }}
       />
-      <div className="absolute inset-0" style={{ background: 'radial-gradient(ellipse 100% 60% at 50% 0%, transparent 0%, rgba(10,10,15,0.5) 100%)' }} />
     </div>
   )
 }
