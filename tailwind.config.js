@@ -73,6 +73,8 @@ module.exports = {
         'drift-b':      'driftB 32s ease-in-out infinite',
         'drift-c':      'driftC 22s ease-in-out infinite',
         'shimmer':      'shimmer 2.5s linear infinite',
+        'scan':         'scan 10s linear infinite',
+        'node-pulse':   'nodePulse 3s ease-in-out infinite',
       },
       keyframes: {
         glow: {
@@ -102,6 +104,14 @@ module.exports = {
         shimmer: {
           '0%':   { backgroundPosition: '-200% 0' },
           '100%': { backgroundPosition: '200% 0' },
+        },
+        scan: {
+          '0%':   { transform: 'translateY(-100%)' },
+          '100%': { transform: 'translateY(100vh)' },
+        },
+        nodePulse: {
+          '0%, 100%': { opacity: '0.4', transform: 'scale(1)' },
+          '50%':      { opacity: '1',   transform: 'scale(1.6)' },
         },
       },
       borderRadius: {
