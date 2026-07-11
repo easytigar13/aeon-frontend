@@ -1171,15 +1171,19 @@ async function tick() {
       console.log(`  ${o.label}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenIn.decimals)} ${o.tokenIn.symbol})`)
     }
     // MIN_PROFIT_PCT is a cheap first-pass filter before the RPC-costly gas
-    // check inside executeArb; try candidates in descending profit order
-    // until one actually clears gas and gets attempted -- don't give up
-    // after just the single best-by-% one if it happens to be too small to
-    // clear gas while a slightly-lower-% one would.
+    // check inside executeArb; try EVERY candidate in descending profit
+    // order (up to the cap below) rather than stopping at the first one
+    // that clears gas -- if several different opportunities are genuinely
+    // profitable in the same tick, take all of them, not just the best one.
+    // Later candidates in this loop were sized against the tick's opening
+    // snapshot, so one that no longer makes sense after an earlier trade
+    // moved reserves just reverts safely (AeonArbKeeper re-derives
+    // everything from live state) -- wastes a little gas, never money.
     let anyAttempted = false
     for (const opp of opps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
       if (opp.profitPct < MIN_PROFIT_PCT) break   // sorted descending -- nothing further qualifies either
       const result = await executeArb(opp, graph, availableEthForWrap)
-      if (result === 'attempted') { anyAttempted = true; break }
+      if (result === 'attempted') anyAttempted = true
     }
     if (!anyAttempted && opps[0].profitPct < MIN_PROFIT_PCT) {
       console.log(`  Best profit ${opps[0].profitPct.toFixed(3)}% below ${MIN_PROFIT_PCT}% threshold, skipping`)
@@ -1200,8 +1204,7 @@ async function tick() {
         }
         for (const opp of aggOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
           if (opp.profitPct < MIN_PROFIT_PCT) break
-          const result = await executeAggregatorArb(opp, graph, availableEthForWrap)
-          if (result === 'attempted') break
+          await executeAggregatorArb(opp, graph, availableEthForWrap)   // try every candidate, not just the first attempted
         }
       }
     } catch (err: any) {
