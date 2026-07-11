@@ -71,7 +71,14 @@ const AVATAR_COLORS: Record<string, string> = {
   USAR:  '#B8860B',
 }
 
-// Optional imageUrl from an external source (e.g. GeckoTerminal) takes priority
+// Curated logos (STOCK_LOGOS/TRUSTWALLET_LOGOS/the local AEON asset) go
+// FIRST, ahead of the dynamic `imageUrl` from GeckoTerminal/CoinGecko --
+// GeckoTerminal auto-generates a generic placeholder image for any token it
+// discovers without a submitted logo (tell: filename is just the contract
+// address, e.g. "0xaf3d76f....png"), and for Robinhood's tokenized stocks
+// that generic icon was silently winning over the real company logo already
+// sitting in STOCK_LOGOS below. imageUrl only serves as the final fallback,
+// for tokens (CASHCAT, ROBINFUN, VIRTUAL, ...) that have no curated entry.
 export function TokenIcon({
   symbol,
   size = 32,
@@ -81,14 +88,11 @@ export function TokenIcon({
   size?: number
   imageUrl?: string | null
 }) {
-  const [primaryFailed, setPrimaryFailed] = useState(false)
-  const [fallbackFailed, setFallbackFailed] = useState(false)
-
-  const primaryUrl = imageUrl && !primaryFailed ? imageUrl : null
-  const stockUrl = STOCK_LOGOS[symbol] && !fallbackFailed ? STOCK_LOGOS[symbol] : null
-  const twUrl = TRUSTWALLET_LOGOS[symbol] && !fallbackFailed ? TRUSTWALLET_LOGOS[symbol] : null
-  const aeonUrl = symbol === 'AEON' && !fallbackFailed ? '/logo.jpg' : null
-  const activeUrl = primaryUrl ?? stockUrl ?? twUrl ?? aeonUrl
+  const candidates = [STOCK_LOGOS[symbol], TRUSTWALLET_LOGOS[symbol], symbol === 'AEON' ? '/logo.jpg' : null, imageUrl].filter(
+    (u): u is string => !!u
+  )
+  const [failedCount, setFailedCount] = useState(0)
+  const activeUrl = candidates[failedCount] ?? null
 
   const color = AVATAR_COLORS[symbol] ?? '#FFB800'
   const letter = symbol.replace(/^W/, '')[0]
@@ -100,10 +104,7 @@ export function TokenIcon({
         alt={symbol}
         width={size}
         height={size}
-        onError={() => {
-          if (primaryUrl) setPrimaryFailed(true)
-          else setFallbackFailed(true)
-        }}
+        onError={() => setFailedCount(n => n + 1)}
         className="rounded-full bg-bg-raised border border-bg-border object-cover shrink-0"
         style={{ width: size, height: size }}
       />

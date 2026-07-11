@@ -206,6 +206,11 @@ export const TOKENS = {
   // liquidity, ~$75K/24h volume) — added 2026-07-10 at the user's request,
   // with an AEON vAMM pool
   SHERWOOD: { address: '0xB3b78ca800C5327a21F03f0636d9A08A103787fD' as `0x${string}`, symbol: 'SHERWOOD', decimals: 18, name: 'Sherwood Online' },
+  // real, independently-deployed token (verified on-chain directly:
+  // name()/symbol()/decimals() resolve to "HOODIE"/"HOODIE"/18, totalSupply
+  // 100,000,000,000) — added 2026-07-11 at the user's request, AEON-only
+  // (no USDG pair, unlike the Robinhood stock tokens)
+  HOODIE: { address: '0xC72c01AAB5f5678dc1d6f5C6d2B417d91D402Ba3' as `0x${string}`, symbol: 'HOODIE', decimals: 18, name: 'HOODIE' },
   // Robinhood's own official tokenized stocks, per
   // https://docs.robinhood.com/chain/contracts -- all 20 addresses verified
   // directly on-chain (name()/symbol()/decimals() all resolve, matching the
@@ -268,6 +273,11 @@ export const POOLS = [
   // Empty until someone adds liquidity -- deployer wallet holds ~0.24 AEON
   // and 0 SHERWOOD, not enough to seed it.
   { name: 'SHERWOOD/AEON', token0: 'SHERWOOD', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xB4692A778E33fBA0B97Feaa863377C6322c83AA4' as `0x${string}` },
+  // Deployed 2026-07-11 via AeonFactoryV2 at the user's request (real gauge
+  // created too -- verified voter.gauges(pool) resolves to it on-chain).
+  // Empty until someone adds liquidity -- deployer wallet holds ~0.24 AEON
+  // and 0 HOODIE, not enough to seed it.
+  { name: 'HOODIE/AEON', token0: 'HOODIE', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x3C643F22F0b24795710638CdEf2296eA12896317' as `0x${string}` },
   // Deployed 2026-07-10 via AeonFactoryV2, all 40 pools + real gauges (real
   // 80-tx batch, ~0.0068 ETH total gas) -- one AEON pair + one USDG pair for
   // each of Robinhood's 20 official tokenized stocks. Every pool verified
