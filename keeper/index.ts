@@ -586,6 +586,78 @@ async function ensureWethBalance(needed: bigint, availableEthForWrap: bigint): P
   return current
 }
 
+// Inverse of amtOut() -- how much amtIn is required to receive EXACTLY
+// amtOutDesired from a pool with these reserves/fee. Same formula
+// Uniswap-V2-style routers use for getAmountIn. +1 covers integer-division
+// rounding so the resulting swap doesn't come up short by a wei.
+function amtIn(amtOutDesired: bigint, rIn: bigint, rOut: bigint, feeBps: bigint): bigint {
+  if (amtOutDesired <= 0n || amtOutDesired >= rOut) return 0n   // can't drain the whole pool
+  const numerator = rIn * amtOutDesired * 10000n
+  const denominator = (rOut - amtOutDesired) * (10000n - feeBps)
+  return numerator / denominator + 1n
+}
+
+const FUND_SWAP_SLIPPAGE_BUFFER_PCT = 105n   // 5% extra USDG spent, buffering against reserve drift between quote and execution
+
+// If baseSym's on-chain balance falls short of `needed`, tops it up by
+// swapping USDG -- the wallet's natural "cash" reserve -- into it via
+// AeonRouter. Unlike ensureWethBalance's free wrap, this is a REAL swap
+// with real fee/slippage, a genuine (small) cost not otherwise reflected in
+// the arb's own profitability math -- acceptable here since it only ever
+// spends USDG that would otherwise sit completely idle, and the swap's own
+// amountOutMin means it either delivers at least `needed` extra or reverts
+// (spending gas, not principal) rather than deliver less. Returns the
+// resulting balance either way -- callers compare that against `needed`
+// themselves, same pattern as ensureWethBalance.
+async function ensureBaseTokenFunded(
+  baseSym: keyof typeof TOKENS, needed: bigint, graph: Map<string, HopCandidate[]>,
+): Promise<bigint> {
+  let current = await pub.readContract({
+    address: TOKENS[baseSym].address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+  }) as bigint
+  if (current >= needed || baseSym === 'USDG') return current
+
+  const edge = (graph.get('USDG') ?? []).find(e => e.tokenOutSym === baseSym)
+  if (!edge) return current   // no direct USDG pool for this token -- can't fund it this way
+
+  const shortfall = needed - current
+  const usdgRequired = amtIn(shortfall, edge.reserveIn, edge.reserveOut, edge.pool.pool.feeBps)
+  if (usdgRequired <= 0n) return current
+
+  const usdgBal = await pub.readContract({
+    address: TOKENS.USDG.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+  }) as bigint
+  const usdgToSpend = (usdgRequired * FUND_SWAP_SLIPPAGE_BUFFER_PCT) / 100n
+  if (usdgToSpend > usdgBal) return current   // not enough USDG to cover the shortfall either
+
+  console.log(`   → funding ${formatUnits(shortfall, TOKENS[baseSym].decimals)} ${baseSym} by swapping ~${formatUnits(usdgToSpend, TOKENS.USDG.decimals)} USDG...`)
+  try {
+    const route = [{
+      tokenIn: getAddress(TOKENS.USDG.address), tokenOut: getAddress(TOKENS[baseSym].address),
+      pool: getAddress(edge.pool.pool.address), poolType: 0, feeBps: Number(edge.pool.pool.feeBps),
+    }]
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
+
+    const hApprove = await wal.writeContract({
+      address: TOKENS.USDG.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, usdgToSpend],
+    })
+    await pub.waitForTransactionReceipt({ hash: hApprove })
+
+    const hSwap = await wal.writeContract({
+      address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [route, usdgToSpend, shortfall, account.address, deadline],   // amountOutMin = the exact shortfall needed
+    })
+    await pub.waitForTransactionReceipt({ hash: hSwap })
+
+    current = await pub.readContract({
+      address: TOKENS[baseSym].address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+    }) as bigint
+  } catch (err: any) {
+    console.error(`   ⚠ Funding swap failed: ${err?.shortMessage ?? err?.message ?? err}`)
+  }
+  return current
+}
+
 // ─── Status file (read by /api/bot/status on the website) ───────────────────
 
 interface ExecutedArb {
@@ -724,7 +796,10 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
   if (balIn < amountIn && tokenIn.symbol === 'WETH') {
-    balIn = await ensureWethBalance(amountIn, availableEthForWrap)
+    balIn = await ensureWethBalance(amountIn, availableEthForWrap)   // free wrap first, where it applies
+  }
+  if (balIn < amountIn && tokenIn.symbol !== 'USDG') {
+    balIn = await ensureBaseTokenFunded(tokenIn.symbol as keyof typeof TOKENS, amountIn, graph)   // then fall back to funding from USDG
   }
   if (balIn < amountIn) {
     console.warn(`   ⚠ Insufficient balance: have ${formatUnits(balIn, tokenIn.decimals)}, need ${formatUnits(amountIn, tokenIn.decimals)}`)
@@ -937,7 +1012,10 @@ async function executeAggregatorArb(opp: AggOpp, graph: Map<string, HopCandidate
     address: tokenBase.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
   if (balIn < amountIn && tokenBase.symbol === 'WETH') {
-    balIn = await ensureWethBalance(amountIn, availableEthForWrap)
+    balIn = await ensureWethBalance(amountIn, availableEthForWrap)   // free wrap first, where it applies
+  }
+  if (balIn < amountIn && tokenBase.symbol !== 'USDG') {
+    balIn = await ensureBaseTokenFunded(tokenBase.symbol as keyof typeof TOKENS, amountIn, graph)   // then fall back to funding from USDG
   }
   if (balIn < amountIn) {
     console.warn(`   ⚠ Insufficient balance: have ${formatUnits(balIn, tokenBase.decimals)}, need ${formatUnits(amountIn, tokenBase.decimals)}`)
