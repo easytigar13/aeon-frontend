@@ -21,10 +21,12 @@
  *
  * Before ever sending a transaction, this also checks the quoted profit
  * against a live gas-cost estimate (converted into whatever token the arb
- * trades, with a 1.3x buffer) and skips if it doesn't clear that floor --
- * see gasCostFloorInToken() below. That floor is also passed on-chain as
- * minProfit, so even a live reserve shift between quoting and inclusion
- * can't result in a trade that nets less than gas cost.
+ * trades, with a 1.3x buffer) PLUS a minimum net-profit floor (default
+ * $0.05 via MIN_NET_PROFIT_USD, expressed through USDG) -- clearing gas by
+ * a rounding error isn't worth the risk of a stale quote or a beaten race.
+ * See gasCostFloorInToken() and minNetProfitInToken() below. That combined
+ * floor is also passed on-chain as minProfit, so even a live reserve shift
+ * between quoting and inclusion can't result in a trade that nets less.
  *
  * This process never leaves funds stuck between calls and holds no custody
  * beyond gas float -- but KEEPER_PRIVATE_KEY below is real signing authority
@@ -65,6 +67,7 @@ import {
   formatUnits,
   formatEther,
   parseEther,
+  parseUnits,
   getAddress,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -108,6 +111,14 @@ const AGGREGATOR_SLIPPAGE_PCT = parseFloat(process.env.AGGREGATOR_SLIPPAGE_PCT ?
 // fetchBalances() and ensureWethBalance()). This amount is NEVER touched --
 // it's what keeps the bot able to pay for its own future transactions.
 const GAS_RESERVE_ETH = parseFloat(process.env.GAS_RESERVE_ETH ?? '0.005')
+
+// Clearing gas isn't the same as being WORTH doing -- a trade that nets
+// $0.001 after gas is technically profitable but not worth the risk of a
+// stale quote or a beaten race for a rounding error. Requires profit AFTER
+// gas to be worth at least this much, expressed via USDG (roughly
+// $1-pegged) as the reference so it works for whatever token a cycle trades
+// in -- see minNetProfitInToken() below.
+const MIN_NET_PROFIT_USD = parseFloat(process.env.MIN_NET_PROFIT_USD ?? '0.05')
 
 // Every cycle starts AND ends in the SAME token -- a real cycle can't mix
 // currencies, since there'd be nothing enforcing you actually end up ahead
@@ -485,6 +496,18 @@ async function gasCostFloorInToken(
   return convertSpot(gasCostWei, path)
 }
 
+// Returns MIN_NET_PROFIT_USD expressed in tokenSym's own raw units (via a
+// live USDG price path), or null if there's no route right now -- same
+// "skip rather than guess" rule as the gas floor above.
+async function minNetProfitInToken(tokenSym: string, graph: Map<string, HopCandidate[]>): Promise<bigint | null> {
+  const usdgAmount = parseUnits(String(MIN_NET_PROFIT_USD), TOKENS.USDG.decimals)
+  if (tokenSym === 'USDG') return usdgAmount
+
+  const path = findConversionPath(graph, 'USDG', tokenSym)
+  if (!path) return null
+  return convertSpot(usdgAmount, path)
+}
+
 // ─── Balances / candidate base tokens ─────────────────────────────────────────
 //
 // Fetched ONCE per tick and reused everywhere -- the internal cycle search,
@@ -674,8 +697,16 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     return 'skipped'
   }
   console.log(`   Est. gas cost (incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
-  if (profitRaw <= gasFloor) {
-    console.log(`   Profit doesn't clear estimated gas cost, skipping`)
+
+  const minNetProfit = await minNetProfitInToken(tokenIn.symbol, graph)
+  if (minNetProfit === null) {
+    console.warn(`   ⚠ No live USDG price path for ${tokenIn.symbol} -- can't verify the $${MIN_NET_PROFIT_USD} net-profit floor, skipping for safety`)
+    return 'skipped'
+  }
+  const requiredProfit = gasFloor + minNetProfit
+  console.log(`   Required profit (gas + $${MIN_NET_PROFIT_USD} floor): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
+  if (profitRaw < requiredProfit) {
+    console.log(`   Profit doesn't clear gas + $${MIN_NET_PROFIT_USD} floor, skipping`)
     return 'skipped'
   }
 
@@ -709,8 +740,8 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
   }))
   // Enforced on-chain too, not just here: if live reserves shift between this
   // quote and inclusion, AeonArbKeeper reverts rather than complete a trade
-  // that no longer clears the gas floor.
-  const minProfit = gasFloor > 1n ? gasFloor : 1n
+  // that no longer clears gas + the $ floor.
+  const minProfit = requiredProfit > 1n ? requiredProfit : 1n
   const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
 
   try {
@@ -880,8 +911,15 @@ async function executeAggregatorArb(opp: AggOpp, graph: Map<string, HopCandidate
     return 'skipped'
   }
   console.log(`   Est. gas cost (2 tx pairs, incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenBase.decimals)} ${tokenBase.symbol}`)
-  if (profitRaw <= gasFloor) {
-    console.log(`   Profit doesn't clear estimated gas cost, skipping`)
+
+  const minNetProfit = await minNetProfitInToken(tokenBase.symbol, graph)
+  if (minNetProfit === null) {
+    console.warn(`   ⚠ No live USDG price path for ${tokenBase.symbol} -- can't verify the $${MIN_NET_PROFIT_USD} net-profit floor, skipping for safety`)
+    return 'skipped'
+  }
+  const requiredProfit = gasFloor + minNetProfit
+  if (profitRaw < requiredProfit) {
+    console.log(`   Profit doesn't clear gas + $${MIN_NET_PROFIT_USD} floor, skipping`)
     return 'skipped'
   }
 
@@ -968,8 +1006,8 @@ async function executeAggregatorArb(opp: AggOpp, graph: Map<string, HopCandidate
   }
 
   const freshProfit = freshTx.amountOut - amountIn
-  if (freshProfit <= gasFloor) {
-    const message = `leg 1 filled, leg 2 no longer profitable after re-quote -- holding ${formatUnits(midReceived, tokenMid.decimals)} ${tokenMid.symbol}`
+  if (freshProfit < requiredProfit) {
+    const message = `leg 1 filled, leg 2 no longer clears gas + $${MIN_NET_PROFIT_USD} floor after re-quote -- holding ${formatUnits(midReceived, tokenMid.decimals)} ${tokenMid.symbol}`
     console.warn(`   ⚠ ${message}`)
     recordArb({
       time: new Date().toISOString(), pair: label, tokenIn: tokenBase.symbol,
