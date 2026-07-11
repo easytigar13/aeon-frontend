@@ -30,7 +30,15 @@ async function upstash(command: (string | number)[]): Promise<any> {
   const config = getConfig()
   if (!config) return null
   const path = command.map(c => encodeURIComponent(String(c))).join('/')
-  const res = await fetch(`${config.url}/${path}`, { headers: { Authorization: `Bearer ${config.token}` } })
+  // cache: 'no-store' is required here -- Next.js's App Router extends
+  // fetch() with its own Data Cache and caches GET responses by default.
+  // Without this, the very first (empty) read gets cached and every
+  // subsequent request -- on the bot's own keeper process too, since this
+  // module is shared -- would keep seeing that same stale result forever.
+  const res = await fetch(`${config.url}/${path}`, {
+    headers: { Authorization: `Bearer ${config.token}` },
+    cache: 'no-store',
+  })
   const body = await res.json().catch(() => null)
   if (!res.ok) throw new Error(body?.error ?? `Upstash error (${res.status})`)
   return body?.result
