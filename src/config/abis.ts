@@ -1200,3 +1200,153 @@ export const TOWER_DEFENSE_ARENA_ABI = [
     { name: 'reward', type: 'uint256', indexed: false },
   ] },
 ] as const
+
+// Token Launchpad -- deployed 2026-07-11 (AeonLPLocker 0xE42c5602..., then
+// AeonTokenLaunchpad 0xf4565380... wired to it). Every launched token is an
+// AeonLaunchTaxToken: fixed non-optional 0.025% transfer tax, auto-swapped to
+// AEON and burned on every transfer (see the contract's own header comment in
+// aeon-protocol-v5/src/launchpad/AeonLaunchpadSuite.sol for the full
+// reentrancy/MEV-tradeoff reasoning). Launch fee is a % of the quote
+// liquidity (owner-adjustable, hard-capped on-chain at 5%), currently 0.
+export const AEON_TOKEN_LAUNCHPAD_ABI = [
+  { name: 'launchFeeBps', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'MAX_LAUNCH_FEE_BPS', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'feeRecipient', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+  { name: 'launchCount', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  {
+    name: 'launches',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'uint256' }],
+    outputs: [
+      { name: 'creator', type: 'address' },
+      { name: 'token', type: 'address' },
+      { name: 'quoteToken', type: 'address' },
+      { name: 'pool', type: 'address' },
+      { name: 'feeBps', type: 'uint24' },
+      { name: 'totalSupply', type: 'uint256' },
+      { name: 'tokenLiquidity', type: 'uint256' },
+      { name: 'quoteLiquidity', type: 'uint256' },
+      { name: 'liquidity', type: 'uint256' },
+      { name: 'lpDestination', type: 'uint8' },
+      { name: 'lockId', type: 'uint256' },
+      { name: 'metadataURI', type: 'string' },
+    ],
+  },
+  {
+    name: 'launchTokenWithNativeLiquidity',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [{
+      name: 'request',
+      type: 'tuple',
+      components: [
+        { name: 'name', type: 'string' },
+        { name: 'symbol', type: 'string' },
+        { name: 'metadataURI', type: 'string' },
+        { name: 'totalSupply', type: 'uint256' },
+        { name: 'tokenLiquidityAmount', type: 'uint256' },
+        { name: 'minTokenAmount', type: 'uint256' },
+        { name: 'minNativeAmount', type: 'uint256' },
+        { name: 'feeBps', type: 'uint24' },
+        { name: 'deadline', type: 'uint256' },
+        { name: 'lpDestination', type: 'uint8' },
+        { name: 'lpUnlockTime', type: 'uint256' },
+      ],
+    }],
+    outputs: [
+      { name: 'token', type: 'address' },
+      { name: 'pool', type: 'address' },
+      { name: 'liquidityOrLockId', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'launchTokenWithTokenLiquidity',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{
+      name: 'request',
+      type: 'tuple',
+      components: [
+        { name: 'name', type: 'string' },
+        { name: 'symbol', type: 'string' },
+        { name: 'metadataURI', type: 'string' },
+        { name: 'totalSupply', type: 'uint256' },
+        { name: 'tokenLiquidityAmount', type: 'uint256' },
+        { name: 'quoteToken', type: 'address' },
+        { name: 'quoteLiquidityAmount', type: 'uint256' },
+        { name: 'minTokenAmount', type: 'uint256' },
+        { name: 'minQuoteAmount', type: 'uint256' },
+        { name: 'feeBps', type: 'uint24' },
+        { name: 'deadline', type: 'uint256' },
+        { name: 'lpDestination', type: 'uint8' },
+        { name: 'lpUnlockTime', type: 'uint256' },
+      ],
+    }],
+    outputs: [
+      { name: 'token', type: 'address' },
+      { name: 'pool', type: 'address' },
+      { name: 'liquidityOrLockId', type: 'uint256' },
+    ],
+  },
+  {
+    name: 'TokenLaunched',
+    type: 'event',
+    inputs: [
+      { name: 'launchId', type: 'uint256', indexed: true },
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'token', type: 'address', indexed: true },
+      { name: 'quoteToken', type: 'address', indexed: false },
+      { name: 'pool', type: 'address', indexed: false },
+      { name: 'lpDestination', type: 'uint8', indexed: false },
+      { name: 'lockId', type: 'uint256', indexed: false },
+      { name: 'metadataURI', type: 'string', indexed: false },
+    ],
+  },
+  {
+    name: 'LaunchFeePaid',
+    type: 'event',
+    inputs: [
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'quoteToken', type: 'address', indexed: false },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'feeRecipient', type: 'address', indexed: false },
+    ],
+  },
+] as const
+
+export const AEON_LP_LOCKER_ABI = [
+  { name: 'lockCount', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'locksOf', type: 'function', stateMutability: 'view', inputs: [{ name: 'owner', type: 'address' }], outputs: [{ name: '', type: 'uint256[]' }] },
+  {
+    name: 'locks',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'uint256' }],
+    outputs: [
+      { name: 'lpToken', type: 'address' },
+      { name: 'owner', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+      { name: 'unlockTime', type: 'uint256' },
+      { name: 'withdrawn', type: 'bool' },
+    ],
+  },
+  { name: 'withdraw', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'lockId', type: 'uint256' }], outputs: [] },
+  {
+    name: 'LPLocked', type: 'event', inputs: [
+      { name: 'lockId', type: 'uint256', indexed: true },
+      { name: 'owner', type: 'address', indexed: true },
+      { name: 'lpToken', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'unlockTime', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'LPWithdrawn', type: 'event', inputs: [
+      { name: 'lockId', type: 'uint256', indexed: true },
+      { name: 'owner', type: 'address', indexed: true },
+      { name: 'lpToken', type: 'address', indexed: true },
+      { name: 'amount', type: 'uint256', indexed: false },
+    ],
+  },
+] as const

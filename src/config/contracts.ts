@@ -116,6 +116,22 @@ export const CONTRACTS = {
   // signer key were ever compromised. Fork-verified (happy path + double-claim
   // + wrong-signer + over-cap all behave correctly) before deploying.
   TowerDefenseArena:   '0xCFcb643D8f51D640e0B81257340C1cA344238F48' as `0x${string}`,
+  // Deployed 2026-07-11: token launchpad, at the user's request. Anyone can
+  // create a new ERC-20 + seed an Aeon vAMM pool for it in one tx (quote
+  // asset is either ETH/WETH or AEON, creator's choice), then route the LP
+  // to themselves, burn it, or lock it in AeonLPLocker until a chosen date.
+  // Every launched token is an AeonLaunchTaxToken (see
+  // aeon-protocol-v5/src/launchpad/AeonLaunchpadSuite.sol): a fixed,
+  // non-optional 0.025% transfer tax that auto-swaps to AEON and burns on
+  // every transfer -- no toggle, same rate for every launch. Launch fee is a
+  // % of the quote liquidity contributed, owner-adjustable, hard-capped
+  // on-chain at 5% (MAX_LAUNCH_FEE_BPS), currently set to 0. Fork-tested
+  // before deploying: launch with LP to creator/burned/locked, lock
+  // withdraw timing, zero-supply/expired-deadline rejection, and the tax
+  // mechanic itself (a real transfer, real 0.025% deducted, real AEON
+  // burned to DEAD in the same tx) all passed against a fork of this chain.
+  AeonLPLocker:        '0xE42c5602f0E38524E94c765639E65aB9a2f10FB3' as `0x${string}`,
+  AeonTokenLaunchpad:  '0xf456538039755c855068AC2e2f3DB48a974DA33e' as `0x${string}`,
 } as const
 
 // Deployed 2026-07-05: parallel staking + AEON-rewards contracts for CL and
