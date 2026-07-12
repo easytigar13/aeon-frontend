@@ -156,6 +156,8 @@ export interface VolumeResult {
   // No third-party indexer involved — this is the same log fetch above,
   // just also read for its price info. Empty until a real trade happens.
   priceHistory: Record<string, number[]>
+  dayWindowComplete: boolean
+  weekWindowComplete: boolean
 }
 
 export function useVolume24h(prices: PriceMap): VolumeResult {
@@ -180,7 +182,7 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
   })
   onChainToken0Ref.current = token0Map
 
-  const [result, setResult] = useState<VolumeResult>({ total: null, byPool: {}, byPoolWeek: {}, priceHistory: {} })
+  const [result, setResult] = useState<VolumeResult>({ total: null, byPool: {}, byPoolWeek: {}, priceHistory: {}, dayWindowComplete: false, weekWindowComplete: false })
 
   useEffect(() => {
     if (!client) return
@@ -191,17 +193,18 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
     // provider-side cap) — never silently accept a narrower window when the
     // wide one just returned zero results, since "no real trades" and
     // "range too small to see them" look identical otherwise.
-    async function fetchLogsForRange(primaryRange: bigint, currentBlock: bigint): Promise<any[]> {
+    async function fetchLogsForRange(primaryRange: bigint, currentBlock: bigint): Promise<{ logs: any[]; complete: boolean }> {
       const candidateRanges = [...new Set([primaryRange, 43200n, 10000n, 2048n, 512n])]
       for (const range of candidateRanges) {
         const fromBlock = currentBlock > range ? currentBlock - range : 0n
         try {
-          return await (client as any).getLogs({
+          const logs = await (client as any).getLogs({
             address: ALL_ADDRESSES,
             topics:  [[SWAP_TOPIC, CL_SWAP_TOPIC, LB_SWAP_TOPIC]], // OR match on topic0
             fromBlock,
             toBlock: currentBlock,
           })
+          return { logs, complete: range >= primaryRange }
         } catch {
           // try next smaller range
         }
@@ -328,16 +331,18 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
       if (cancelled) return
 
       const p = pricesRef.current
-      const day  = logs24h ? processLogs(logs24h, p) : null
-      const week = logs7d  ? processLogs(logs7d,  p) : null
+      const day  = logs24h ? processLogs(logs24h.logs, p) : null
+      const week = logs7d  ? processLogs(logs7d.logs,  p) : null
 
       if (!day && !week) return
 
       setResult({
-        total:      day?.totalUsd ?? null,
-        byPool:     day?.byPool ?? {},
-        byPoolWeek: week?.byPool ?? {},
+        total:      logs24h?.complete ? (day?.totalUsd ?? 0) : null,
+        byPool:     logs24h?.complete ? (day?.byPool ?? {}) : {},
+        byPoolWeek: logs7d?.complete ? (week?.byPool ?? {}) : {},
         priceHistory: day?.priceHistory ?? week?.priceHistory ?? {},
+        dayWindowComplete: logs24h?.complete ?? false,
+        weekWindowComplete: logs7d?.complete ?? false,
       })
     }
 

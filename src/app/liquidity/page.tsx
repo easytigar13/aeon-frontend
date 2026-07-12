@@ -47,6 +47,7 @@ function fmtApr(apr: number | null): string {
 }
 function fmtUsd(n: number | null): string {
   if (n === null || n <= 0 || !isFinite(n)) return '$—'
+  if (n < 0.01) return '<$0.01'
   if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
   if (n >= 1_000) return `$${(n / 1_000).toFixed(2)}K`
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -193,6 +194,9 @@ interface UnifiedPool {
   volUsdWeek: number | null
   feesUsdWeek: number | null
   aprPct: number | null
+  utilizationPct: number | null
+  health: 'Healthy' | 'Low liquidity' | 'Critical liquidity' | 'Data pending'
+  riskNote: string
 }
 
 type ListFilter = 'ALL' | PoolMode
@@ -205,6 +209,13 @@ function usePoolListData(): UnifiedPool[] {
   const volResult      = useVolume24h(prices)
   const { discovered }  = useAllPools()
   const discoveredStats = useDiscoveredPoolStats(discovered, prices)
+  const healthFor = (type: PoolMode, tvl: number | null, vol: number | null) => {
+    const health: UnifiedPool['health'] = tvl === null ? 'Data pending' : tvl < 25 ? 'Critical liquidity' : tvl < 100 ? 'Low liquidity' : 'Healthy'
+    const riskNote = type === 'CL' ? 'Returns depend on the position remaining in its active price range.'
+      : type === 'DLMM' ? 'Returns depend on active bins and market volatility.'
+      : health === 'Healthy' ? 'Full-range constant-product liquidity.' : 'Higher price impact and execution risk.'
+    return { utilizationPct: tvl && tvl > 0 && vol !== null ? (vol / tvl) * 100 : null, health, riskNote }
+  }
 
   const vamm: UnifiedPool[] = POOLS.map(p => {
     const tvlUsd = poolStats.find(s => s.address === p.address)?.tvlUsd ?? null
@@ -224,7 +235,7 @@ function usePoolListData(): UnifiedPool[] {
     const aprPct = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
       ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
-    return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct }
+    return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, ...healthFor('vAMM', tvlUsd, volUsd) }
   })
 
   // Pools anyone created themselves via Create Pool, discovered live from
@@ -235,12 +246,14 @@ function usePoolListData(): UnifiedPool[] {
   // of time), so those stay null. They show up and are addable/swappable
   // immediately either way, instead of being invisible until someone
   // manually wires them into contracts.ts.
-  const vammDiscovered: UnifiedPool[] = discovered.map(p => ({
-    type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address,
-    feeLabel: p.fee,
-    tvlUsd: discoveredStats.find(s => s.address === p.address)?.tvlUsd ?? null,
-    volUsd: null, feesUsd: null, volUsdWeek: null, feesUsdWeek: null, aprPct: null,
-  }))
+  const vammDiscovered: UnifiedPool[] = discovered.map(p => {
+    const tvlUsd = discoveredStats.find(s => s.address === p.address)?.tvlUsd ?? null
+    return {
+      type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address,
+      feeLabel: p.fee, tvlUsd, volUsd: null, feesUsd: null, volUsdWeek: null, feesUsdWeek: null, aprPct: null,
+      ...healthFor('vAMM', tvlUsd, null),
+    }
+  })
 
   // CL_POOLS/DLMM_POOLS are currently empty (see contracts.ts comment), so
   // these two always produce []. Kept consistent with vamm's byPoolWeek APR
@@ -255,7 +268,7 @@ function usePoolListData(): UnifiedPool[] {
     const aprPct = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
       ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
-    return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct }
+    return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, ...healthFor('CL', tvlUsd, volUsd) }
   })
 
   const dlmm: UnifiedPool[] = DLMM_POOLS.map(p => {
@@ -268,7 +281,7 @@ function usePoolListData(): UnifiedPool[] {
     const aprPct = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
       ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
-    return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct }
+    return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, ...healthFor('DLMM', tvlUsd, volUsd) }
   })
 
   return [...vamm, ...vammDiscovered, ...cl, ...dlmm]
@@ -348,16 +361,18 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
       </div>
 
       <GlowPanel accent="aeon" className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[980px]">
+        <table className="w-full text-sm min-w-[1220px]">
           <thead>
             <tr className="border-b border-bg-border text-left text-xs font-mono text-text-muted uppercase tracking-wider">
               <th className="px-4 py-3 font-medium">Liquidity Pool</th>
-              <th className="px-4 py-3 font-medium text-right">APR</th>
+              <th className="px-4 py-3 font-medium text-right" title="Trailing 7-day gross swap fees annualized: fees7d ÷ TVL × 365/7. Historical, not guaranteed.">7d Gross Fee APR</th>
               <th className="px-4 py-3 font-medium text-right">TVL</th>
               <th className="px-4 py-3 font-medium text-right">Volume (24h)</th>
               <th className="px-4 py-3 font-medium text-right">Fees (24h)</th>
               <th className="px-4 py-3 font-medium text-right">Volume (7d)</th>
               <th className="px-4 py-3 font-medium text-right">Fees (7d)</th>
+              <th className="px-4 py-3 font-medium text-right">Utilization</th>
+              <th className="px-4 py-3 font-medium text-right">Pool Health</th>
               <th className="px-4 py-3 font-medium text-right"></th>
             </tr>
           </thead>
@@ -385,6 +400,10 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
                 <td className="px-4 py-3 text-right font-mono text-text-muted">{fmtUsd(p.feesUsd)}</td>
                 <td className="px-4 py-3 text-right font-mono text-text-muted">{fmtUsd(p.volUsdWeek)}</td>
                 <td className="px-4 py-3 text-right font-mono text-text-muted">{fmtUsd(p.feesUsdWeek)}</td>
+                <td className="px-4 py-3 text-right font-mono text-text-muted">{p.utilizationPct !== null ? `${p.utilizationPct.toFixed(1)}%` : '—'}</td>
+                <td className="px-4 py-3 text-right" title={p.riskNote}>
+                  <span className={clsx('text-2xs font-mono px-2 py-1 rounded-full border', p.health === 'Healthy' ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' : p.health === 'Data pending' ? 'text-text-muted border-bg-border' : 'text-amber-400 border-amber-500/30 bg-amber-500/10')}>{p.health}</span>
+                </td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => onDeposit(p.type, p.address)}
@@ -397,7 +416,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-4 py-8 text-center text-text-muted text-sm">No pools match your search.</td>
+                <td colSpan={10} className="px-4 py-8 text-center text-text-muted text-sm">No pools match your search.</td>
               </tr>
             )}
           </tbody>

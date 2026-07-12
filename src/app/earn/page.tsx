@@ -305,8 +305,16 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   const periodFinish = (periodFinishRaw as bigint | undefined) ?? 0n
   const isEmitting = periodFinish > BigInt(Math.floor(Date.now() / 1000))
   const aeonPrice = prices['AEON'] ?? null
-  const vApr = isEmitting && rewardRate > 0n && aeonPrice !== null && tvlUsd && tvlUsd > 0
-    ? (Number(formatUnits(rewardRate, 18)) * 365 * 24 * 3600 * aeonPrice) / tvlUsd * 100
+  const { data: totalLpSupplyRaw } = useReadContract({ address: pool.address, abi: ERC20_ABI, functionName: 'totalSupply' })
+  const { data: gaugeLpBalanceRaw } = useReadContract({
+    address: pool.address, abi: ERC20_ABI, functionName: 'balanceOf', args: gauge ? [gauge] : undefined,
+    query: { enabled: !!gauge, refetchInterval: 60_000 },
+  })
+  const totalLpSupply = (totalLpSupplyRaw as bigint | undefined) ?? 0n
+  const gaugeLpBalance = (gaugeLpBalanceRaw as bigint | undefined) ?? 0n
+  const stakedTvlUsd = tvlUsd && totalLpSupply > 0n ? tvlUsd * Number(gaugeLpBalance) / Number(totalLpSupply) : 0
+  const vApr = isEmitting && rewardRate > 0n && aeonPrice !== null && stakedTvlUsd > 0
+    ? (Number(formatUnits(rewardRate, 18)) * 365 * 24 * 3600 * aeonPrice) / stakedTvlUsd * 100
     : null
 
   const { writeContract, data: txHash, error: writeError } = useWriteContract()
@@ -398,11 +406,11 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
         </div>
         <div className="col-span-2">
           <div className="text-sm font-mono font-bold text-emerald-400">{fmtApr(apr ?? null)}</div>
-          <div className="text-2xs text-text-muted">Fee APR</div>
+          <div className="text-2xs text-text-muted" title="Trailing 7-day gross swap fees annualized over total pool TVL. Fees are organic trading yield; gauge rewards are separate.">7d gross fee APR</div>
         </div>
         <div className="col-span-2 hidden sm:block">
           <div className="text-sm font-mono font-bold text-violet-400">{fmtApr(vApr)}</div>
-          <div className="text-2xs text-text-muted">vAPR</div>
+          <div className="text-2xs text-text-muted" title="Current AEON reward rate annualized over gauge-staked TVL only.">Gauge vAPR</div>
         </div>
         <div className="col-span-2">
           <div className="text-sm font-mono text-text-secondary">{myPosition ?? '—'}</div>

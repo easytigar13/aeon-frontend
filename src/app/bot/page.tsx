@@ -15,6 +15,8 @@ interface Opportunity {
   expectedNetUsd?: number
   gasCostUsd?: number
   venues?: string
+  routeScore?: number
+  reliabilityPct?: number
 }
 
 interface ExecutedArb {
@@ -32,6 +34,9 @@ interface ExecutedArb {
   error?: string
   route?: 'internal' | 'openocean' | '1inch'
   venues?: string
+  quotedProfit?: string
+  realizedProfitUsd?: number
+  quoteVariancePct?: number
 }
 
 interface BotStatus {
@@ -51,6 +56,9 @@ interface BotStatus {
   recentErrors?: { time: string; message: string }[]
   consecutiveFailures?: number
   pausedUntil?: string | null
+  gasReserve?: { requiredEth: string; availableEth: string; healthy: boolean }
+  pendingTransaction?: { hash: string; label: string; nonce: number; submittedAt: string; replacements: number } | null
+  outcomeCounters?: Record<'detected' | 'executed' | 'belowGas' | 'insufficientBalance' | 'simulationFailed' | 'staleQuote' | 'reverted', number>
 }
 
 const STALE_AFTER_MS = 15_000
@@ -160,6 +168,36 @@ export default function BotPage() {
               </div>
             )}
 
+            {status.gasReserve && !status.gasReserve.healthy && (
+              <div className="card p-4 mb-6 border-red-500/30 text-red-400 text-sm">
+                Execution is safely paused: gas wallet has {parseFloat(status.gasReserve.availableEth).toFixed(6)} ETH, below the dynamic {parseFloat(status.gasReserve.requiredEth).toFixed(6)} ETH reserve.
+              </div>
+            )}
+
+            {status.pendingTransaction && (
+              <div className="card p-4 mb-6 border-aeon-400/30 text-aeon-400 text-sm font-mono">
+                Pending nonce {status.pendingTransaction.nonce}: {status.pendingTransaction.label} · {status.pendingTransaction.replacements} replacement(s)
+              </div>
+            )}
+
+            {status.outcomeCounters && (
+              <GlowPanel accent="blue" className="p-6 mb-6">
+                <div className="text-text-secondary text-sm font-mono uppercase tracking-wider mb-4">Execution Funnel</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                  {([
+                    ['Detected', 'detected'], ['Executed', 'executed'], ['Below gas', 'belowGas'],
+                    ['No balance', 'insufficientBalance'], ['Simulation', 'simulationFailed'],
+                    ['Stale quote', 'staleQuote'], ['Reverted', 'reverted'],
+                  ] as const).map(([label, key]) => (
+                    <div key={key} className="rounded-xl border border-bg-border bg-bg-raised/60 p-3">
+                      <div className="text-2xs text-text-muted uppercase font-mono">{label}</div>
+                      <div className="text-lg text-text-primary font-mono mt-1">{status.outcomeCounters?.[key] ?? 0}</div>
+                    </div>
+                  ))}
+                </div>
+              </GlowPanel>
+            )}
+
             {/* Balances + cumulative profit */}
             <div className="grid md:grid-cols-2 gap-6 mb-6">
               <GlowPanel accent="blue" className="p-6">
@@ -213,7 +251,7 @@ export default function BotPage() {
                   {status.lastOpportunities.slice(0, 5).map((o, i) => (
                     <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center text-sm py-1.5 border-b border-bg-border last:border-0">
                       <span className="font-mono text-text-primary">{o.pair}</span>
-                      {o.venues && <span className="text-violet-400 font-mono text-xs">{o.venues}</span>}
+                      {o.venues && <span className="text-violet-400 font-mono text-xs">{o.venues}{o.reliabilityPct != null ? ` · ${o.reliabilityPct.toFixed(0)}% reliable` : ''}</span>}
                       <span className="text-text-secondary">{o.amountIn} {o.tokenIn}</span>
                       <span className={clsx('font-mono', o.expectedNetUsd != null && o.expectedNetUsd < 0 ? 'text-red-400' : 'text-emerald-400')}>
                         net est. {o.expectedNetUsd != null ? `${o.expectedNetUsd < 0 ? '-' : ''}$${Math.abs(o.expectedNetUsd).toFixed(4)}` : '—'} (gross {o.grossProfit ?? '—'} {o.tokenIn}
@@ -255,7 +293,7 @@ export default function BotPage() {
                       </div>
                       <span className="text-text-muted text-xs">{new Date(a.time).toLocaleTimeString()}</span>
                       <span className={a.status === 'success' ? 'text-emerald-400 font-mono' : 'text-text-muted font-mono'}>
-                        {a.status === 'success' ? `net +${parseFloat(a.profit).toFixed(6)} ${a.tokenIn}${a.gasCost ? ` (gas ${parseFloat(a.gasCost).toFixed(6)})` : ''}` : a.status}
+                        {a.status === 'success' ? `net +${parseFloat(a.profit).toFixed(6)} ${a.tokenIn}${a.realizedProfitUsd != null ? ` ($${a.realizedProfitUsd.toFixed(4)})` : ''}${a.gasCost ? ` · gas ${parseFloat(a.gasCost).toFixed(6)}` : ''}${a.quoteVariancePct != null ? ` · quote ${a.quoteVariancePct >= 0 ? '+' : ''}${a.quoteVariancePct.toFixed(2)}%` : ''}` : a.status}
                       </span>
                     </div>
                   ))}

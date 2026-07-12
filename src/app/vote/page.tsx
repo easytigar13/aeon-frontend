@@ -11,6 +11,8 @@ import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const
+
 // AeonVotingEscrow is a plain (non-Enumerable) ERC721 — the only way to find
 // which tokenIds a wallet owns is to walk every minted id and check ownerOf.
 // `tokenId()` is the mint counter (highest id ever minted), and this is a
@@ -224,6 +226,16 @@ export default function VotePage() {
   const tvlByAddr   = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
   const votesByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.votesFormatted]))
   const volResult   = useVolume24h(prices)
+  const { data: gaugeAddressReads } = useReadContracts({
+    contracts: POOLS.map(pool => ({ address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'gauges' as const, args: [pool.address] as const })),
+  })
+  const gaugeAddresses = POOLS.map((_, i) => gaugeAddressReads?.[i]?.status === 'success' ? gaugeAddressReads[i].result as `0x${string}` : ZERO_ADDRESS)
+  const { data: lpSupplyReads } = useReadContracts({
+    contracts: POOLS.map(pool => ({ address: pool.address, abi: ERC20_ABI, functionName: 'totalSupply' as const })),
+  })
+  const { data: gaugeLpReads } = useReadContracts({
+    contracts: POOLS.map((pool, i) => ({ address: pool.address, abi: ERC20_ABI, functionName: 'balanceOf' as const, args: [gaugeAddresses[i]] as const })),
+  })
 
   // Fee APR per pool: trailing-week volume, not literal 24h -- a pool with
   // real but sporadic trading shouldn't show "—%" just because nothing
@@ -294,11 +306,14 @@ export default function VotePage() {
   const projectedWeeklyToVoterUSD = aeonPrice ? toVoterAeon * aeonPrice : 0
 
   const vaprByAddr: Record<string, number | null> = {}
-  for (const pool of POOLS) {
+  for (const [poolIndex, pool] of POOLS.entries()) {
     const tvl = tvlByAddr[pool.address] ?? null
+    const totalLp = lpSupplyReads?.[poolIndex]?.status === 'success' ? lpSupplyReads[poolIndex].result as bigint : 0n
+    const stakedLp = gaugeLpReads?.[poolIndex]?.status === 'success' ? gaugeLpReads[poolIndex].result as bigint : 0n
+    const stakedTvl = tvl && totalLp > 0n ? tvl * Number(stakedLp) / Number(totalLp) : 0
     const poolWeight = poolStats.find(s => s.address === pool.address)?.votesWei ?? 0n
-    vaprByAddr[pool.address] = (tvl && tvl > 0 && aeonPrice && onChainTotalWeight && onChainTotalWeight > 0n)
-      ? (projectedWeeklyToVoterUSD * (Number(poolWeight) / Number(onChainTotalWeight)) * 52 / tvl) * 100
+    vaprByAddr[pool.address] = (stakedTvl > 0 && aeonPrice && onChainTotalWeight && onChainTotalWeight > 0n)
+      ? (projectedWeeklyToVoterUSD * (Number(poolWeight) / Number(onChainTotalWeight)) * 52 / stakedTvl) * 100
       : null
   }
 
@@ -547,8 +562,8 @@ export default function VotePage() {
 
           <div className="card overflow-hidden">
             <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-bg-border">
-              {['Pool', 'Type', 'TVL', 'Volume 24h', 'APR', 'vAPR', ''].map((h, i) => (
-                <div key={h + i} className={clsx('text-2xs font-mono text-text-muted uppercase tracking-wider', i === 0 ? 'col-span-3' : i === 1 ? 'col-span-1' : i === 6 ? 'col-span-1 text-right' : 'col-span-2')}>{h}</div>
+              {['Pool', 'Type', 'TVL', 'Volume 24h', '7d gross fee APR', 'Projected gauge vAPR', ''].map((h, i) => (
+                <div key={h + i} title={i === 4 ? 'Trailing 7-day gross swap fees annualized: fees7d ÷ TVL × 365/7.' : i === 5 ? 'Projected next-epoch AEON rewards annualized and divided by gauge-staked TVL only.' : undefined} className={clsx('text-2xs font-mono text-text-muted uppercase tracking-wider', i === 0 ? 'col-span-3' : i === 1 ? 'col-span-1' : i === 6 ? 'col-span-1 text-right' : 'col-span-2')}>{h}</div>
               ))}
             </div>
 

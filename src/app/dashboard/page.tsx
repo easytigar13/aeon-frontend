@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-import { useReadContract } from 'wagmi'
+import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS } from '@/config/contracts'
 import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI, FEE_DISTRIBUTOR_ABI } from '@/config/abis'
@@ -13,6 +13,7 @@ import { useVolume24h } from '@/hooks/useVolume24h'
 
 function fmtUsd(n: number | null, compact = false): string {
   if (n === null) return '$—'
+  if (n > 0 && n < 0.01) return '<$0.01'
   if (compact && n >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
   if (compact && n >= 1_000)    return `$${(n / 1_000).toFixed(2)}K`
   return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -165,10 +166,10 @@ export default function DashboardPage() {
   const volume24h = volResult.total
   const volByAddr = volResult.byPool
   const volByAddrWeek = volResult.byPoolWeek
-  const statByAddr = Object.fromEntries(poolStats.map(s => [s.address, s]))
+  const statByAddr = Object.fromEntries([...poolStats, ...clPoolStats, ...dlmmPoolStats].map(s => [s.address, s]))
 
   const seenAddrs = new Set<string>()
-  const uniquePools = POOLS.filter(p => {
+  const uniquePools = [...POOLS, ...CL_POOLS, ...DLMM_POOLS].filter(p => {
     if (seenAddrs.has(p.address)) return false
     seenAddrs.add(p.address)
     return true
@@ -186,6 +187,10 @@ export default function DashboardPage() {
   const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight', ...LIVE })
   const { data: weeklyEmissions } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount', ...LIVE })
   const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.FeeDistributor,  abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD', ...LIVE })
+  const { data: emissionFeeHistoryRaw } = useReadContracts({
+    contracts: [0, 1, 2].map(i => ({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'feeHistory' as const, args: [BigInt(i)] as const })),
+    query: { refetchInterval: 60_000 },
+  })
 
   const WEEK_MS       = 7 * 24 * 60 * 60 * 1000
   const WEEK_S        = 7 * 24 * 60 * 60
@@ -206,12 +211,17 @@ export default function DashboardPage() {
   const blendedFeePct  = 0.003 // ~0.3% blended across pools
   const aeonPrice      = prices.AEON ?? null
 
-  // Projected emissions — prefer on-chain, fall back to volume estimate
-  const projectedEmissionsAeon = weeklyEmissions
-    ? parseFloat(formatUnits(weeklyEmissions as bigint, 18))
-    : (volume24h !== null && aeonPrice && aeonPrice > 0)
-      ? (volume24h * 7 * blendedFeePct) / 10 / aeonPrice
-      : null
+  // Exact next-epoch model used by EmissionsEngineRH: non-zero 3-epoch fee
+  // average, 10:1 fee budget, then the 3x circuit-breaker against last mint.
+  const emissionHistory = (emissionFeeHistoryRaw ?? [])
+    .filter(r => r.status === 'success' && (r.result as bigint) > 0n)
+    .map(r => Number(formatUnits(r.result as bigint, 18)))
+  const smoothedEpochFees = emissionHistory.length > 0 ? emissionHistory.reduce((a, b) => a + b, 0) / emissionHistory.length : 0
+  const previousMint = weeklyEmissions ? Number(formatUnits(weeklyEmissions as bigint, 18)) : 0
+  const rawNextMint = aeonPrice && aeonPrice > 0 ? (smoothedEpochFees / 10) / aeonPrice : 0
+  const projectedEmissionsAeon = aeonPrice && aeonPrice > 0
+    ? (previousMint > 0 ? Math.min(rawNextMint, previousMint * 3) : rawNextMint)
+    : null
 
   // Fees this epoch — FeeDistributorV3.lastEpochFeesUSD only updates once per
   // epoch (on distribute()), so mid-epoch it's still reporting the PREVIOUS
@@ -335,8 +345,8 @@ export default function DashboardPage() {
                 { label: 'Current Epoch',       value: epochLabel },
                 { label: 'Epoch Ends',          value: `${days}d ${hours}h remaining` },
                 { label: 'Total Votes',         value: totalVotes !== undefined ? `${fmt18(totalVotes)} veAEON` : '—' },
-                { label: 'Fees This Epoch',     value: feesThisEpoch !== null ? fmtUsd(feesThisEpoch, true) : '$—' },
-                { label: 'Projected Emissions', value: projectedEmissionsAeon !== null ? `~${projectedEmissionsAeon.toLocaleString(undefined, { maximumFractionDigits: 0 })} AEON` : '— AEON' },
+                { label: 'Estimated gross fees this epoch', value: feesThisEpoch !== null ? fmtUsd(feesThisEpoch, true) : '$—' },
+                { label: 'Next-epoch emission estimate', value: projectedEmissionsAeon !== null ? `~${projectedEmissionsAeon.toLocaleString(undefined, { maximumFractionDigits: 3 })} AEON` : '— AEON' },
               ].map(item => (
                 <div key={item.label} className="flex justify-between items-center gap-3">
                   <span className="text-sm text-text-muted">{item.label}</span>
@@ -356,7 +366,8 @@ export default function DashboardPage() {
             <div className="flex-1 space-y-3 min-w-0">
               {[
                 { label: 'Price',        value: prices.AEON ? fmtUsd(prices.AEON) : '$—' },
-                { label: 'Market Cap',   value: (prices.AEON && aeonSupply) ? fmtUsd(prices.AEON * parseFloat(formatUnits(aeonSupply, 18)), true) : '$—' },
+                { label: 'Circulating Market Cap', value: (prices.AEON && circulatingSupply !== undefined) ? fmtUsd(prices.AEON * parseFloat(formatUnits(circulatingSupply, 18)), true) : '$—' },
+                { label: 'Fully Diluted Value', value: (prices.AEON && aeonSupply) ? fmtUsd(prices.AEON * parseFloat(formatUnits(aeonSupply, 18)), true) : '$—' },
                 { label: 'Total Supply', value: aeonSupply !== undefined ? `${fmt18(aeonSupply)} AEON` : '—' },
                 { label: 'Total Burned', value: totalBurned !== undefined ? `${fmt18(totalBurned)} AEON` : '—' },
                 { label: '% Burned',     value: `${burnedPct}%` },
@@ -420,19 +431,19 @@ export default function DashboardPage() {
       <div className="card overflow-hidden">
         <div className="px-6 py-4 border-b border-bg-border flex items-center justify-between">
           <h2 className="font-display font-semibold text-text-primary">All Pools</h2>
-          <span className="text-xs font-mono text-text-muted">{POOLS.length} pools</span>
+          <span className="text-xs font-mono text-text-muted">{uniquePools.length} pools</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-bg-border">
-                {['Pool', 'Type', 'Fee', 'TVL', 'Volume 24h', 'Fee APR', 'Votes'].map(h => (
+                {['Pool', 'Type', 'Fee', 'TVL', 'Volume 24h', 'Trailing 7d gross fee APR', 'Votes'].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-2xs font-mono text-text-muted uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-bg-border">
-              {POOLS.map(pool => {
+              {uniquePools.map(pool => {
                 const stat    = statByAddr[pool.address]
                 const vol     = volByAddr[pool.address.toLowerCase()] ?? null
                 const volWeek = volByAddrWeek[pool.address.toLowerCase()] ?? null
@@ -463,7 +474,7 @@ export default function DashboardPage() {
                     <td className="px-4 py-3 text-sm font-mono text-text-secondary">{fmtUsd(tvl)}</td>
                     <td className="px-4 py-3 text-sm font-mono text-text-secondary">{fmtUsd(vol)}</td>
                     <td className="px-4 py-3 text-sm font-mono text-emerald-400">{feeApr}</td>
-                    <td className="px-4 py-3 text-xs font-mono text-text-muted">{stat ? `${stat.votesFormatted} veAEON` : '—'}</td>
+                    <td className="px-4 py-3 text-xs font-mono text-text-muted">{stat && 'votesFormatted' in stat ? `${stat.votesFormatted} veAEON` : '—'}</td>
                   </tr>
                 )
               })}

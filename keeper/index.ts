@@ -110,6 +110,8 @@ const MAX_BALANCE_USAGE_BPS = configuredBalanceUsageBps < 1n ? 1n : configuredBa
 const ROUTE_FAILURE_THRESHOLD = parseInt(process.env.ROUTE_FAILURE_THRESHOLD ?? '2')
 const ROUTE_COOLDOWN_MS = parseInt(process.env.ROUTE_COOLDOWN_MS ?? '60000')
 const ROUTE_MAX_COOLDOWN_MS = parseInt(process.env.ROUTE_MAX_COOLDOWN_MS ?? '900000')
+const PENDING_TX_TIMEOUT_MS = parseInt(process.env.PENDING_TX_TIMEOUT_MS ?? '45000')
+const REPLACEMENT_GAS_BUMP_BPS = BigInt(process.env.REPLACEMENT_GAS_BUMP_BPS ?? '1250')
 
 // Cross-venue (OpenOcean / 1inch) scan runs far less often than the internal
 // pool scan -- it costs real API calls (rate-limited, especially 1inch),
@@ -697,6 +699,8 @@ interface ArbOpp {
   profitPct: number
   expectedNetUsd?: number
   gasCostUsd?: number
+  routeScore?: number
+  reliabilityPct?: number
 }
 
 // A SettlementOpp is NOT a cycle -- it starts in one SETTLEMENT_TOKEN and
@@ -1054,6 +1058,8 @@ interface BalancesResult {
   searchBalances: Record<string, bigint>  // same, but WETH inflated by wrap-available native ETH -- what discovery/sizing uses
   nativeEth: bigint
   availableEthForWrap: bigint
+  gasReserveWei: bigint
+  gasReserveHealthy: boolean
 }
 
 // The reserve is never just a fixed ETH amount -- it's whichever is LARGER
@@ -1085,15 +1091,15 @@ async function fetchBalances(gasPrice: bigint): Promise<BalancesResult> {
 
   let nativeEth = 0n
   let availableEthForWrap = 0n
+  const gasReserveWei = computeMinGasReserveWei(gasPrice)
   try {
     nativeEth = await pub.getBalance({ address: account.address })
-    const reserveWei = computeMinGasReserveWei(gasPrice)
-    availableEthForWrap = nativeEth > reserveWei ? nativeEth - reserveWei : 0n
+    availableEthForWrap = nativeEth > gasReserveWei ? nativeEth - gasReserveWei : 0n
   } catch { /* leave at 0 if this read fails -- WETH search balance just won't include it this tick */ }
 
   const searchBalances = { ...balances, WETH: (balances.WETH ?? 0n) + availableEthForWrap }
 
-  return { balances, searchBalances, nativeEth, availableEthForWrap }
+  return { balances, searchBalances, nativeEth, availableEthForWrap, gasReserveWei, gasReserveHealthy: nativeEth >= gasReserveWei }
 }
 
 // Which tokens are worth anchoring a cycle search to this tick. BASE_TOKEN
@@ -1227,6 +1233,9 @@ interface ExecutedArb {
   grossProfit?: string
   gasCost?: string
   gasCostEth?: string
+  quotedProfit?: string
+  realizedProfitUsd?: number
+  quoteVariancePct?: number
   txHash?: string
   status: 'success' | 'failed' | 'dry-run'
   error?: string
@@ -1245,6 +1254,33 @@ let consecutiveFailures = 0
 let pausedUntil = 0
 const MAX_CONSECUTIVE_FAILURES = parseInt(process.env.MAX_CONSECUTIVE_FAILURES ?? '3')
 const FAILURE_PAUSE_MS = parseInt(process.env.FAILURE_PAUSE_MS ?? '300000')
+
+type OutcomeKey = 'detected' | 'executed' | 'belowGas' | 'insufficientBalance' | 'simulationFailed' | 'staleQuote' | 'reverted'
+const outcomeCounters: Record<OutcomeKey, number> = {
+  detected: 0, executed: 0, belowGas: 0, insufficientBalance: 0,
+  simulationFailed: 0, staleQuote: 0, reverted: 0,
+}
+
+interface PendingTransaction {
+  hash: `0x${string}`
+  label: string
+  nonce: number
+  submittedAt: string
+  replacements: number
+}
+
+let pendingTransaction: PendingTransaction | null = null
+
+function publishPendingTransaction() {
+  try {
+    const prior = JSON.parse(fs.readFileSync(statusPath, 'utf-8'))
+    const next = { ...prior, updatedAt: new Date().toISOString(), pendingTransaction }
+    fs.writeFileSync(statusPath, JSON.stringify(next, null, 2))
+    if (isBotStoreConfigured()) {
+      writeBotStatus(next).catch(err => console.error(`[bot store error] failed to sync pending transaction: ${err?.message ?? err}`))
+    }
+  } catch { /* the first full tick will create status.json */ }
+}
 
 type FailureCategory = 'stale_quote' | 'slippage' | 'allowance' | 'insufficient_balance' | 'rpc' | 'expired' | 'invalid_route' | 'venue_revert' | 'unknown'
 type FailureStage = 'quote' | 'approval' | 'gas_estimate' | 'simulation' | 'submission' | 'confirmation'
@@ -1300,6 +1336,13 @@ function decodeFailure(err: any): DecodedFailure {
   return { category: 'unknown', message: message.slice(0, 240), routeScoped: false }
 }
 
+function countFailureOutcome(failure: DecodedFailure, stage: FailureStage) {
+  if (stage === 'simulation') outcomeCounters.simulationFailed++
+  if (failure.category === 'stale_quote' || failure.category === 'slippage') outcomeCounters.staleQuote++
+  else if (failure.category === 'insufficient_balance') outcomeCounters.insufficientBalance++
+  else outcomeCounters.reverted++
+}
+
 function routeCooldownRemaining(hops: HopCandidate[]): number {
   const health = routeHealth.get(routeKey(hops))
   if (!health || health.cooldownUntil <= Date.now()) return 0
@@ -1325,6 +1368,29 @@ function clearRouteFailure(hops: HopCandidate[]) {
   routeHealth.delete(routeKey(hops))
 }
 
+function routeReliability(hops: HopCandidate[]): number {
+  const failures = routeHealth.get(routeKey(hops))?.failures ?? 0
+  const venueFactor = hops.reduce((factor, hop) => {
+    const kind = hop.pool.pool.kind
+    const hopFactor = kind === 'vAMM' ? 1 : kind === 'uniV2' ? 0.98 : kind === 'uniV3' ? 0.95 : kind === 'uniV4' ? 0.92 : 0.9
+    return factor * hopFactor
+  }, 1)
+  return Math.max(0.2, venueFactor * Math.pow(0.72, failures))
+}
+
+// Absolute net profit stays dominant. Reliability, hop count and first-hop
+// depth only break ties between otherwise similar routes, avoiding the old
+// behaviour where a fragile 8-hop quote beat a deep 2-hop route by a tiny
+// percentage-point difference.
+function scoreOpportunity(opp: ArbOpp, netUsd: number): number {
+  const reliability = routeReliability(opp.hops)
+  const depthUsage = opp.hops[0].reserveIn > 0n ? Number(opp.amountIn * 10_000n / opp.hops[0].reserveIn) / 10_000 : 1
+  const depthFactor = Math.max(0.45, 1 - depthUsage)
+  const hopFactor = 1 / (1 + Math.max(0, opp.hops.length - 2) * 0.08)
+  opp.reliabilityPct = reliability * 100
+  return netUsd * reliability * depthFactor * hopFactor
+}
+
 // Resume counters across restarts instead of losing history every deploy/reboot.
 try {
   const prior = JSON.parse(fs.readFileSync(statusPath, 'utf-8'))
@@ -1337,6 +1403,7 @@ try {
   cumulativeProfit = prior.cumulativeProfit ?? {}
   totalExecuted = prior.totalArbsExecuted ?? 0
   totalFailed = prior.totalArbsFailed ?? 0
+  Object.assign(outcomeCounters, prior.outcomeCounters ?? {})
 } catch { /* no prior status file -- fresh start */ }
 
 // Records a trade in the capped in-memory list (what status.json shows for
@@ -1359,7 +1426,7 @@ function recordArb(arb: ExecutedArb) {
   }
 }
 
-async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Record<string, bigint>, nativeEth: bigint, graph: Map<string, HopCandidate[]>) {
+async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Record<string, bigint>, nativeEth: bigint, gasReserveWei: bigint, gasReserveHealthy: boolean, graph: Map<string, HopCandidate[]>) {
   const balances: Record<string, string> = { ETH: formatEther(nativeEth) }
   for (const [sym, bal] of Object.entries(rawBalances)) {
     balances[sym] = formatUnits(bal, TOKENS[sym as keyof typeof TOKENS].decimals)
@@ -1373,6 +1440,13 @@ async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Reco
     tickMs,
     poolsMonitored: ARB_POOLS.length,
     rpcEndpointCount: RPC_URLS.length,
+    gasReserve: {
+      requiredEth: formatEther(gasReserveWei),
+      availableEth: formatEther(nativeEth),
+      healthy: gasReserveHealthy,
+    },
+    pendingTransaction,
+    outcomeCounters,
     activeRouteCooldowns: Array.from(routeHealth.entries())
       .filter(([, health]) => health.cooldownUntil > Date.now())
       .map(([route, health]) => ({ route, failures: health.failures, category: health.lastCategory, until: new Date(health.cooldownUntil).toISOString() })),
@@ -1386,6 +1460,8 @@ async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Reco
       grossProfitUsd: Number(formatUnits(valueInUsdg(o.tokenIn.symbol, o.profitRaw, graph), TOKENS.USDG.decimals)),
       expectedNetUsd: o.expectedNetUsd,
       gasCostUsd: o.gasCostUsd,
+      routeScore: o.routeScore,
+      reliabilityPct: o.reliabilityPct,
       venues: o.hops.map(h => h.pool.pool.kind).join(' -> '),
     })),
     recentArbs: recentArbs.slice(0, 30),
@@ -1416,14 +1492,60 @@ const REDIS_STATUS_SYNC_INTERVAL_MS = parseInt(process.env.REDIS_STATUS_SYNC_INT
 
 type ExecResult = 'skipped' | 'attempted'
 
+async function writeContractTracked(args: any, label: string): Promise<{ hash: `0x${string}`; receipt: any }> {
+  const nonce = await pub.getTransactionCount({ address: account.address, blockTag: 'pending' })
+  const initialGasPrice = await pub.getGasPrice()
+  let hash = await wal.writeContract({ ...args, nonce, gasPrice: initialGasPrice } as any)
+  const originalHash = hash
+  pendingTransaction = { hash, label, nonce, submittedAt: new Date().toISOString(), replacements: 0 }
+  publishPendingTransaction()
+
+  try {
+    const receipt = await pub.waitForTransactionReceipt({ hash, timeout: PENDING_TX_TIMEOUT_MS })
+    pendingTransaction = null
+    publishPendingTransaction()
+    return { hash, receipt }
+  } catch (firstError: any) {
+    // If the original landed but the first RPC missed the receipt, do not
+    // manufacture a replacement. A direct receipt read distinguishes that
+    // from a genuinely pending nonce.
+    const landed = await pub.getTransactionReceipt({ hash }).catch(() => null)
+    if (landed) {
+      pendingTransaction = null
+      publishPendingTransaction()
+      return { hash, receipt: landed }
+    }
+
+    const bumpedGasPrice = initialGasPrice + (initialGasPrice * REPLACEMENT_GAS_BUMP_BPS) / 10_000n + 1n
+    console.warn(`   Pending ${label} ${hash} exceeded ${PENDING_TX_TIMEOUT_MS}ms; replacing nonce ${nonce} with a ${Number(REPLACEMENT_GAS_BUMP_BPS) / 100}% gas bump`)
+    try {
+      const replacementHash = await wal.writeContract({ ...args, nonce, gasPrice: bumpedGasPrice } as any)
+      hash = replacementHash
+      pendingTransaction = { hash, label, nonce, submittedAt: new Date().toISOString(), replacements: 1 }
+      publishPendingTransaction()
+      const receipt = await pub.waitForTransactionReceipt({ hash, timeout: PENDING_TX_TIMEOUT_MS })
+      pendingTransaction = null
+      publishPendingTransaction()
+      return { hash, receipt }
+    } catch (replacementError: any) {
+      // A race can mine the original between the receipt check and the
+      // replacement. Prefer its real receipt when present.
+      const originalReceipt = await pub.getTransactionReceipt({ hash: originalHash }).catch(() => null)
+      pendingTransaction = null
+      publishPendingTransaction()
+      if (originalReceipt) return { hash: originalReceipt.transactionHash, receipt: originalReceipt }
+      throw replacementError?.message ? replacementError : firstError
+    }
+  }
+}
+
 async function ensureKeeperAllowance(tokenAddress: `0x${string}`, needsApproval: boolean): Promise<bigint> {
   if (!needsApproval) return 0n
-  const hash = await wal.writeContract({
+  const { receipt } = await writeContractTracked({
     address: tokenAddress, abi: ERC20_ABI, functionName: 'approve',
     args: [CONTRACTS.ArbKeeper, MAX_UINT256],
-  })
-  const receipt = await pub.waitForTransactionReceipt({ hash })
-  return receipt.gasUsed * receipt.effectiveGasPrice
+  }, 'ArbKeeper approval')
+  return BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)
 }
 
 // Maps HopCandidate[] (any mix of pool kinds) into AeonUniversalRouter's
@@ -1534,6 +1656,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
   let requiredProfit = gasFloor + 1n
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
+    outcomeCounters.belowGas++
     return 'skipped'
   }
 
@@ -1558,6 +1681,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
   }
   if (balIn < amountIn) {
     console.warn(`   ⚠ Insufficient balance: have ${formatUnits(balIn, tokenIn.decimals)}, need ${formatUnits(amountIn, tokenIn.decimals)}`)
+    outcomeCounters.insufficientBalance++
     return 'skipped'
   }
   const balanceBefore = balIn
@@ -1571,11 +1695,10 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     if (needsApproval) {
       failureStage = 'approval'
       console.log('   → approve...')
-      const hApprove = await wal.writeContract({
+      const { receipt: approvalReceipt } = await writeContractTracked({
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.UniversalRouter, MAX_UINT256],
-      })
-      const approvalReceipt = await pub.waitForTransactionReceipt({ hash: hApprove })
-      approvalGasWei = approvalReceipt.gasUsed * approvalReceipt.effectiveGasPrice
+      }, 'UniversalRouter approval')
+      approvalGasWei = BigInt(approvalReceipt.gasUsed) * BigInt(approvalReceipt.effectiveGasPrice)
     }
 
     // Refresh every venue quote after any approval transaction and directly
@@ -1602,6 +1725,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     amountOutMin = amountIn + requiredProfit
     if (finalQuotedProfit < requiredProfit) {
       console.log('   Exact gas estimate removed profitability; not submitting')
+      outcomeCounters.belowGas++
       return 'attempted'
     }
 
@@ -1618,24 +1742,24 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
 
     failureStage = 'submission'
     console.log('   → swapExactTokensForTokens...')
-    const hSwap = await wal.writeContract({
+    const { hash: hSwap, receipt } = await writeContractTracked({
       address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
       args: [hops, amountIn, amountOutMin, account.address, deadline],
-    })
+    }, `arb ${pairLabel}`)
     failureStage = 'confirmation'
-    const receipt = await pub.waitForTransactionReceipt({ hash: hSwap })
 
     if (receipt.status === 'success') {
       const balanceAfter = await pub.readContract({
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
       }) as bigint
       const realizedGross = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n
-      const totalGasWei = approvalGasWei + receipt.gasUsed * receipt.effectiveGasPrice
+      const totalGasWei = approvalGasWei + BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)
       const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
       const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
       const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
       console.log(`   ✅ ARB COMPLETE (CL/DLMM route) — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hSwap}`)
       totalExecuted++
+      outcomeCounters.executed++
       consecutiveFailures = 0
       clearRouteFailure(hopCandidates)
       const prev = parseFloat(cumulativeProfit[tokenIn.symbol] ?? '0')
@@ -1644,7 +1768,10 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
         time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
         amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(realizedNet, tokenIn.decimals),
         grossProfit: formatUnits(realizedGross, tokenIn.decimals), gasCost: formatUnits(actualGasInToken, tokenIn.decimals),
-        gasCostEth: formatEther(totalGasWei), profitPct: realizedNetPct, txHash: hSwap, status: 'success', route: 'internal', venues,
+        gasCostEth: formatEther(totalGasWei), quotedProfit: formatUnits(finalQuotedProfit, tokenIn.decimals),
+        realizedProfitUsd: Number(formatUnits(valueInUsdg(tokenIn.symbol, realizedNet, graph), TOKENS.USDG.decimals)),
+        quoteVariancePct: finalQuotedProfit > 0n ? Number((realizedGross - finalQuotedProfit) * 10_000n / finalQuotedProfit) / 100 : 0,
+        profitPct: realizedNetPct, txHash: hSwap, status: 'success', route: 'internal', venues,
       })
     } else {
       throw new Error('transaction reverted')
@@ -1652,6 +1779,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     return 'attempted'
   } catch (err: any) {
     const failure = decodeFailure(err)
+    countFailureOutcome(failure, failureStage)
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
     registerRouteFailure(hopCandidates, failure)
     console.error(`   ❌ ARB FAILED (no funds lost -- amountOutMin reverts atomically): ${message}`)
@@ -1711,6 +1839,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
   console.log(`   Required profit (buffered gas + 1 raw unit): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
+    outcomeCounters.belowGas++
     return 'skipped'
   }
 
@@ -1735,6 +1864,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
   }
   if (balIn < amountIn) {
     console.warn(`   ⚠ Insufficient balance: have ${formatUnits(balIn, tokenIn.decimals)}, need ${formatUnits(amountIn, tokenIn.decimals)}`)
+    outcomeCounters.insufficientBalance++
     return 'skipped'
   }
   const balanceBefore = balIn
@@ -1769,6 +1899,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     requiredProfit = exactGasInToken + 1n
     if (profitRaw < requiredProfit) {
       console.log('   Exact gas estimate removed profitability; not submitting')
+      outcomeCounters.belowGas++
       return needsApproval ? 'attempted' : 'skipped'
     }
 
@@ -1788,24 +1919,24 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
 
     failureStage = 'submission'
     console.log('   → executeArb...')
-    const hExec = await wal.writeContract({
+    const { hash: hExec, receipt } = await writeContractTracked({
       address: CONTRACTS.ArbKeeper, abi: ARB_KEEPER_ABI, functionName: 'executeArb',
       args: [hops, amountIn, requiredProfit, deadline],
-    })
+    }, `arb ${pairLabel}`)
     failureStage = 'confirmation'
-    const receipt = await pub.waitForTransactionReceipt({ hash: hExec })
 
     if (receipt.status === 'success') {
       const balanceAfter = await pub.readContract({
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
       }) as bigint
       const realizedGross = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n
-      const totalGasWei = approvalGasWei + receipt.gasUsed * receipt.effectiveGasPrice
+      const totalGasWei = approvalGasWei + BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)
       const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
       const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
       const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
       console.log(`   ✅ ARB COMPLETE — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hExec}`)
       totalExecuted++
+      outcomeCounters.executed++
       consecutiveFailures = 0
       clearRouteFailure(hopCandidates)
       const prev = parseFloat(cumulativeProfit[tokenIn.symbol] ?? '0')
@@ -1814,7 +1945,10 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
         time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
         amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(realizedNet, tokenIn.decimals),
         grossProfit: formatUnits(realizedGross, tokenIn.decimals), gasCost: formatUnits(actualGasInToken, tokenIn.decimals),
-        gasCostEth: formatEther(totalGasWei), profitPct: realizedNetPct, txHash: hExec, status: 'success', route: 'internal', venues,
+        gasCostEth: formatEther(totalGasWei), quotedProfit: formatUnits(profitRaw, tokenIn.decimals),
+        realizedProfitUsd: Number(formatUnits(valueInUsdg(tokenIn.symbol, realizedNet, graph), TOKENS.USDG.decimals)),
+        quoteVariancePct: profitRaw > 0n ? Number((realizedGross - profitRaw) * 10_000n / profitRaw) / 100 : 0,
+        profitPct: realizedNetPct, txHash: hExec, status: 'success', route: 'internal', venues,
       })
     } else {
       throw new Error('transaction reverted')
@@ -1822,6 +1956,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     return 'attempted'
   } catch (err: any) {
     const failure = decodeFailure(err)
+    countFailureOutcome(failure, failureStage)
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
     registerRouteFailure(hopCandidates, failure)
     console.error(`   ❌ ARB FAILED (no funds lost -- the contract reverts atomically): ${message}`)
@@ -2936,7 +3071,7 @@ async function tick() {
   }
 
   const rankingGasPrice = await pub.getGasPrice()
-  const { balances, searchBalances, nativeEth, availableEthForWrap } = await fetchBalances(rankingGasPrice)
+  const { balances, searchBalances, nativeEth, availableEthForWrap, gasReserveWei, gasReserveHealthy } = await fetchBalances(rankingGasPrice)
   const bases = candidateBaseTokens(searchBalances)
   const graph = buildGraph(states)
   // Signed, NOT floored at zero -- this feeds the dashboard's "net est."
@@ -2949,19 +3084,19 @@ async function tick() {
     return valueInUsdg('WETH', gasWei, graph)
   }
   const expectedNetUsdg = (opp: ArbOpp) => valueInUsdg(opp.tokenIn.symbol, opp.profitRaw, graph) - gasUsdgFor(opp)
-  const opps = bases
-    .flatMap(baseSym => findArbs(graph, baseSym, searchBalances[baseSym] ?? 0n))
-    .sort((a, b) => {
-      const aValue = expectedNetUsdg(a)
-      const bValue = expectedNetUsdg(b)
-      if (bValue > aValue) return 1
-      if (bValue < aValue) return -1
-      return (SETTLEMENT_PRIORITY[a.tokenIn.symbol] ?? 99) - (SETTLEMENT_PRIORITY[b.tokenIn.symbol] ?? 99)
-    })
+  const opps = bases.flatMap(baseSym => findArbs(graph, baseSym, searchBalances[baseSym] ?? 0n))
   for (const opp of opps) {
-    opp.expectedNetUsd = Number(formatUnits(expectedNetUsdg(opp), TOKENS.USDG.decimals))
+    const netUsd = Number(formatUnits(expectedNetUsdg(opp), TOKENS.USDG.decimals))
+    opp.expectedNetUsd = netUsd
     opp.gasCostUsd = Number(formatUnits(gasUsdgFor(opp), TOKENS.USDG.decimals))
+    opp.routeScore = scoreOpportunity(opp, netUsd)
   }
+  opps.sort((a, b) => {
+    const scoreDiff = (b.routeScore ?? -Infinity) - (a.routeScore ?? -Infinity)
+    if (scoreDiff !== 0) return scoreDiff
+    return (SETTLEMENT_PRIORITY[a.tokenIn.symbol] ?? 99) - (SETTLEMENT_PRIORITY[b.tokenIn.symbol] ?? 99)
+  })
+  outcomeCounters.detected += opps.length
   const tickMs = Date.now() - t0
 
   // Candidates were all sized from the same opening snapshot. Once one is
@@ -2972,7 +3107,9 @@ async function tick() {
   // attempt per tick, whichever kind fires first.
   let anyAttempted = false
 
-  if (opps.length === 0) {
+  if (!gasReserveHealthy) {
+    console.warn(`\n[${new Date().toISOString()}] Execution disabled: gas wallet ${formatEther(nativeEth)} ETH is below reserve ${formatEther(gasReserveWei)} ETH`)
+  } else if (opps.length === 0) {
     process.stdout.write(`\r[${new Date().toISOString()}] No arb found (${tickMs}ms) — ${states.length}/${ARB_POOLS.length} pools live, base tokens: ${bases.join(',') || 'none'}`)
   } else {
     console.log(`\n[${new Date().toISOString()}] ${opps.length} opportunities across ${bases.length} base token(s):`)
@@ -2996,7 +3133,7 @@ async function tick() {
   // Settlement routes (e.g. AEON -> token -> WETH, staying in WETH) --
   // independent of whether any CYCLIC opportunity existed, only skipped if
   // one already fired above this tick.
-  if (!anyAttempted && !SAME_TOKEN_ONLY) {
+  if (!anyAttempted && gasReserveHealthy && !SAME_TOKEN_ONLY) {
     const settlementOpps = bases
       .flatMap(baseSym => findSettlementRoutes(graph, baseSym, searchBalances[baseSym] ?? 0n))
       .sort((a, b) => {
@@ -3032,7 +3169,7 @@ async function tick() {
   // Cross-venue (OpenOcean / 1inch) scan runs on its own slower cadence --
   // reuses this tick's already-fetched states/graph/balances, only adding
   // aggregator API calls, not extra pool or balance reads.
-  if (!anyAttempted && ENABLE_CROSS_VENUE && Date.now() - lastAggregatorScan >= AGGREGATOR_SCAN_INTERVAL_MS) {
+  if (!anyAttempted && gasReserveHealthy && ENABLE_CROSS_VENUE && Date.now() - lastAggregatorScan >= AGGREGATOR_SCAN_INTERVAL_MS) {
     lastAggregatorScan = Date.now()
     let aggAttempted = false
     try {
@@ -3090,7 +3227,7 @@ async function tick() {
     }
   }
 
-  await writeStatus(opps, tickMs, balances, nativeEth, graph)
+  await writeStatus(opps, tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
 }
 
 interface DiscoveryCounts {
