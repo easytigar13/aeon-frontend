@@ -1921,6 +1921,265 @@ async function executeAggregatorArb(opp: AggOpp, graph: Map<string, HopCandidate
   }
 }
 
+// ─── Pure external-to-external arb (neither leg touches an AEON pool) ───────
+//
+// Explicitly requested despite the tradeoff: AEON's own pools (including the
+// CL/DLMM ones above) are where this bot has a real edge -- first-mover
+// pricing information nobody else is watching. Arbing purely BETWEEN two
+// external DEXes that AEON doesn't operate is generic MEV territory,
+// contested 24/7 by professional searcher infrastructure with far lower
+// latency than a 1-second-polling bot -- there's little edge here. This
+// stays strictly lower priority: it only runs on the same slow cross-venue
+// cadence as scanAggregatorArbs above, and only after that path already had
+// its turn this cycle (see tick()).
+//
+// Same non-atomic exposure as executeAggregatorArb: two separate
+// transactions (buy via whichever aggregator quotes best, sell via
+// whichever quotes best for the amount actually received), re-quoted fresh
+// before the second leg, holding the intermediate token rather than force a
+// losing trade if it's no longer profitable after re-quote.
+
+// Only the two tokens with the STRONGEST confirmed external liquidity (see
+// contracts.ts's own comments on each -- VIRTUAL has real, verified
+// WETH/VIRTUAL and USDG/VIRTUAL pools; CASHCAT trades elsewhere on this
+// chain at ~$88M/24h volume) -- deliberately a short, curated list, not
+// every non-AEON-exclusive token. OpenOcean's public tier hard-caps at 1
+// request/second with a 1-HOUR lockout on exceeding it (see aggregators.ts's
+// throttleOpenOcean) -- every extra candidate here is real request budget
+// taken from that shared, global limit, so this stays intentionally small.
+// A single size fraction for the same reason (halves the request count
+// versus trying multiple sizes per pair).
+const EXTERNAL_ARB_MID_CANDIDATES: (keyof typeof TOKENS)[] = ['VIRTUAL', 'CASHCAT']
+const EXTERNAL_ARB_SIZE_FRACTIONS = [0.10]
+
+interface ExternalArbOpp {
+  tokenBase: typeof TOKENS[keyof typeof TOKENS]
+  tokenMid:  typeof TOKENS[keyof typeof TOKENS]
+  amountIn:  bigint
+  buyQuote:  import('./aggregators').AggregatorQuote   // base -> mid
+  midOutEstimate: bigint
+  sellQuote: import('./aggregators').AggregatorQuote   // mid -> base, quoted at midOutEstimate -- re-quoted fresh before executing leg 2
+  profitRaw: bigint
+  profitPct: number
+  label: string
+}
+
+async function scanExternalToExternalArbs(
+  balances: Record<string, bigint>, bases: (keyof typeof TOKENS)[],
+): Promise<ExternalArbOpp[]> {
+  const opps: ExternalArbOpp[] = []
+
+  for (const baseSym of bases) {
+    const walletBal = balances[baseSym] ?? 0n
+    if (walletBal <= 0n) continue
+    const tokenBase = TOKENS[baseSym]
+
+    for (const midSym of EXTERNAL_ARB_MID_CANDIDATES) {
+      if (midSym === baseSym) continue
+      const tokenMid = TOKENS[midSym]
+
+      for (const frac of EXTERNAL_ARB_SIZE_FRACTIONS) {
+        const amountIn = BigInt(Math.floor(Number(walletBal) * frac))
+        if (amountIn <= 0n) continue
+
+        const buyQuote = await getBestQuote(tokenBase.address, tokenMid.address, amountIn, tokenBase.decimals)
+        if (!buyQuote || buyQuote.amountOut <= 0n) continue
+
+        const sellQuote = await getBestQuote(tokenMid.address, tokenBase.address, buyQuote.amountOut, tokenMid.decimals)
+        if (!sellQuote || sellQuote.amountOut <= 0n) continue
+
+        const profitRaw = sellQuote.amountOut - amountIn
+        if (profitRaw <= 0n) continue
+        const profitPct = Number(profitRaw * 10000n / amountIn) / 100
+        if (profitPct < 0.02 || profitPct > 50) continue
+
+        opps.push({
+          tokenBase, tokenMid, amountIn, buyQuote, midOutEstimate: buyQuote.amountOut, sellQuote, profitRaw, profitPct,
+          label: `${baseSym}→${tokenMid.symbol} (${buyQuote.source})→${baseSym} (${sellQuote.source})`,
+        })
+      }
+    }
+  }
+
+  return opps.sort((a, b) => b.profitPct - a.profitPct)
+}
+
+async function executeExternalArb(opp: ExternalArbOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint): Promise<ExecResult> {
+  if (Date.now() < pausedUntil) return 'skipped'
+  const { tokenBase, tokenMid, amountIn, buyQuote, profitRaw, profitPct, label } = opp
+
+  console.log(`\n🌐 EXTERNAL ARB: ${label}  profit ${profitPct.toFixed(3)}%  in ${formatUnits(amountIn, tokenBase.decimals)} ${tokenBase.symbol}`)
+
+  // Reuses the SAME gas floor as AEON-pool-vs-aggregator cross-venue --
+  // identically shaped (approve+swap, twice), just both legs go through an
+  // aggregator instead of one leg being our own pool.
+  const gasFloor = await gasCostFloorCrossVenue(tokenBase.symbol, tokenBase.address, graph)
+  if (gasFloor === null) {
+    console.warn(`   ⚠ No live WETH price path for ${tokenBase.symbol} -- can't verify profit clears gas cost, skipping for safety`)
+    return 'skipped'
+  }
+  console.log(`   Est. gas cost (2 tx pairs, incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenBase.decimals)} ${tokenBase.symbol}`)
+
+  const requiredProfit = gasFloor + 1n
+  if (profitRaw < requiredProfit) {
+    console.log('   Profit does not clear the buffered gas cost, skipping')
+    return 'skipped'
+  }
+
+  if (DRY_RUN) {
+    console.log(`   [DRY RUN] would execute ${buyQuote.source} -> ... -- clears gas cost, skipping actual send`)
+    recordArb({
+      time: new Date().toISOString(), pair: label, tokenIn: tokenBase.symbol,
+      amountIn: formatUnits(amountIn, tokenBase.decimals), profit: formatUnits(profitRaw, tokenBase.decimals),
+      profitPct, status: 'dry-run', route: buyQuote.source,
+    })
+    return 'attempted'
+  }
+
+  let balIn = await pub.readContract({
+    address: tokenBase.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+  }) as bigint
+  if (balIn < amountIn && tokenBase.symbol === 'WETH') {
+    balIn = await ensureWethBalance(amountIn, availableEthForWrap)
+  }
+  if (balIn < amountIn && tokenBase.symbol !== 'USDG') {
+    balIn = await ensureBaseTokenFunded(tokenBase.symbol as keyof typeof TOKENS, amountIn, graph)
+  }
+  if (balIn < amountIn) {
+    console.warn(`   ⚠ Insufficient balance: have ${formatUnits(balIn, tokenBase.decimals)}, need ${formatUnits(amountIn, tokenBase.decimals)}`)
+    return 'skipped'
+  }
+
+  // Leg 1: buy tokenMid via whichever aggregator quoted best -- fresh
+  // swap-tx fetch right before sending, same discipline as leg 2 below.
+  let midReceived = 0n
+  try {
+    const balMidBefore = await pub.readContract({ address: tokenMid.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address] }) as bigint
+
+    const buyTx = await getSwapTx(buyQuote.source, tokenBase.address, tokenMid.address, amountIn, tokenBase.decimals, account.address, AGGREGATOR_SLIPPAGE_PCT)
+    if (!buyTx) {
+      console.warn(`   ⚠ ${buyQuote.source} no longer has a route for leg 1, skipping`)
+      return 'skipped'
+    }
+
+    console.log(`   → leg 1: approve to ${buyQuote.source}...`)
+    const hApprove1 = await wal.writeContract({
+      address: tokenBase.address, abi: ERC20_ABI, functionName: 'approve', args: [buyTx.to, amountIn],
+    })
+    await pub.waitForTransactionReceipt({ hash: hApprove1 })
+
+    console.log(`   → leg 1: swap via ${buyQuote.source}...`)
+    const hSwap1 = await wal.sendTransaction({ to: buyTx.to, data: buyTx.data, value: buyTx.value })
+    await pub.waitForTransactionReceipt({ hash: hSwap1 })
+
+    const balMidAfter = await pub.readContract({ address: tokenMid.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address] }) as bigint
+    midReceived = balMidAfter - balMidBefore
+    console.log(`   ✓ leg 1 confirmed — received ${formatUnits(midReceived, tokenMid.decimals)} ${tokenMid.symbol}`)
+  } catch (err: any) {
+    const message = err?.shortMessage ?? err?.message ?? String(err)
+    console.error(`   ❌ Leg 1 failed: ${message}`)
+    totalFailed++
+    recentErrors.unshift({ time: new Date().toISOString(), message })
+    recentErrors = recentErrors.slice(0, 5)
+    recordArb({
+      time: new Date().toISOString(), pair: label, tokenIn: tokenBase.symbol,
+      amountIn: formatUnits(amountIn, tokenBase.decimals), profit: '0', profitPct, status: 'failed', error: message, route: buyQuote.source,
+    })
+    return 'attempted'
+  }
+
+  if (midReceived <= 0n) {
+    console.warn('   ⚠ Leg 1 produced no output, stopping (no funds lost beyond leg 1 gas)')
+    return 'attempted'
+  }
+
+  // Leg 2: fresh re-quote for the amount ACTUALLY received -- if it's no
+  // longer profitable after gas, stop here and hold tokenMid rather than
+  // force a losing trade.
+  const sellFreshQuote = await getBestQuote(tokenMid.address, tokenBase.address, midReceived, tokenMid.decimals)
+  if (!sellFreshQuote) {
+    const message = `leg 1 filled, no aggregator has a route back for leg 2 -- holding ${formatUnits(midReceived, tokenMid.decimals)} ${tokenMid.symbol}`
+    console.warn(`   ⚠ ${message}`)
+    recordArb({
+      time: new Date().toISOString(), pair: label, tokenIn: tokenBase.symbol,
+      amountIn: formatUnits(amountIn, tokenBase.decimals), profit: '0', profitPct, status: 'failed', error: message, route: buyQuote.source,
+    })
+    return 'attempted'
+  }
+
+  const freshProfit = sellFreshQuote.amountOut - amountIn
+  if (freshProfit < requiredProfit) {
+    const message = `leg 1 filled, leg 2 no longer clears the buffered gas cost after re-quote -- holding ${formatUnits(midReceived, tokenMid.decimals)} ${tokenMid.symbol}`
+    console.warn(`   ⚠ ${message}`)
+    recordArb({
+      time: new Date().toISOString(), pair: label, tokenIn: tokenBase.symbol,
+      amountIn: formatUnits(amountIn, tokenBase.decimals), profit: '0', profitPct, status: 'failed', error: message, route: buyQuote.source,
+    })
+    return 'attempted'
+  }
+
+  try {
+    const sellTx = await getSwapTx(sellFreshQuote.source, tokenMid.address, tokenBase.address, midReceived, tokenMid.decimals, account.address, AGGREGATOR_SLIPPAGE_PCT)
+    if (!sellTx) {
+      const message = `leg 1 filled, ${sellFreshQuote.source} swap-tx fetch failed for leg 2 -- holding ${formatUnits(midReceived, tokenMid.decimals)} ${tokenMid.symbol}`
+      console.warn(`   ⚠ ${message}`)
+      recordArb({
+        time: new Date().toISOString(), pair: label, tokenIn: tokenBase.symbol,
+        amountIn: formatUnits(amountIn, tokenBase.decimals), profit: '0', profitPct, status: 'failed', error: message, route: buyQuote.source,
+      })
+      return 'attempted'
+    }
+
+    const balBaseBefore = await pub.readContract({ address: tokenBase.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address] }) as bigint
+
+    console.log(`   → leg 2: approve to ${sellFreshQuote.source}...`)
+    const hApprove2 = await wal.writeContract({
+      address: tokenMid.address, abi: ERC20_ABI, functionName: 'approve', args: [sellTx.to, midReceived],
+    })
+    await pub.waitForTransactionReceipt({ hash: hApprove2 })
+
+    console.log(`   → leg 2: swap via ${sellFreshQuote.source}...`)
+    const hSwap2 = await wal.sendTransaction({ to: sellTx.to, data: sellTx.data, value: sellTx.value })
+    const receipt2 = await pub.waitForTransactionReceipt({ hash: hSwap2 })
+
+    if (receipt2.status === 'success') {
+      const balBaseAfter = await pub.readContract({ address: tokenBase.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address] }) as bigint
+      const realizedOut = balBaseAfter > balBaseBefore ? balBaseAfter - balBaseBefore : 0n
+      const realizedNet = realizedOut > amountIn ? realizedOut - amountIn : 0n
+      const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
+      console.log(`   ✅ EXTERNAL ARB COMPLETE — profit ~${formatUnits(realizedNet, tokenBase.decimals)} ${tokenBase.symbol} — ${hSwap2}`)
+      totalExecuted++
+      consecutiveFailures = 0
+      const prev = parseFloat(cumulativeProfit[tokenBase.symbol] ?? '0')
+      cumulativeProfit[tokenBase.symbol] = (prev + parseFloat(formatUnits(realizedNet, tokenBase.decimals))).toString()
+      recordArb({
+        time: new Date().toISOString(), pair: label, tokenIn: tokenBase.symbol,
+        amountIn: formatUnits(amountIn, tokenBase.decimals), profit: formatUnits(realizedNet, tokenBase.decimals),
+        profitPct: realizedNetPct, txHash: hSwap2, status: 'success', route: sellFreshQuote.source,
+      })
+    } else {
+      throw new Error('leg 2 transaction reverted')
+    }
+    return 'attempted'
+  } catch (err: any) {
+    const message = err?.shortMessage ?? err?.message ?? String(err)
+    console.error(`   ❌ Leg 2 failed: ${message} -- may be holding intermediate ${tokenMid.symbol}`)
+    totalFailed++
+    consecutiveFailures++
+    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      pausedUntil = Date.now() + FAILURE_PAUSE_MS
+      console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
+    }
+    recentErrors.unshift({ time: new Date().toISOString(), message })
+    recentErrors = recentErrors.slice(0, 5)
+    recordArb({
+      time: new Date().toISOString(), pair: label, tokenIn: tokenBase.symbol,
+      amountIn: formatUnits(amountIn, tokenBase.decimals), profit: '0', profitPct, status: 'failed', error: message, route: buyQuote.source,
+    })
+    return 'attempted'
+  }
+}
+
 // ─── Main loop ────────────────────────────────────────────────────────────────
 
 let lastAggregatorScan = 0
@@ -2040,6 +2299,7 @@ async function tick() {
   // aggregator API calls, not extra pool or balance reads.
   if (ENABLE_CROSS_VENUE && Date.now() - lastAggregatorScan >= AGGREGATOR_SCAN_INTERVAL_MS) {
     lastAggregatorScan = Date.now()
+    let aggAttempted = false
     try {
       const aggOpps = await scanAggregatorArbs(states, searchBalances, bases)
       if (aggOpps.length > 0) {
@@ -2050,7 +2310,7 @@ async function tick() {
         for (const opp of aggOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
           if (opp.profitPct < MIN_PROFIT_PCT) break
           const result = await executeAggregatorArb(opp, graph, availableEthForWrap)
-          if (result === 'attempted') break   // rescan before another state-changing route
+          if (result === 'attempted') { aggAttempted = true; break }   // rescan before another state-changing route
         }
       }
     } catch (err: any) {
@@ -2058,6 +2318,32 @@ async function tick() {
       console.error(`[aggregator scan error] ${message}`)
       recentErrors.unshift({ time: new Date().toISOString(), message })
       recentErrors = recentErrors.slice(0, 5)
+    }
+
+    // Pure external-to-external arb (see scanExternalToExternalArbs above)
+    // is the lowest-priority tier -- AEON's own pools, then settlement
+    // routes, then AEON-pool-vs-aggregator cross-venue, all get first crack
+    // every cycle; this only gets a turn if NONE of those already acted.
+    if (!anyAttempted && !aggAttempted) {
+      try {
+        const externalOpps = await scanExternalToExternalArbs(searchBalances, bases)
+        if (externalOpps.length > 0) {
+          console.log(`\n[${new Date().toISOString()}] ${externalOpps.length} pure external-to-external opportunities:`)
+          for (const o of externalOpps.slice(0, 3)) {
+            console.log(`  ${o.label}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenBase.decimals)} ${o.tokenBase.symbol})`)
+          }
+          for (const opp of externalOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
+            if (opp.profitPct < MIN_PROFIT_PCT) break
+            const result = await executeExternalArb(opp, graph, availableEthForWrap)
+            if (result === 'attempted') break
+          }
+        }
+      } catch (err: any) {
+        const message = err?.message ?? String(err)
+        console.error(`[external arb scan error] ${message}`)
+        recentErrors.unshift({ time: new Date().toISOString(), message })
+        recentErrors = recentErrors.slice(0, 5)
+      }
     }
   }
 

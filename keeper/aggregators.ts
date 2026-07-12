@@ -36,7 +36,32 @@ export interface AggregatorSwapTx {
 const OPENOCEAN_BASE = 'https://open-api.openocean.finance/v3'
 const OPENOCEAN_CHAIN_SLUG = 'robinhood'
 
+// OpenOcean's public tier hard-caps at 1 request/second -- confirmed
+// directly against the live API (429, "Your data usage has exceeded the
+// limit of 1 r/s. Please try again in 1 hour."). Exceeding it doesn't just
+// fail the next call, it locks out EVERY OpenOcean call for a full hour,
+// which would silently disable cross-venue arb (both AEON-pool-vs-aggregator
+// and pure external-to-external) for that whole window without erroring --
+// getBestQuote's null-on-failure design means a lockout just looks like "no
+// opportunities found," not a visible outage. This throttle is the single
+// chokepoint every OpenOcean call goes through, so it protects all current
+// and future callers, not just one code path.
+const OPENOCEAN_MIN_INTERVAL_MS = 1100   // 1.1s between requests -- a safety margin over the bare 1 r/s limit
+let lastOpenOceanRequestAt = 0
+let openOceanQueue: Promise<void> = Promise.resolve()
+
+async function throttleOpenOcean(): Promise<void> {
+  const myTurn = openOceanQueue.then(async () => {
+    const wait = lastOpenOceanRequestAt + OPENOCEAN_MIN_INTERVAL_MS - Date.now()
+    if (wait > 0) await new Promise(r => setTimeout(r, wait))
+    lastOpenOceanRequestAt = Date.now()
+  })
+  openOceanQueue = myTurn.catch(() => {})   // keep the queue alive even if one caller's own request later throws
+  return myTurn
+}
+
 async function openOceanFetch(path: string, params: Record<string, string>): Promise<any> {
+  await throttleOpenOcean()
   const url = `${OPENOCEAN_BASE}/${OPENOCEAN_CHAIN_SLUG}${path}?${new URLSearchParams(params).toString()}`
   const res = await fetch(url)
   const body = await res.json().catch(() => null)
