@@ -190,7 +190,9 @@ export default function BotPage() {
                       <span className="font-mono text-text-primary">{o.pair}</span>
                       {o.venues && <span className="text-violet-400 font-mono text-xs">{o.venues}</span>}
                       <span className="text-text-secondary">{o.amountIn} {o.tokenIn}</span>
-                      <span className="text-emerald-400 font-mono">net est. {o.expectedNetUsd != null ? `$${o.expectedNetUsd.toFixed(4)}` : '—'} (gross {o.grossProfit ?? '—'} {o.tokenIn})</span>
+                      <span className={clsx('font-mono', o.expectedNetUsd != null && o.expectedNetUsd < 0 ? 'text-red-400' : 'text-emerald-400')}>
+                        net est. {o.expectedNetUsd != null ? `${o.expectedNetUsd < 0 ? '-' : ''}$${Math.abs(o.expectedNetUsd).toFixed(4)}` : '—'} (gross {o.grossProfit ?? '—'} {o.tokenIn})
+                      </span>
                       <span className="text-aeon-400 font-mono">{o.profitPct.toFixed(3)}%</span>
                     </div>
                   ))}

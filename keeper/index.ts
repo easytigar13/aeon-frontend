@@ -72,8 +72,8 @@ import { privateKeyToAccount } from 'viem/accounts'
 import * as dotenv from 'dotenv'
 import * as fs from 'fs'
 import { fileURLToPath } from 'url'
-import { POOLS, TOKENS, CONTRACTS } from '../src/config/contracts'
-import { ERC20_ABI, AEON_ROUTER_ABI, WETH_ABI } from '../src/config/abis'
+import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES } from '../src/config/contracts'
+import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, WETH_ABI } from '../src/config/abis'
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
 import { writeBotStatus, appendTrade, isBotStoreConfigured } from '../src/lib/botStore'
@@ -148,7 +148,25 @@ function parseFeeBps(fee: string): number {
   return Math.round(parseFloat(fee.replace('%', '')) * 100)
 }
 
-const ARB_POOLS = POOLS
+// 'vAMM'/'uniV2' are constant-product (x*y=k); 'CL' is AEON's own Algebra
+// Integral fork (concentrated liquidity, tick-based); 'DLMM' is AEON's own
+// Trader Joe Liquidity Book fork (bin-based). All four route through the
+// same DFS/ternary-search sizing below via PoolState's r0/r1/effFeeBps --
+// only pool discovery, state-fetching, and on-chain execution differ by kind.
+type PoolKind = 'vAMM' | 'uniV2' | 'CL' | 'DLMM'
+
+interface PoolConfig {
+  name: string
+  address: `0x${string}`
+  token0: keyof typeof TOKENS
+  token1: keyof typeof TOKENS
+  feeBps: bigint
+  isUniV2: boolean
+  kind: PoolKind
+  binStep?: number   // DLMM only -- identifies which pair-at-this-bin-step on-chain
+}
+
+const ARB_POOLS: PoolConfig[] = POOLS
   .filter(p => p.type === 'vAMM')
   .map(p => ({
     name: p.name,
@@ -157,6 +175,7 @@ const ARB_POOLS = POOLS
     token1: p.token1 as keyof typeof TOKENS,
     feeBps: BigInt(parseFeeBps(p.fee)),
     isUniV2: false,
+    kind: 'vAMM' as const,
   }))
 
 const UNISWAP_V2_FACTORY = '0x8bcEaA40B9AcdfAedF85AdF4FF01F5Ad6517937f' as `0x${string}`
@@ -251,10 +270,92 @@ async function discoverUniswapPools(): Promise<number> {
       token1: source.token1,
       feeBps: UNISWAP_FEE_BPS,
       isUniV2: true,
+      kind: 'uniV2',
     })
     added++
   }
   return added
+}
+
+// Algebra Integral (CL) pools don't expose token0/token1 in the shared
+// ALGEBRA_POOL_ABI (the frontend never needed them there -- its pairs are
+// already known statically), but the bot resolves them dynamically here.
+const CL_POOL_ABI = [
+  ...ALGEBRA_POOL_ABI,
+  { name: 'token0', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { name: 'token1', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+] as const
+
+// AEON's own concentrated-liquidity (Algebra Integral fork, "CL") and
+// bin-based (Trader Joe Liquidity Book fork, "DLMM") pools -- hidden from
+// the frontend's LP-deposit UI (governor-funded rewards, not automatic
+// vote-weighted emissions -- see contracts.ts's CL_POOLS/DLMM_POOLS
+// comments) but still real, live, tradeable liquidity on-chain. The bot
+// only ever reads prices and swaps here, never deposits, so it's unaffected
+// by that reward-guarantee concern. Address list comes from
+// CL_GAUGES/DLMM_GAUGES's keys (kept live/maintained, unlike the
+// commented-out CL_POOLS/DLMM_POOLS arrays) -- token symbols are resolved
+// on-chain rather than hand-copied, so this stays correct if more get added.
+async function discoverClAndDlmmPools(): Promise<{ cl: number; dlmm: number }> {
+  const addrToSymbol = new Map<string, keyof typeof TOKENS>()
+  for (const sym of Object.keys(TOKENS) as (keyof typeof TOKENS)[]) {
+    addrToSymbol.set(TOKENS[sym].address.toLowerCase(), sym)
+  }
+
+  const clAddresses = Object.keys(CL_GAUGES) as `0x${string}`[]
+  const dlmmAddresses = Object.keys(DLMM_GAUGES) as `0x${string}`[]
+  let clAdded = 0, dlmmAdded = 0
+
+  if (clAddresses.length > 0) {
+    const calls = clAddresses.flatMap(addr => [
+      { address: addr, abi: CL_POOL_ABI, functionName: 'token0' as const },
+      { address: addr, abi: CL_POOL_ABI, functionName: 'token1' as const },
+    ])
+    const results = await pub.multicall({ contracts: calls, allowFailure: true })
+    for (let i = 0; i < clAddresses.length; i++) {
+      const t0R = results[i * 2], t1R = results[i * 2 + 1]
+      if (t0R?.status !== 'success' || t1R?.status !== 'success') continue
+      const sym0 = addrToSymbol.get((t0R.result as string).toLowerCase())
+      const sym1 = addrToSymbol.get((t1R.result as string).toLowerCase())
+      if (!sym0 || !sym1) continue   // one side isn't a token this bot knows/trades
+      ARB_POOLS.push({
+        name: `CL ${sym0}/${sym1}`, address: clAddresses[i],
+        token0: sym0, token1: sym1, feeBps: 0n, isUniV2: false, kind: 'CL',
+      })
+      clAdded++
+    }
+  }
+
+  if (dlmmAddresses.length > 0) {
+    const calls = dlmmAddresses.flatMap(addr => [
+      { address: addr, abi: LB_PAIR_ABI, functionName: 'getTokenX' as const },
+      { address: addr, abi: LB_PAIR_ABI, functionName: 'getTokenY' as const },
+      { address: addr, abi: LB_PAIR_ABI, functionName: 'getBinStep' as const },
+    ])
+    const results = await pub.multicall({ contracts: calls, allowFailure: true })
+    for (let i = 0; i < dlmmAddresses.length; i++) {
+      const xR = results[i * 3], yR = results[i * 3 + 1], bR = results[i * 3 + 2]
+      if (xR?.status !== 'success' || yR?.status !== 'success' || bR?.status !== 'success') continue
+      const symX = addrToSymbol.get((xR.result as string).toLowerCase())
+      const symY = addrToSymbol.get((yR.result as string).toLowerCase())
+      if (!symX || !symY) continue
+      const binStep = Number(bR.result)
+      // Real on-chain fee = baseFactor(5000) * binStep / 1e8 -- i.e. 0.5 bps
+      // per unit of binStep (verified against every live pool, see
+      // contracts.ts's DLMM_POOLS comment). Rounded UP since this feeBps
+      // only feeds LOCAL sizing math, never the actual on-chain swap --
+      // understating it would just size trades that fail the real
+      // amountOutMin check more often than necessary, not lose money.
+      const feeBps = BigInt(Math.max(1, Math.ceil(binStep * 0.5)))
+      ARB_POOLS.push({
+        name: `DLMM ${symX}/${symY}`, address: dlmmAddresses[i],
+        token0: symX, token1: symY, feeBps, isUniV2: false, kind: 'DLMM', binStep,
+      })
+      dlmmAdded++
+    }
+  }
+
+  return { cl: clAdded, dlmm: dlmmAdded }
 }
 
 // ─── Math (mirrors AeonPoolRH.swap()'s own constant-product formula) ─────────
@@ -268,33 +369,124 @@ function amtOut(amtIn: bigint, rIn: bigint, rOut: bigint, feeBps: bigint): bigin
 // ─── Pool state ───────────────────────────────────────────────────────────────
 
 interface PoolState {
-  pool: typeof ARB_POOLS[number]
+  pool: PoolConfig
   r0: bigint
   r1: bigint
   onchain0: string
+  effFeeBps: bigint   // this tick's actual fee -- static for vAMM/UniV2/DLMM, live-read for CL (Algebra's fee is dynamic)
+}
+
+// Chunk to stay well under any single RPC's multicall gas/size ceiling.
+const MULTICALL_CHUNK = 120
+async function chunkedMulticall(contracts: any[]): Promise<any[]> {
+  const results: any[] = []
+  for (let i = 0; i < contracts.length; i += MULTICALL_CHUNK) {
+    const batch = await pub.multicall({ contracts: contracts.slice(i, i + MULTICALL_CHUNK) as any, allowFailure: true })
+    results.push(...batch)
+  }
+  return results
 }
 
 async function fetchAllStates(): Promise<PoolState[]> {
-  const contracts = ARB_POOLS.flatMap(p => [
+  const vammPools = ARB_POOLS.filter(p => p.kind === 'vAMM' || p.kind === 'uniV2')
+  const clPools   = ARB_POOLS.filter(p => p.kind === 'CL')
+  const dlmmPools = ARB_POOLS.filter(p => p.kind === 'DLMM')
+
+  const vammContracts = vammPools.flatMap(p => [
     { address: p.address, abi: PAIR_ABI, functionName: 'getReserves' as const },
     { address: p.address, abi: PAIR_ABI, functionName: 'token0'      as const },
   ])
+  const clContracts = clPools.flatMap(p => [
+    { address: p.address, abi: ALGEBRA_POOL_ABI, functionName: 'globalState' as const },
+    { address: p.address, abi: ALGEBRA_POOL_ABI, functionName: 'liquidity'   as const },
+  ])
+  const dlmmActiveIdContracts = dlmmPools.map(p => ({
+    address: p.address, abi: LB_PAIR_ABI, functionName: 'getActiveId' as const,
+  }))
 
-  // Chunk to stay well under any single RPC's multicall gas/size ceiling.
-  const CHUNK = 120
-  const results: any[] = []
-  for (let i = 0; i < contracts.length; i += CHUNK) {
-    const batch = await pub.multicall({ contracts: contracts.slice(i, i + CHUNK) as any, allowFailure: true })
-    results.push(...batch)
-  }
+  const results = await chunkedMulticall([...vammContracts, ...clContracts, ...dlmmActiveIdContracts])
+  const vammResults     = results.slice(0, vammContracts.length)
+  const clResults       = results.slice(vammContracts.length, vammContracts.length + clContracts.length)
+  const activeIdResults = results.slice(vammContracts.length + clContracts.length)
 
-  return ARB_POOLS.map((pool, i) => {
-    const resD  = results[i * 2]
-    const tok0D = results[i * 2 + 1]
+  const vammStates: PoolState[] = vammPools.map((pool, i) => {
+    const resD  = vammResults[i * 2]
+    const tok0D = vammResults[i * 2 + 1]
     const reserves = resD?.status  === 'success' ? resD.result  as [bigint, bigint, number] : null
     const onchain0  = tok0D?.status === 'success' ? (tok0D.result as string).toLowerCase() : ''
-    return { pool, r0: reserves?.[0] ?? 0n, r1: reserves?.[1] ?? 0n, onchain0 }
-  }).filter(s => s.r0 > 0n && s.r1 > 0n && hasRealLiquidity(s))
+    return { pool, r0: reserves?.[0] ?? 0n, r1: reserves?.[1] ?? 0n, onchain0, effFeeBps: pool.feeBps }
+  })
+
+  const clStates: PoolState[] = clPools.map((pool, i) => {
+    const gsD  = clResults[i * 2]
+    const liqD = clResults[i * 2 + 1]
+    const global = gsD?.status === 'success' ? gsD.result as readonly [bigint, number, number, number, number, boolean] : null
+    const liquidity = liqD?.status === 'success' ? liqD.result as bigint : 0n
+    const sqrtPriceX96 = global?.[0] ?? 0n
+    if (!global || liquidity === 0n || sqrtPriceX96 === 0n) {
+      return { pool, r0: 0n, r1: 0n, onchain0: '', effFeeBps: 0n }
+    }
+    // Standard concentrated-liquidity "virtual reserves": treats the
+    // CURRENT tick's liquidity as an x*y=L^2 constant-product pool, exact
+    // as long as a trade doesn't cross into the next tick. Beyond that this
+    // undercounts real depth (multi-tick liquidity isn't visible here at
+    // all), which only ever makes local sizing UNDERSTATE what's tradeable
+    // -- the on-chain amountOutMin/simulateContract gate in
+    // executeArbViaUniversalRouter/executeSettlementSwap is what actually
+    // protects real funds either way, same as every other pool kind here.
+    const virtualR0 = (liquidity << 96n) / sqrtPriceX96
+    const virtualR1 = (liquidity * sqrtPriceX96) >> 96n
+    // globalState().lastFee is Algebra's fee in parts-per-million (same
+    // scale Uniswap V3's uint24 fee uses, just narrowed to uint16 since a
+    // dynamic-fee pool here never needs more than ~6.5%) -- divided by 100
+    // for bps, rounded up for the same "never understate the real fee in
+    // local sizing" reason as DLMM's feeBps in discoverClAndDlmmPools().
+    const effFeeBps = (BigInt(global[2]) + 99n) / 100n
+    // Discovery already resolved token0/token1 to match on-chain order
+    // exactly (see discoverClAndDlmmPools), so virtualR0 always IS
+    // pool.token0's reserve -- no separate ordering check needed here.
+    return { pool, r0: virtualR0, r1: virtualR1, onchain0: TOKENS[pool.token0].address.toLowerCase(), effFeeBps }
+  })
+
+  const activeIds = dlmmPools.map((_, i) => {
+    const idD = activeIdResults[i]
+    return idD?.status === 'success' ? idD.result as number : null
+  })
+  const dlmmBinContracts = dlmmPools
+    .map((p, i) => (activeIds[i] !== null ? { address: p.address, abi: LB_PAIR_ABI, functionName: 'getBin' as const, args: [activeIds[i]!] as const } : null))
+  const dlmmBinIdxs = dlmmBinContracts.map((c, i) => (c ? i : -1)).filter(i => i >= 0)
+  const binResults = dlmmBinIdxs.length > 0
+    ? await chunkedMulticall(dlmmBinIdxs.map(i => dlmmBinContracts[i]!))
+    : []
+
+  const dlmmStates: PoolState[] = dlmmPools.map((pool, i) => {
+    const idxInValid = dlmmBinIdxs.indexOf(i)
+    const binD = idxInValid >= 0 ? binResults[idxInValid] : null
+    const bin = binD?.status === 'success' ? binD.result as [bigint, bigint] : null
+    const activeId = activeIds[i]
+    if (!bin || activeId === null || pool.binStep === undefined) {
+      return { pool, r0: 0n, r1: 0n, onchain0: '', effFeeBps: 0n }
+    }
+    // A DLMM bin's raw reserveX/reserveY ratio does NOT encode price the
+    // way a constant-product pool's does -- each bin trades at a FIXED
+    // price set purely by its id and binStep, and X+Y can coexist in any
+    // proportion an LP happened to deposit within it. Using the raw ratio
+    // as if it were a price (as an earlier version of this code did) was
+    // cross-checked against the real on-chain LBRouter.getSwapOut() quoter
+    // before shipping and was off by >200x. The correct LB price formula
+    // (price = (1+binStep/1e4)^(id-2^23), Y raw units per X raw unit) was
+    // verified to match getSwapOut() within fee/rounding tolerance instead.
+    // Anchoring virtual reserves on the REAL X-side bin reserve (genuine
+    // on-chain depth) and deriving Y from that formula keeps the resulting
+    // pair usable by the same constant-product amtOut/amtIn math every
+    // other pool kind here uses, with a spot price that's actually correct.
+    const price = Math.pow(1 + pool.binStep / 10000, activeId - 8388608)
+    const virtualR0 = bin[0]
+    const virtualR1 = BigInt(Math.floor(Number(bin[0]) * price))
+    return { pool, r0: virtualR0, r1: virtualR1, onchain0: TOKENS[pool.token0].address.toLowerCase(), effFeeBps: pool.feeBps }
+  })
+
+  return [...vammStates, ...clStates, ...dlmmStates].filter(s => s.r0 > 0n && s.r1 > 0n && hasRealLiquidity(s))
 }
 
 // Several pools in POOLS are genuinely empty -- deployed with a real gauge
@@ -396,7 +588,7 @@ function buildGraph(states: PoolState[]): Map<string, HopCandidate[]> {
 function cycleOut(amountIn: bigint, hops: HopCandidate[]): bigint {
   let amt = amountIn
   for (const h of hops) {
-    amt = amtOut(amt, h.reserveIn, h.reserveOut, h.pool.pool.feeBps)
+    amt = amtOut(amt, h.reserveIn, h.reserveOut, h.pool.effFeeBps)
     if (amt === 0n) return 0n
   }
   return amt
@@ -418,6 +610,17 @@ function optimalTrade(hops: HopCandidate[], maxIn: bigint): { amountIn: bigint; 
   return { amountIn: best, profit: cycleOut(best, hops) - best }
 }
 
+// CL/DLMM reserves are LOCAL approximations (current tick / current bin
+// only -- see fetchAllStates), thinner and less reliable the further a
+// trade pushes past them than a vAMM/UniV2 pool's real total reserves are.
+// Capping first-hop size more tightly here reduces how often a route gets
+// sized past what the real on-chain swap can actually deliver, which would
+// otherwise just fail the final amountOutMin check and waste gas (never
+// lose principal -- see executeArbViaUniversalRouter/executeSettlementSwap).
+function sizingDivisor(kind: PoolKind): bigint {
+  return kind === 'CL' || kind === 'DLMM' ? 20n : 4n
+}
+
 // Safety valve on the DFS below -- bails out rather than block the tick loop
 // indefinitely if the pool graph ever grows dense enough for exhaustive
 // simple-cycle enumeration up to MAX_HOPS to blow up combinatorially.
@@ -435,7 +638,7 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
     if (seen.has(key)) return
     seen.add(key)
 
-    const maxIn = hops[0].reserveIn / 4n   // never take more than 25% of the first pool's reserve
+    const maxIn = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
     const { amountIn, profit } = optimalTrade(hops, maxIn)
     if (profit <= 0n || amountIn <= 0n) return
 
@@ -525,7 +728,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
       return convertSpot(out, endPath!) - convertSpot(amountIn, startPath!)
     }
 
-    const maxIn = hops[0].reserveIn / 4n
+    const maxIn = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
     if (maxIn <= 1n) return
     let lo = 0n, hi = maxIn
     for (let i = 0; i < 100; i++) {
@@ -797,11 +1000,13 @@ async function ensureBaseTokenFunded(
   }) as bigint
   if (current >= needed || baseSym === 'USDG') return current
 
-  const edge = (graph.get('USDG') ?? []).find(e => e.tokenOutSym === baseSym)
+  // Restricted to vAMM/UniV2 edges -- this swaps via AeonRouter below, which
+  // hard-reverts on any other poolType (see AeonRouterRH.sol).
+  const edge = (graph.get('USDG') ?? []).find(e => e.tokenOutSym === baseSym && (e.pool.pool.kind === 'vAMM' || e.pool.pool.kind === 'uniV2'))
   if (!edge) return current   // no direct USDG pool for this token -- can't fund it this way
 
   const shortfall = needed - current
-  const usdgRequired = amtIn(shortfall, edge.reserveIn, edge.reserveOut, edge.pool.pool.feeBps)
+  const usdgRequired = amtIn(shortfall, edge.reserveIn, edge.reserveOut, edge.pool.effFeeBps)
   if (usdgRequired <= 0n) return current
 
   const usdgBal = await pub.readContract({
@@ -917,7 +1122,7 @@ async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Reco
       grossProfit: formatUnits(o.profitRaw, o.tokenIn.decimals),
       grossProfitUsd: Number(formatUnits(valueInUsdg(o.tokenIn.symbol, o.profitRaw, graph), TOKENS.USDG.decimals)),
       expectedNetUsd: o.expectedNetUsd,
-      venues: o.hops.map(h => h.pool.pool.isUniV2 ? 'Uniswap' : 'AEON').join(' -> '),
+      venues: o.hops.map(h => h.pool.pool.kind).join(' -> '),
     })),
     recentArbs: recentArbs.slice(0, 30),
     cumulativeProfit,
@@ -957,9 +1162,166 @@ async function ensureKeeperAllowance(tokenAddress: `0x${string}`, needsApproval:
   return receipt.gasUsed * receipt.effectiveGasPrice
 }
 
+// Maps HopCandidate[] (any mix of pool kinds) into AeonUniversalRouter's
+// Hop[] shape. CL/DLMM hops pass pool=address(0) -- the router derives
+// Algebra's pool from tokenIn/tokenOut/deployer and DLMM's pair from
+// tokenPath/binStep, neither needs it (see AEON_UNIVERSAL_ROUTER_ABI's own
+// comment in abis.ts).
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as `0x${string}`
+
+function buildUniversalHops(hopCandidates: HopCandidate[]) {
+  return hopCandidates.map(h => {
+    const kind = h.pool.pool.kind
+    const tokenIn  = getAddress(TOKENS[h.tokenInSym as keyof typeof TOKENS].address)
+    const tokenOut = getAddress(TOKENS[h.tokenOutSym as keyof typeof TOKENS].address)
+    if (kind === 'CL') return { poolType: 1, pool: ZERO_ADDRESS, tokenIn, tokenOut, feeBps: 0, binStep: 0 }
+    if (kind === 'DLMM') return { poolType: 2, pool: ZERO_ADDRESS, tokenIn, tokenOut, feeBps: 0, binStep: h.pool.pool.binStep ?? 0 }
+    return { poolType: kind === 'uniV2' ? 3 : 0, pool: getAddress(h.pool.pool.address), tokenIn, tokenOut, feeBps: Number(h.pool.pool.feeBps), binStep: 0 }
+  })
+}
+
+function hasNonVammHop(hopCandidates: HopCandidate[]): boolean {
+  return hopCandidates.some(h => h.pool.pool.kind === 'CL' || h.pool.pool.kind === 'DLMM')
+}
+
+// Cyclic routes (same start/end token) that include a CL or DLMM hop can't
+// go through AeonArbKeeper -- it only ever does raw vAMM/UniV2-style
+// getReserves()+swap() calls (see AeonArbKeeper.sol's IPairLike/IAeonPoolSwap
+// interfaces), no concept of Algebra's tick-based or LB's bin-based swap.
+// This executes via AeonUniversalRouter instead, with the SAME
+// "can't knowingly execute at a loss" property, just enforced by a computed
+// amountOutMin (= amountIn + requiredProfit, same token in and out so no
+// USDG-equivalent conversion is needed) instead of AeonArbKeeper's built-in
+// profit check -- the whole transaction reverts if the real swap can't
+// deliver that, same as every other execution path in this file.
+async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint): Promise<ExecResult> {
+  if (Date.now() < pausedUntil) return 'skipped'
+  const { tokenIn, hops: hopCandidates, amountIn, profitRaw, profitPct, label: pairLabel } = opp
+
+  console.log(`\n🔄 ARB (CL/DLMM route, via UniversalRouter): ${pairLabel}  profit ${profitPct.toFixed(3)}%  in ${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`)
+
+  const allowance = await pub.readContract({
+    address: tokenIn.address, abi: ERC20_ABI, functionName: 'allowance',
+    args: [account.address, CONTRACTS.UniversalRouter],
+  }) as bigint
+  const needsApproval = allowance < amountIn
+  const gasFloor = await gasCostFloorInToken(tokenIn.symbol, tokenIn.address, hopCandidates.length, graph, needsApproval)
+  if (gasFloor === null) {
+    console.warn(`   ⚠ No live WETH price path for ${tokenIn.symbol} -- can't verify profit clears gas cost, skipping for safety`)
+    return 'skipped'
+  }
+  console.log(`   Est. gas cost (incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
+
+  const requiredProfit = gasFloor + 1n
+  if (profitRaw < requiredProfit) {
+    console.log('   Profit does not clear the buffered gas cost, skipping')
+    return 'skipped'
+  }
+
+  if (DRY_RUN) {
+    console.log('   [DRY RUN] would execute via UniversalRouter -- clears gas cost, skipping actual send')
+    recordArb({
+      time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
+      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(profitRaw, tokenIn.decimals),
+      profitPct, status: 'dry-run', route: 'internal',
+    })
+    return 'attempted'
+  }
+
+  let balIn = await pub.readContract({
+    address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+  }) as bigint
+  if (balIn < amountIn && tokenIn.symbol === 'WETH') {
+    balIn = await ensureWethBalance(amountIn, availableEthForWrap)
+  }
+  if (balIn < amountIn && tokenIn.symbol !== 'USDG') {
+    balIn = await ensureBaseTokenFunded(tokenIn.symbol as keyof typeof TOKENS, amountIn, graph)
+  }
+  if (balIn < amountIn) {
+    console.warn(`   ⚠ Insufficient balance: have ${formatUnits(balIn, tokenIn.decimals)}, need ${formatUnits(amountIn, tokenIn.decimals)}`)
+    return 'skipped'
+  }
+  const balanceBefore = balIn
+
+  const hops = buildUniversalHops(hopCandidates)
+  const amountOutMin = amountIn + requiredProfit
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
+
+  try {
+    if (needsApproval) {
+      console.log('   → approve...')
+      const hApprove = await wal.writeContract({
+        address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.UniversalRouter, MAX_UINT256],
+      })
+      await pub.waitForTransactionReceipt({ hash: hApprove })
+    }
+
+    console.log('   → simulate swapExactTokensForTokens...')
+    await pub.simulateContract({
+      account,
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
+    })
+
+    console.log('   → swapExactTokensForTokens...')
+    const hSwap = await wal.writeContract({
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
+    })
+    const receipt = await pub.waitForTransactionReceipt({ hash: hSwap })
+
+    if (receipt.status === 'success') {
+      const balanceAfter = await pub.readContract({
+        address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+      }) as bigint
+      const realizedGross = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n
+      const totalGasWei = receipt.gasUsed * receipt.effectiveGasPrice
+      const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
+      const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
+      const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
+      console.log(`   ✅ ARB COMPLETE (CL/DLMM route) — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hSwap}`)
+      totalExecuted++
+      consecutiveFailures = 0
+      const prev = parseFloat(cumulativeProfit[tokenIn.symbol] ?? '0')
+      cumulativeProfit[tokenIn.symbol] = (prev + parseFloat(formatUnits(realizedNet, tokenIn.decimals))).toString()
+      recordArb({
+        time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
+        amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(realizedNet, tokenIn.decimals),
+        grossProfit: formatUnits(realizedGross, tokenIn.decimals), gasCost: formatUnits(actualGasInToken, tokenIn.decimals),
+        gasCostEth: formatEther(totalGasWei), profitPct: realizedNetPct, txHash: hSwap, status: 'success', route: 'internal',
+      })
+    } else {
+      throw new Error('transaction reverted')
+    }
+    return 'attempted'
+  } catch (err: any) {
+    const message = err?.shortMessage ?? err?.message ?? String(err)
+    console.error(`   ❌ ARB FAILED (no funds lost -- amountOutMin reverts atomically): ${message}`)
+    totalFailed++
+    consecutiveFailures++
+    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      pausedUntil = Date.now() + FAILURE_PAUSE_MS
+      console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
+    }
+    recentErrors.unshift({ time: new Date().toISOString(), message })
+    recentErrors = recentErrors.slice(0, 5)
+    recordArb({
+      time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
+      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message, route: 'internal',
+    })
+    return 'attempted'
+  }
+}
+
 async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint): Promise<ExecResult> {
   if (Date.now() < pausedUntil) return 'skipped'
   const { tokenIn, hops: hopCandidates, amountIn, profitRaw, profitPct, label: pairLabel } = opp
+
+  // AeonArbKeeper (below) is vAMM/UniV2-only -- any route touching a CL or
+  // DLMM pool needs the separate UniversalRouter-based path instead.
+  if (hasNonVammHop(hopCandidates)) {
+    return executeArbViaUniversalRouter(opp, graph, availableEthForWrap)
+  }
 
   console.log(`\n🔄 ARB: ${pairLabel}  profit ${profitPct.toFixed(3)}%  in ${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`)
 
@@ -1108,8 +1470,10 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
 //
 // Not atomic in the AeonArbKeeper sense -- can't be, the contract rejects
 // any route that doesn't close back to its own start token. This goes
-// through AeonRouter's plain swapExactTokensForTokens instead, over the
-// FULL multi-hop route in one transaction. Still can't execute for nothing:
+// through AeonUniversalRouter's plain swapExactTokensForTokens instead
+// (poolType-aware -- can cross vAMM, CL, DLMM, and UniV2 hops in the same
+// route, see buildUniversalHops), over the FULL multi-hop route in one
+// transaction. Still can't execute for nothing:
 // amountOutMin is computed here as "the smallest output that would still be
 // worth at least input value + gas, in live USDG terms" -- not a slippage
 // percentage. If reserves moved enough since quoting that the route can't
@@ -1135,7 +1499,7 @@ async function executeSettlementSwap(
 
   const allowance = await pub.readContract({
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'allowance',
-    args: [account.address, CONTRACTS.AeonRouter],
+    args: [account.address, CONTRACTS.UniversalRouter],
   }) as bigint
   const needsApproval = allowance < amountIn
 
@@ -1146,7 +1510,7 @@ async function executeSettlementSwap(
     try {
       approveGasEstimate = await pub.estimateContractGas({
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve',
-        args: [CONTRACTS.AeonRouter, MAX_UINT256], account: account.address,
+        args: [CONTRACTS.UniversalRouter, MAX_UINT256], account: account.address,
       })
     } catch { /* fall back to a conservative fixed approval estimate */ }
   }
@@ -1190,13 +1554,7 @@ async function executeSettlementSwap(
     address: tokenOut.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
 
-  const route = hopCandidates.map(h => ({
-    tokenIn: getAddress(TOKENS[h.tokenInSym as keyof typeof TOKENS].address),
-    tokenOut: getAddress(TOKENS[h.tokenOutSym as keyof typeof TOKENS].address),
-    pool: getAddress(h.pool.pool.address),
-    poolType: 0,
-    feeBps: Number(h.pool.pool.feeBps),
-  }))
+  const hops = buildUniversalHops(hopCandidates)
   const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
 
   try {
@@ -1204,7 +1562,7 @@ async function executeSettlementSwap(
     if (needsApproval) {
       console.log('   → approve...')
       const hApprove = await wal.writeContract({
-        address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, MAX_UINT256],
+        address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.UniversalRouter, MAX_UINT256],
       })
       const approveReceipt = await pub.waitForTransactionReceipt({ hash: hApprove })
       approvalGasWei = approveReceipt.gasUsed * approveReceipt.effectiveGasPrice
@@ -1213,14 +1571,14 @@ async function executeSettlementSwap(
     console.log('   → simulate swapExactTokensForTokens...')
     await pub.simulateContract({
       account,
-      address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-      args: [route, amountIn, amountOutMin, account.address, deadline],
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
     })
 
     console.log('   → swapExactTokensForTokens...')
     const hSwap = await wal.writeContract({
-      address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-      args: [route, amountIn, amountOutMin, account.address, deadline],
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
     })
     const receipt = await pub.waitForTransactionReceipt({ hash: hSwap })
 
@@ -1336,9 +1694,11 @@ async function scanAggregatorArbs(
 
     // Only pools that actually pair this base token directly against
     // something -- this path is a single our-pool hop, so the base has to
-    // be one side of it.
+    // be one side of it. Restricted to vAMM/UniV2 -- "leg 1" below swaps via
+    // AeonRouter, which hard-reverts on any other poolType.
     const eligible = states.filter(s =>
       (s.pool.token0 === baseSym || s.pool.token1 === baseSym) &&
+      (s.pool.kind === 'vAMM' || s.pool.kind === 'uniV2') &&
       !AGGREGATOR_EXCLUDE.has(s.pool.token0) && !AGGREGATOR_EXCLUDE.has(s.pool.token1),
     )
     if (eligible.length === 0) continue
@@ -1360,7 +1720,7 @@ async function scanAggregatorArbs(
         const amountIn = BigInt(Math.floor(Number(cap) * frac))
         if (amountIn <= 0n) continue
 
-        const midOutEstimate = amtOut(amountIn, rBaseIn, rMidOut, s.pool.feeBps)
+        const midOutEstimate = amtOut(amountIn, rBaseIn, rMidOut, s.effFeeBps)
         if (midOutEstimate <= 0n) continue
 
         const quote = await getBestQuote(tokenMid.address, tokenBase.address, midOutEstimate, tokenMid.decimals)
@@ -1562,12 +1922,16 @@ async function tick() {
   const bases = candidateBaseTokens(searchBalances)
   const graph = buildGraph(states)
   const rankingGasPrice = await pub.getGasPrice()
+  // Signed, NOT floored at zero -- this feeds the dashboard's "net est."
+  // figure too, and a trade that doesn't clear gas needs to show as
+  // negative there, not as a misleading "$0.0000" sitting next to a
+  // positive-looking gross profit number.
   const expectedNetUsdg = (opp: ArbOpp) => {
     const gross = valueInUsdg(opp.tokenIn.symbol, opp.profitRaw, graph)
     const gasUnits = EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * BigInt(opp.hops.length)
     const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
     const gasUsdg = valueInUsdg('WETH', gasWei, graph)
-    return gross > gasUsdg ? gross - gasUsdg : 0n
+    return gross - gasUsdg
   }
   const opps = bases
     .flatMap(baseSym => findArbs(graph, baseSym))
@@ -1622,8 +1986,15 @@ async function tick() {
         if (b.profitUsdg < a.profitUsdg) return -1
         return (SETTLEMENT_PRIORITY[a.tokenOut.symbol] ?? 99) - (SETTLEMENT_PRIORITY[b.tokenOut.symbol] ?? 99)
       })
+    // profitUsdg is GROSS (output value - input value, pre-gas) -- subtract
+    // an estimated gas cost here too, same reasoning as expectedNetUsdg
+    // above, so the dashboard never shows a settlement route as a "win"
+    // that gas actually eats.
     for (const opp of settlementOpps) {
-      opp.expectedNetUsd = Number(formatUnits(opp.profitUsdg, TOKENS.USDG.decimals))
+      const gasUnits = SETTLEMENT_SWAP_GAS_BASE + SETTLEMENT_SWAP_GAS_PER_HOP * BigInt(opp.hops.length)
+      const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
+      const gasUsdg = valueInUsdg('WETH', gasWei, graph)
+      opp.expectedNetUsd = Number(formatUnits(opp.profitUsdg - gasUsdg, TOKENS.USDG.decimals))
     }
     if (settlementOpps.length > 0) {
       console.log(`\n[${new Date().toISOString()}] ${settlementOpps.length} settlement-route opportunities:`)
@@ -1669,12 +2040,14 @@ async function tick() {
 
 async function main() {
   const uniswapPools = await discoverUniswapPools()
+  const { cl: clPools, dlmm: dlmmPools } = await discoverClAndDlmmPools()
   console.log(`AEON Arb Keeper`)
   console.log(`  Keeper address: ${account.address}`)
   console.log(`  Settlement tokens: ${BASE_TOKEN_OVERRIDE || SETTLEMENT_TOKENS.join(', ')} (AEON preferred on equal net profit)`)
   console.log(`  Max hops per cycle: ${MAX_HOPS}`)
   console.log(`  Pools monitored: ${ARB_POOLS.length}`)
   console.log(`  Uniswap V2 pools discovered: ${uniswapPools}`)
+  console.log(`  AEON CL pools discovered: ${clPools}  |  AEON DLMM pools discovered: ${dlmmPools}`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
