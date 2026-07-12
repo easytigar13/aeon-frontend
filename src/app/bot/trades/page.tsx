@@ -18,6 +18,7 @@ interface Trade {
   status: 'success' | 'failed' | 'dry-run'
   error?: string
   route?: 'internal' | 'openocean' | '1inch'
+  venues?: string
 }
 
 type StatusFilter = 'all' | 'success' | 'failed' | 'dry-run'
@@ -113,7 +114,7 @@ export default function BotTradesPage() {
                 <tr className="border-b border-bg-border text-text-muted text-xs font-mono uppercase tracking-wider">
                   <th className="text-left px-4 py-3">Time</th>
                   <th className="text-left px-4 py-3">Pair</th>
-                  <th className="text-left px-4 py-3">Route</th>
+                  <th className="text-left px-4 py-3">Bought / Sold</th>
                   <th className="text-right px-4 py-3">Amount In</th>
                   <th className="text-right px-4 py-3">Net Profit</th>
                   <th className="text-right px-4 py-3">Profit %</th>
@@ -128,11 +129,8 @@ export default function BotTradesPage() {
                     <td className="px-4 py-3 text-text-muted whitespace-nowrap">{new Date(t.time).toLocaleString()}</td>
                     <td className="px-4 py-3 font-mono text-text-primary whitespace-nowrap">{t.pair}</td>
                     <td className="px-4 py-3">
-                      <span className={clsx(
-                        'px-1.5 py-0.5 rounded text-xs font-mono uppercase',
-                        !t.route || t.route === 'internal' ? 'text-text-muted bg-bg-raised' : 'text-violet-400 bg-violet-500/10 border border-violet-500/20'
-                      )}>
-                        {t.route ?? 'internal'}
+                      <span className="text-violet-400 font-mono text-xs whitespace-nowrap">
+                        {t.venues ?? t.route ?? 'legacy trade'}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right text-text-secondary font-mono whitespace-nowrap">{t.amountIn} {t.tokenIn}</td>

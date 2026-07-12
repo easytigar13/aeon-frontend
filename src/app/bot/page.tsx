@@ -30,6 +30,7 @@ interface ExecutedArb {
   status: 'success' | 'failed' | 'dry-run'
   error?: string
   route?: 'internal' | 'openocean' | '1inch'
+  venues?: string
 }
 
 interface BotStatus {
@@ -235,6 +236,9 @@ export default function BotPage() {
                           a.status === 'success' ? 'bg-emerald-400' : a.status === 'dry-run' ? 'bg-aeon-400' : 'bg-red-400'
                         )} />
                         <span className="font-mono text-text-primary">{a.pair}</span>
+                        {a.venues && (
+                          <span className="text-violet-400 font-mono text-xs">{a.venues}</span>
+                        )}
                         {a.route && a.route !== 'internal' && (
                           <span className="px-1.5 py-0.5 rounded text-2xs font-mono uppercase text-violet-400 bg-violet-500/10 border border-violet-500/20">
                             {a.route}

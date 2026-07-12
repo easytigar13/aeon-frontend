@@ -291,6 +291,8 @@ export default function SwapPage() {
       tokenOut: step.tokenOut === 'ETH' ? WETH_ADDR : TOKENS[step.tokenOut as keyof typeof TOKENS].address,
       feeBps:   Number(step.feeBps),
       binStep:  step.binStep,
+      tickSpacing: 0,
+      v4Native: false,
     }
   }
 

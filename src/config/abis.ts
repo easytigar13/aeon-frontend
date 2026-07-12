@@ -211,12 +211,14 @@ export const AEON_UNIVERSAL_ROUTER_ABI = [
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'hops', type: 'tuple[]', components: [
-        { name: 'poolType', type: 'uint8'   }, // 0 = vAMM, 1 = CL, 2 = DLMM, 3 = UniV2, 4 = UniV3
+        { name: 'poolType', type: 'uint8'   }, // 0 = vAMM, 1 = CL, 2 = DLMM, 3 = UniV2, 4 = UniV3, 5 = UniV4
         { name: 'pool',     type: 'address' },
         { name: 'tokenIn',  type: 'address' },
         { name: 'tokenOut', type: 'address' },
         { name: 'feeBps',   type: 'uint24'  }, // vAMM/UniV2 only
         { name: 'binStep',  type: 'uint16'  }, // DLMM only
+        { name: 'tickSpacing', type: 'int24' }, // UniV4 only
+        { name: 'v4Native', type: 'bool' },     // UniV4 native-ETH PoolKey
       ]},
       { name: 'amountIn',     type: 'uint256' },
       { name: 'amountOutMin', type: 'uint256' },
@@ -242,6 +244,8 @@ export const AEON_UNIVERSAL_ROUTER_ABI = [
           { name: 'tokenOut', type: 'address' },
           { name: 'feeBps',   type: 'uint24'  },
           { name: 'binStep',  type: 'uint16'  },
+          { name: 'tickSpacing', type: 'int24' },
+          { name: 'v4Native', type: 'bool' },
         ]},
         { name: 'amountIn', type: 'uint256' },
       ]},
