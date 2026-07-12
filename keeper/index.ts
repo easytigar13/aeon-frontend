@@ -1198,7 +1198,7 @@ async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Reco
     tickMs,
     poolsMonitored: ARB_POOLS.length,
     balances,
-    lastOpportunities: lastOpps.slice(0, 5).map(o => ({
+    lastOpportunities: lastOpps.slice(0, 20).map(o => ({
       pair: o.label,
       profitPct: Number(o.profitPct.toFixed(4)),
       amountIn: formatUnits(o.amountIn, o.tokenIn.decimals),

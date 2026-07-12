@@ -181,12 +181,17 @@ export default function BotPage() {
 
             {/* Current opportunities */}
             <div className="card p-6 mb-6">
-              <div className="text-text-secondary text-sm font-mono uppercase tracking-wider mb-4 flex items-center gap-2">
-                <Activity size={14} /> Current Opportunities
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-text-secondary text-sm font-mono uppercase tracking-wider flex items-center gap-2">
+                  <Activity size={14} /> Current Opportunities
+                </div>
+                <Link href="/bot/opportunities" className="inline-flex items-center gap-1 text-aeon-400 hover:text-aeon-300 text-xs font-medium">
+                  View all opportunities <ArrowRight size={12} />
+                </Link>
               </div>
               {status.lastOpportunities && status.lastOpportunities.length > 0 ? (
                 <div className="space-y-2">
-                  {status.lastOpportunities.map((o, i) => (
+                  {status.lastOpportunities.slice(0, 5).map((o, i) => (
                     <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center text-sm py-1.5 border-b border-bg-border last:border-0">
                       <span className="font-mono text-text-primary">{o.pair}</span>
                       {o.venues && <span className="text-violet-400 font-mono text-xs">{o.venues}</span>}
