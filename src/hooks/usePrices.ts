@@ -3,86 +3,86 @@ import { useReadContracts } from 'wagmi'
 import { TOKENS, POOLS } from '@/config/contracts'
 import { PAIR_ABI } from '@/config/abis'
 
-const POOL_AEON_USDG     = POOLS.find(p => p.name === 'AEON/USDG')!.address
-const POOL_ETH_USDG      = POOLS.find(p => p.name === 'ETH/USDG')!.address
-// Was sourced from the CL pool's sqrtPriceX96 -- switched to the vAMM pool
-// 2026-07-10 when CL_POOLS was emptied (see contracts.ts comment for why).
-// Same derivation ROBINFUN already uses (deriveViaAeonPool, reserves-based).
-const POOL_VIRTUAL_AEON  = POOLS.find(p => p.name === 'VIRTUAL/AEON')!.address
-const POOL_ROBINFUN_AEON = POOLS.find(p => p.name === 'ROBINFUN/AEON')!.address
-const POOL_CASHCAT_USDG  = POOLS.find(p => p.name === 'CASHCAT/USDG')!.address
-
-// Static — defined once at module scope so useReadContracts gets a stable
-// reference across renders instead of a fresh array every time (which
-// wagmi treats as a config change and re-queries for).
-const PRICE_CONTRACTS = [
-  { address: POOL_AEON_USDG,     abi: PAIR_ABI,         functionName: 'getReserves' },
-  { address: POOL_AEON_USDG,     abi: PAIR_ABI,         functionName: 'token0' },
-  { address: POOL_ETH_USDG,      abi: PAIR_ABI,         functionName: 'getReserves' },
-  { address: POOL_ETH_USDG,      abi: PAIR_ABI,         functionName: 'token0' },
-  { address: POOL_VIRTUAL_AEON,  abi: PAIR_ABI,         functionName: 'getReserves' },
-  { address: POOL_VIRTUAL_AEON,  abi: PAIR_ABI,         functionName: 'token0' },
-  { address: POOL_ROBINFUN_AEON, abi: PAIR_ABI,         functionName: 'getReserves' },
-  { address: POOL_ROBINFUN_AEON, abi: PAIR_ABI,         functionName: 'token0' },
-  { address: POOL_CASHCAT_USDG,  abi: PAIR_ABI,         functionName: 'getReserves' },
-  { address: POOL_CASHCAT_USDG,  abi: PAIR_ABI,         functionName: 'token0' },
-] as const
+export type PriceMap = Record<string, number | null>
 
 type Reserves = readonly [bigint, bigint, number]
 
-// Derive USD price of "target" token from a pool paired against USDG ($1).
-function deriveUsdPrice(
-  reserves: Reserves | undefined,
-  token0: string | undefined,
-  usdgAddr: string,
-  targetDec: number,
-): number | null {
-  if (!reserves || !token0) return null
-  const [r0, r1] = reserves
-  if (r0 === 0n || r1 === 0n) return null
-  const isUsdg0 = token0.toLowerCase() === usdgAddr.toLowerCase()
-  const rUsdg   = Number(isUsdg0 ? r0 : r1)
-  const rTarget = Number(isUsdg0 ? r1 : r0)
-  // price_target = (rUsdg / 1e6) / (rTarget / 10^targetDec)
-  return (rUsdg * 10 ** targetDec) / (rTarget * 1e6)
+// Anchors with an independently-known USD price, in priority order for
+// deriving every OTHER token's price. USDG is a literal $1 peg -- a
+// USDG-paired pool is the most direct/precise read, so it wins whenever a
+// token has more than one priced pool (e.g. every Robinhood stock has both
+// a /AEON and a /USDG pool). AEON and WETH themselves get bootstrapped from
+// their own USDG pool below, same as every other token -- no separate
+// hardcoded derivation for them anymore.
+const ANCHOR_PRIORITY = ['USDG', 'AEON', 'WETH'] as const
+type Anchor = (typeof ANCHOR_PRIORITY)[number]
+
+// For every symbol in POOLS, find whichever pool pairs it directly with an
+// anchor. Iterated in REVERSE priority order so a later (higher-priority)
+// pass overwrites an earlier one -- e.g. a stock's /AEON route gets replaced
+// by its /USDG route once that pass runs. Computed once at module scope
+// since POOLS/TOKENS are both static -- this is what makes every token
+// added from here on (a new launchpad token, a new Create Pool pair, a new
+// stock) get priced automatically with zero code changes, instead of
+// needing a hand-written derivation function per token like before.
+const PRICE_ROUTES: Partial<Record<string, { pool: `0x${string}`; anchor: Anchor }>> = {}
+for (const anchor of [...ANCHOR_PRIORITY].reverse()) {
+  for (const p of POOLS) {
+    if (p.token0 === anchor && p.token1 !== anchor) PRICE_ROUTES[p.token1] = { pool: p.address, anchor }
+    else if (p.token1 === anchor && p.token0 !== anchor) PRICE_ROUTES[p.token0] = { pool: p.address, anchor }
+  }
 }
 
-// Derive USD price of a token from its own vAMM pool against AEON (both
-// legs 18-decimal, so no scaling needed) cross-multiplied by AEON's own USD
-// price — same "no direct USDG pool" situation VIRTUAL is already in, just
-// via getReserves() instead of a CL pool's sqrtPriceX96.
-function deriveViaAeonPool(
-  reserves: Reserves | undefined,
-  token0: string | undefined,
-  targetAddr: string,
-  aeonUsd: number | null,
-): number | null {
-  if (!reserves || !token0 || aeonUsd === null) return null
-  const [r0, r1] = reserves
-  if (r0 === 0n || r1 === 0n) return null
-  const isTarget0 = token0.toLowerCase() === targetAddr.toLowerCase()
-  const rTarget = Number(isTarget0 ? r0 : r1)
-  const rAeon   = Number(isTarget0 ? r1 : r0)
-  const aeonPerTarget = rAeon / rTarget
-  return aeonPerTarget * aeonUsd
-}
+const PRICED_SYMBOLS = Object.keys(PRICE_ROUTES)
 
-export type PriceMap = Record<string, number | null>
+const PRICE_CONTRACTS = PRICED_SYMBOLS.flatMap(symbol => {
+  const pool = PRICE_ROUTES[symbol]!.pool
+  return [
+    { address: pool, abi: PAIR_ABI, functionName: 'getReserves' } as const,
+    { address: pool, abi: PAIR_ABI, functionName: 'token0' } as const,
+  ]
+})
 
 export function usePrices(): PriceMap {
   const { data } = useReadContracts({ contracts: PRICE_CONTRACTS, query: { refetchInterval: 15000 } })
 
-  const get = (i: number) => data?.[i]?.status === 'success' ? data[i].result : undefined
+  const get = (i: number) => (data?.[i]?.status === 'success' ? data[i].result : undefined)
 
-  const aeon = deriveUsdPrice(get(0) as Reserves | undefined, get(1) as string | undefined, TOKENS.USDG.address, TOKENS.AEON.decimals)
-  const weth = deriveUsdPrice(get(2) as Reserves | undefined, get(3) as string | undefined, TOKENS.USDG.address, TOKENS.WETH.decimals)
-  const virtual  = deriveViaAeonPool(get(4) as Reserves | undefined, get(5) as string | undefined, TOKENS.VIRTUAL.address, aeon)
-  const robinfun = deriveViaAeonPool(get(6) as Reserves | undefined, get(7) as string | undefined, TOKENS.ROBINFUN.address, aeon)
-  // CASHCAT/USDG is a direct USDG pair (unlike VIRTUAL/ROBINFUN), so this
-  // uses the same direct derivation as AEON/WETH -- returns null while the
-  // pool is still unseeded (zero reserves), starts working the moment
-  // liquidity is actually added, no code change needed then.
-  const cashcat = deriveUsdPrice(get(8) as Reserves | undefined, get(9) as string | undefined, TOKENS.USDG.address, TOKENS.CASHCAT.decimals)
+  const prices: PriceMap = { USDG: 1 }
 
-  return { AEON: aeon, ETH: weth, WETH: weth, USDG: 1, VIRTUAL: virtual, ROBINFUN: robinfun, CASHCAT: cashcat }
+  function resolve(symbol: string): number | null {
+    if (symbol in prices) return prices[symbol]
+    const route = PRICE_ROUTES[symbol]
+    if (!route) return (prices[symbol] = null)
+
+    const idx = PRICED_SYMBOLS.indexOf(symbol) * 2
+    const reserves = get(idx) as Reserves | undefined
+    const token0 = get(idx + 1) as string | undefined
+    if (!reserves || !token0) return (prices[symbol] = null)
+
+    const [r0, r1] = reserves
+    if (r0 === 0n || r1 === 0n) return (prices[symbol] = null)
+
+    const anchorPrice = route.anchor === 'USDG' ? 1 : resolve(route.anchor)
+    if (anchorPrice === null) return (prices[symbol] = null)
+
+    const tokenAddr = TOKENS[symbol as keyof typeof TOKENS]?.address
+    const isTokenFirst = token0.toLowerCase() === tokenAddr?.toLowerCase()
+    const rToken = Number(isTokenFirst ? r0 : r1)
+    const rAnchor = Number(isTokenFirst ? r1 : r0)
+    if (rToken === 0) return (prices[symbol] = null)
+
+    const tokenDec = TOKENS[symbol as keyof typeof TOKENS]?.decimals ?? 18
+    const anchorDec = TOKENS[route.anchor as keyof typeof TOKENS]?.decimals ?? 18
+
+    const price = ((rAnchor / 10 ** anchorDec) * anchorPrice) / (rToken / 10 ** tokenDec)
+    return (prices[symbol] = price)
+  }
+
+  for (const symbol of PRICED_SYMBOLS) resolve(symbol)
+  // ETH is the native-gas sentinel, not its own pool -- always priced
+  // identically to WETH.
+  prices.ETH = prices.WETH ?? null
+
+  return prices
 }
