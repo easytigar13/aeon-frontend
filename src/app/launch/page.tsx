@@ -2,24 +2,17 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Rocket, Lock, Flame, Wallet, Info, Loader2, CheckCircle2, ExternalLink, Coins } from 'lucide-react'
+import { Rocket, Flame, Lock, Info, Loader2, CheckCircle2, ExternalLink, Coins } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useWaitForTransactionReceipt, useWriteContract } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
-import { formatEther, parseEther, parseUnits, formatUnits } from 'viem'
-import { AEON_TOKEN_LAUNCHPAD_ABI, ERC20_ABI } from '@/config/abis'
-import { CONTRACTS, TOKENS } from '@/config/contracts'
+import { formatEther, parseEther, parseUnits } from 'viem'
+import { AEON_TOKEN_LAUNCHPAD_V2_ABI, ERC20_ABI } from '@/config/abis'
+import { CONTRACTS } from '@/config/contracts'
 import { robinhoodChain } from '@/config/chain'
 import { TokenIcon } from '@/components/TokenIcon'
 
-type LpMode = 0 | 1 | 2
 type QuoteAsset = 'ETH' | 'AEON'
-
-const LP_OPTIONS: { mode: LpMode; label: string; desc: string; icon: typeof Wallet; tone: string }[] = [
-  { mode: 0, label: 'Send LP to me', desc: 'Creator wallet receives the LP tokens.', icon: Wallet, tone: 'text-sky-400 border-sky-400/20 bg-sky-400/10' },
-  { mode: 1, label: 'Burn LP', desc: 'LP tokens are sent permanently to the dead address.', icon: Flame, tone: 'text-red-400 border-red-400/20 bg-red-400/10' },
-  { mode: 2, label: 'Lock LP', desc: 'LP tokens are held in AeonLPLocker until the unlock date.', icon: Lock, tone: 'text-aeon-400 border-aeon-400/20 bg-aeon-400/10' },
-]
 
 function safeParseTokenAmount(value: string): bigint {
   if (!value || Number(value) <= 0) return 0n
@@ -59,11 +52,6 @@ function deadlineFromMinutes(minutes: string): bigint {
   return BigInt(Math.floor(Date.now() / 1000) + mins * 60)
 }
 
-function unlockFromDays(days: string): bigint {
-  const d = Math.max(1, Math.min(3650, Number(days) || 365))
-  return BigInt(Math.floor(Date.now() / 1000) + d * 86400)
-}
-
 export default function LaunchPage() {
   const { address, isConnected } = useAccount()
   const { openConnectModal } = useConnectModal()
@@ -78,16 +66,15 @@ export default function LaunchPage() {
   const [feeBps, setFeeBps] = useState('100')
   const [slippage, setSlippage] = useState('0.5')
   const [deadlineMinutes, setDeadlineMinutes] = useState('20')
-  const [lpMode, setLpMode] = useState<LpMode>(2)
-  const [lockDays, setLockDays] = useState('365')
   const [manualError, setManualError] = useState('')
   const [needsApproval, setNeedsApproval] = useState(false)
 
   const explorerUrl = robinhoodChain.blockExplorers?.default.url
+  const launchpad = CONTRACTS.AeonTokenLaunchpadV2
 
   const { data: launchFeeBpsRaw } = useReadContract({
-    address: CONTRACTS.AeonTokenLaunchpad,
-    abi: AEON_TOKEN_LAUNCHPAD_ABI,
+    address: launchpad,
+    abi: AEON_TOKEN_LAUNCHPAD_V2_ABI,
     functionName: 'launchFeeBps',
   })
   const launchFeeBps = (launchFeeBpsRaw as bigint | undefined) ?? 0n
@@ -115,7 +102,7 @@ export default function LaunchPage() {
     address: aeonQuoteToken,
     abi: ERC20_ABI,
     functionName: 'allowance',
-    args: address ? [address, CONTRACTS.AeonTokenLaunchpad] : undefined,
+    args: address ? [address, launchpad] : undefined,
     query: { enabled: !!address && quoteAsset === 'AEON' },
   })
 
@@ -134,9 +121,8 @@ export default function LaunchPage() {
     if (quoteAmountWei === 0n) return `${quoteAsset} liquidity must be greater than zero.`
     if (tokenLiquidityWei > totalSupplyWei) return 'Token liquidity cannot exceed total supply.'
     if (Number(feeBps) <= 0 || Number(feeBps) > 1000) return 'Fee tier must be between 1 and 1000 bps.'
-    if (lpMode === 2 && Number(lockDays) < 1) return 'LP lock must be at least 1 day.'
     return ''
-  }, [name, symbol, totalSupplyWei, tokenLiquidityWei, quoteAmountWei, quoteAsset, feeBps, lpMode, lockDays])
+  }, [name, symbol, totalSupplyWei, tokenLiquidityWei, quoteAmountWei, quoteAsset, feeBps])
 
   const { writeContract, data: txHash, isPending, error: writeError } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash: txHash })
@@ -153,7 +139,7 @@ export default function LaunchPage() {
       address: aeonQuoteToken,
       abi: ERC20_ABI,
       functionName: 'approve',
-      args: [CONTRACTS.AeonTokenLaunchpad, quoteAmountWei],
+      args: [launchpad, quoteAmountWei],
     })
   }
 
@@ -170,8 +156,8 @@ export default function LaunchPage() {
 
     if (quoteAsset === 'ETH') {
       writeContract({
-        address: CONTRACTS.AeonTokenLaunchpad,
-        abi: AEON_TOKEN_LAUNCHPAD_ABI,
+        address: launchpad,
+        abi: AEON_TOKEN_LAUNCHPAD_V2_ABI,
         functionName: 'launchTokenWithNativeLiquidity',
         args: [{
           name: name.trim(),
@@ -183,15 +169,13 @@ export default function LaunchPage() {
           minNativeAmount: minQuoteAmount,
           feeBps: Number(feeBps),
           deadline: deadlineFromMinutes(deadlineMinutes),
-          lpDestination: lpMode,
-          lpUnlockTime: lpMode === 2 ? unlockFromDays(lockDays) : 0n,
         }],
         value: quoteAmountWei,
       })
     } else {
       writeContract({
-        address: CONTRACTS.AeonTokenLaunchpad,
-        abi: AEON_TOKEN_LAUNCHPAD_ABI,
+        address: launchpad,
+        abi: AEON_TOKEN_LAUNCHPAD_V2_ABI,
         functionName: 'launchTokenWithTokenLiquidity',
         args: [{
           name: name.trim(),
@@ -205,8 +189,6 @@ export default function LaunchPage() {
           minQuoteAmount,
           feeBps: Number(feeBps),
           deadline: deadlineFromMinutes(deadlineMinutes),
-          lpDestination: lpMode,
-          lpUnlockTime: lpMode === 2 ? unlockFromDays(lockDays) : 0n,
         }],
       })
     }
@@ -240,7 +222,7 @@ export default function LaunchPage() {
           <div className="badge-aeon w-fit mb-3">AEON LAUNCHPAD</div>
           <h1 className="font-display font-bold text-3xl text-text-primary">Launch an ERC-20 with instant Aeon liquidity</h1>
           <p className="text-text-secondary mt-2 max-w-2xl">
-            Create the token, seed the vAMM pool against ETH or AEON, and choose whether LP tokens go to you, get burned, or get locked.
+            Create the token and seed the vAMM pool against ETH or AEON. The LP always ends up permanently staked in a real gauge -- there&apos;s no choice to make and no way to take it back out.
           </p>
         </div>
         <Link href="/liquidity" className="btn-secondary text-sm inline-flex items-center gap-2">
@@ -248,12 +230,22 @@ export default function LaunchPage() {
         </Link>
       </div>
 
-      <div className="mb-6 rounded-xl border border-aeon-400/20 bg-aeon-400/10 p-4 flex gap-3">
+      <div className="mb-4 rounded-xl border border-aeon-400/20 bg-aeon-400/10 p-4 flex gap-3">
         <Flame size={18} className="text-aeon-400 shrink-0 mt-0.5" />
         <div>
           <div className="text-sm font-semibold text-aeon-400">Every launched token taxes 0.025% of every transfer</div>
           <div className="text-xs text-aeon-400/80 mt-1">
             That cut is swapped to AEON and burned automatically, on every transfer, forever. It&apos;s not optional and the rate can&apos;t be changed per-launch.
+          </div>
+        </div>
+      </div>
+
+      <div className="mb-6 rounded-xl border border-violet-400/20 bg-violet-400/10 p-4 flex gap-3">
+        <Lock size={18} className="text-violet-400 shrink-0 mt-0.5" />
+        <div>
+          <div className="text-sm font-semibold text-violet-400">LP is permanently staked, not sent to you</div>
+          <div className="text-xs text-violet-400/80 mt-1">
+            A real gauge gets created for your pool and the launchpad stakes 100% of the LP into it on your behalf -- forever. Nobody, including the creator, can ever withdraw it. This happens automatically shortly after your launch confirms, not in the same transaction (gauge creation needs a separate protocol-level step) -- your pool is live and swappable immediately either way.
           </div>
         </div>
       </div>
@@ -332,42 +324,6 @@ export default function LaunchPage() {
               <input type="number" value={deadlineMinutes} onChange={e => setDeadlineMinutes(e.target.value)} className="input-base w-full max-w-[160px] font-mono" />
             </label>
           </div>
-
-          <div className="card p-5">
-            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-4">LP Handling</div>
-            <div className="grid md:grid-cols-3 gap-3">
-              {LP_OPTIONS.map(opt => {
-                const Icon = opt.icon
-                return (
-                  <button
-                    key={opt.mode}
-                    onClick={() => setLpMode(opt.mode)}
-                    className={clsx(
-                      'rounded-xl border p-4 text-left transition-all',
-                      lpMode === opt.mode ? opt.tone : 'border-bg-border bg-bg-raised text-text-secondary hover:border-bg-hover',
-                    )}
-                  >
-                    <div className="flex items-center gap-2 mb-2">
-                      <Icon size={16} />
-                      <span className="font-semibold text-sm">{opt.label}</span>
-                    </div>
-                    <p className="text-xs leading-relaxed opacity-80">{opt.desc}</p>
-                  </button>
-                )
-              })}
-            </div>
-            {lpMode === 2 && (
-              <label className="block mt-3">
-                <span className="text-xs text-text-muted mb-1 block">Lock length in days</span>
-                <input type="number" min={1} value={lockDays} onChange={e => setLockDays(e.target.value)} className="input-base w-full font-mono" />
-              </label>
-            )}
-            {lpMode === 1 && (
-              <div className="mt-3 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-400">
-                Burning LP is irreversible. The initial liquidity cannot be withdrawn later.
-              </div>
-            )}
-          </div>
         </div>
 
         <aside className="space-y-4 lg:sticky lg:top-24">
@@ -405,7 +361,7 @@ export default function LaunchPage() {
                 <span className="text-sm font-semibold text-text-primary">Instant Aeon pool</span>
               </div>
               <p className="text-xs text-text-muted leading-relaxed">
-                The launchpad creates the ERC-20, creates or finds the Aeon vAMM pool, adds the first liquidity, then applies your LP choice.
+                The launchpad creates the ERC-20, creates or finds the Aeon vAMM pool, and adds the first liquidity. The gauge + permanent stake finish shortly after, automatically.
               </p>
             </div>
 
