@@ -146,17 +146,19 @@ export default function LiquidityPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display font-bold text-2xl text-text-primary">Liquidity</h1>
-          <p className="text-sm text-text-muted mt-0.5">Provide liquidity to AEON's vAMM pools</p>
+          <p className="text-sm text-text-muted mt-0.5">
+            Provide liquidity to AEON's {mode === 'CL' ? 'concentrated-liquidity' : mode === 'DLMM' ? 'DLMM' : 'vAMM'} pools
+          </p>
         </div>
       </div>
 
-      {/* CL/DLMM mode buttons removed 2026-07-10 -- see CL_POOLS/DLMM_POOLS
-          comment in contracts.ts for why. mode can now only ever be 'vAMM'
-          (handleDeposit/handleCreated never set it to CL/DLMM either, since
-          PoolListView no longer produces any CL/DLMM rows to click Deposit
-          on), so this renders VammLiquidity unconditionally rather than
-          leaving dead ClLiquidity/DlmmLiquidity branches reachable. */}
-      <VammLiquidity initialPool={initialPool} />
+      {/* CL/DLMM routing restored 2026-07-12 alongside CL_POOLS/DLMM_POOLS --
+          see that comment in contracts.ts. PoolListView can now produce
+          CL/DLMM rows again, so handleDeposit can set mode to 'CL'/'DLMM'
+          and this needs to route to the matching form. */}
+      {mode === 'CL' ? <ClLiquidity initialPool={initialPool} /> :
+       mode === 'DLMM' ? <DlmmLiquidity initialPool={initialPool} /> :
+       <VammLiquidity initialPool={initialPool} />}
     </div>
   )
 }
@@ -307,11 +309,11 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
         </div>
       </div>
 
-      {/* CL/DLMM filter options removed 2026-07-10 alongside CL_POOLS/DLMM_POOLS
-          -- see that comment in contracts.ts for why. Only ALL/vAMM remain
-          since CL/DLMM pools can never appear in `pools` now. */}
+      {/* CL/DLMM filter options restored 2026-07-12 alongside the
+          CASHCAT/AEON/ETH/USDG subset of CL_POOLS/DLMM_POOLS -- see that
+          comment in contracts.ts for the full history. */}
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4 w-fit">
-        {(['ALL', 'vAMM'] as ListFilter[]).map(f => (
+        {(['ALL', 'vAMM', 'CL', 'DLMM'] as ListFilter[]).map(f => (
           <button
             key={f}
             onClick={() => setFilter(f)}
