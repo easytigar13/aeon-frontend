@@ -105,7 +105,7 @@ export const CONTRACTS = {
   // instead of trusting the previous hop's theoretical reported amountOut,
   // covering tax tokens and any other quote/settlement mismatch, not just
   // the one already-observed case.
-  UniversalRouter:     '0x75Cb8CFDCB0894A1D2187c670250af5f2022586d' as `0x${string}`,
+  UniversalRouter:     '0xe395a7c03a01c5fbeab494ee99a642bd88ba0a01' as `0x${string}`,
   // Deployed 2026-07-05: backs the Tower Defense mini-game. 50 AEON entry fee
   // per session feeds a self-funded prize pool; claimReward() only pays out
   // with a signature from trustedSigner (a dedicated key held by
@@ -116,22 +116,45 @@ export const CONTRACTS = {
   // signer key were ever compromised. Fork-verified (happy path + double-claim
   // + wrong-signer + over-cap all behave correctly) before deploying.
   TowerDefenseArena:   '0xCFcb643D8f51D640e0B81257340C1cA344238F48' as `0x${string}`,
-  // Deployed 2026-07-11: token launchpad, at the user's request. Anyone can
-  // create a new ERC-20 + seed an Aeon vAMM pool for it in one tx (quote
-  // asset is either ETH/WETH or AEON, creator's choice), then route the LP
-  // to themselves, burn it, or lock it in AeonLPLocker until a chosen date.
-  // Every launched token is an AeonLaunchTaxToken (see
-  // aeon-protocol-v5/src/launchpad/AeonLaunchpadSuite.sol): a fixed,
-  // non-optional 0.025% transfer tax that auto-swaps to AEON and burns on
-  // every transfer -- no toggle, same rate for every launch. Launch fee is a
-  // % of the quote liquidity contributed, owner-adjustable, hard-capped
-  // on-chain at 5% (MAX_LAUNCH_FEE_BPS), currently set to 0. Fork-tested
-  // before deploying: launch with LP to creator/burned/locked, lock
-  // withdraw timing, zero-supply/expired-deadline rejection, and the tax
-  // mechanic itself (a real transfer, real 0.025% deducted, real AEON
-  // burned to DEAD in the same tx) all passed against a fork of this chain.
+  // Deployed 2026-07-11: token launchpad V1, at the user's request. Anyone
+  // could create a new ERC-20 + seed an Aeon vAMM pool for it in one tx, then
+  // route the LP to themselves, burn it, or lock it in AeonLPLocker until a
+  // chosen date. Superseded by V2 below the same day, after the user asked
+  // for every launch's LP to be permanently staked in a real gauge instead --
+  // left here (not deleted) since one real launch went through it and its
+  // pool/token are still live and swappable. AeonLPLocker is V1-only; V2 has
+  // no lock/burn/creator choice at all, so it's never used going forward.
   AeonLPLocker:        '0xE42c5602f0E38524E94c765639E65aB9a2f10FB3' as `0x${string}`,
   AeonTokenLaunchpad:  '0xf456538039755c855068AC2e2f3DB48a974DA33e' as `0x${string}`,
+  // V2 -- every launch is an AeonLaunchTaxToken (see
+  // aeon-protocol-v5/src/launchpad/AeonLaunchpadSuiteV2.sol): a fixed,
+  // non-optional 0.025% transfer tax that auto-swaps to AEON and burns on
+  // every transfer, no toggle. LP always ends up permanently staked in a
+  // real AeonVoterV2 gauge -- no creator/burn/lock choice anymore, no
+  // withdraw function anywhere in the contract. Quote asset is ETH/WETH or
+  // AEON, creator's choice. Launch fee is a % of quote liquidity,
+  // owner-adjustable, hard-capped on-chain at 5%, currently 0, paid to the
+  // dev wallet.
+  //
+  // Gauge creation can't happen atomically in the launch transaction --
+  // AeonVoterV2.createGauge() requires a direct governor-signed call for any
+  // brand-new pool, confirmed by reading its verified source (no bypass for
+  // a calling contract, by design -- a real security boundary on the core
+  // voting contract, not something to route around). Instead:
+  // keeper/launchpad-keeper.js in aeon-protocol-v5 watches for new launches
+  // and does that governor step (registerPool + createGauge) automatically
+  // shortly after each one, then calls the permissionless stakeLaunch() to
+  // finish. Until that runs for a given launch, its pool exists and is
+  // swappable, but shows no gauge/stake yet.
+  //
+  // Fork-tested before deploying (10 tests): the full keeper flow end to
+  // end (launch -> governor creates gauge -> permissionless stake -> LP
+  // balance confirmed in the real gauge), stakeLaunch rejecting a
+  // not-yet-created gauge and rejecting a second call, the harvest-and-burn
+  // sweep (real AEON burned to DEAD, nothing left sitting in the
+  // contract), permissionless harvest callable by a random address, exact
+  // 5%-fee-to-dev-wallet routing, and zero-supply rejection.
+  AeonTokenLaunchpadV2: '0x06825A8969593b83cCcC793f82463e892Fb7641e' as `0x${string}`,
 } as const
 
 // Deployed 2026-07-05: parallel staking + AEON-rewards contracts for CL and

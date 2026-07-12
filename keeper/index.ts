@@ -77,6 +77,7 @@ import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, ALGEBRA_POOL_ABI
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
 import { writeBotStatus, appendTrade, isBotStoreConfigured } from '../src/lib/botStore'
+import { discoverUniswapV3Pools, quoteUniswapV3ExactInput, UNISWAP_V3_POOL_ABI, type UniswapV3PoolRef } from './uniswap-v3'
 
 const envPath      = fileURLToPath(new URL('.env', import.meta.url))
 dotenv.config({ path: envPath })
@@ -102,6 +103,11 @@ const DEADLINE_SECONDS = 120  // execution must land within 2 min of being sized
 const AGGREGATOR_SCAN_INTERVAL_MS = parseInt(process.env.AGGREGATOR_SCAN_INTERVAL_MS ?? '30000')
 const AGGREGATOR_SLIPPAGE_PCT = parseFloat(process.env.AGGREGATOR_SLIPPAGE_PCT ?? '0.5')
 const ENABLE_CROSS_VENUE = process.env.ENABLE_CROSS_VENUE === 'true'
+// Safety defaults: an arbitrage must close in its starting token and all
+// legs must settle atomically. Non-atomic routes may still be observed, but
+// are never signed while ATOMIC_ONLY is enabled.
+const SAME_TOKEN_ONLY = process.env.SAME_TOKEN_ONLY !== 'false'
+const ATOMIC_ONLY = process.env.ATOMIC_ONLY !== 'false'
 
 // Native ETH isn't one of the pool tokens (everything trades WETH), but
 // it's economically fungible with WETH via wrap/unwrap -- whatever's spare
@@ -158,7 +164,7 @@ function parseFeeBps(fee: string): number {
 // Trader Joe Liquidity Book fork (bin-based). All four route through the
 // same DFS/ternary-search sizing below via PoolState's r0/r1/effFeeBps --
 // only pool discovery, state-fetching, and on-chain execution differ by kind.
-type PoolKind = 'vAMM' | 'uniV2' | 'CL' | 'DLMM'
+type PoolKind = 'vAMM' | 'uniV2' | 'uniV3' | 'CL' | 'DLMM'
 
 interface PoolConfig {
   name: string
@@ -169,6 +175,7 @@ interface PoolConfig {
   isUniV2: boolean
   kind: PoolKind
   binStep?: number   // DLMM only -- identifies which pair-at-this-bin-step on-chain
+  v3Fee?: number     // Uniswap V3 fee tier in parts per million
 }
 
 const ARB_POOLS: PoolConfig[] = POOLS
@@ -189,6 +196,38 @@ const UNISWAP_FEE_BPS = 30n
 // AeonArbKeeper uses standard V2 exact-input math, so those pairs cannot be
 // executed safely until the contract re-measures received amounts per hop.
 const UNISWAP_UNSUPPORTED_TOKENS = new Set<keyof typeof TOKENS>(['ROBINFUN'])
+const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?? '1000000')
+const uniswapV3Refs = new Map<string, UniswapV3PoolRef>()
+
+async function discoverHighVolumeUniswapV3Pools(): Promise<number> {
+  const symbols = (Object.keys(TOKENS) as (keyof typeof TOKENS)[]).filter(sym =>
+    sym !== 'ETH' && (sym === 'WETH' || sym === 'USDG' || !AGGREGATOR_EXCLUDE.has(String(sym))),
+  )
+  const refs = await discoverUniswapV3Pools(pub, symbols.map(sym => getAddress(TOKENS[sym].address)))
+  const addressToSymbol = new Map(symbols.map(sym => [TOKENS[sym].address.toLowerCase(), sym]))
+  let added = 0
+  for (const ref of refs) {
+    const token0 = addressToSymbol.get(ref.token0.toLowerCase())
+    const token1 = addressToSymbol.get(ref.token1.toLowerCase())
+    if (!token0 || !token1) continue
+    let volume24 = 0
+    try {
+      const response = await fetch(`https://api.dexscreener.com/latest/dex/pairs/robinhood/${ref.address}`)
+      const body = await response.json() as { pairs?: { volume?: { h24?: number } }[] }
+      volume24 = Number(body.pairs?.[0]?.volume?.h24 ?? 0)
+    } catch { continue }
+    if (volume24 < MIN_EXTERNAL_VOLUME_USD) continue
+    uniswapV3Refs.set(ref.address.toLowerCase(), ref)
+    ARB_POOLS.push({
+      name: `UniV3 ${token0}/${token1} ${ref.fee}`,
+      address: ref.address, token0, token1,
+      feeBps: (BigInt(ref.fee) + 99n) / 100n,
+      isUniV2: false, kind: 'uniV3', v3Fee: ref.fee,
+    })
+    added++
+  }
+  return added
+}
 
 // AEON isn't listed on any external aggregator (confirmed -- nothing to
 // compare against), and the Robinhood tokenized stocks only exist inside
@@ -394,6 +433,7 @@ async function chunkedMulticall(contracts: any[]): Promise<any[]> {
 
 async function fetchAllStates(): Promise<PoolState[]> {
   const vammPools = ARB_POOLS.filter(p => p.kind === 'vAMM' || p.kind === 'uniV2')
+  const v3Pools   = ARB_POOLS.filter(p => p.kind === 'uniV3')
   const clPools   = ARB_POOLS.filter(p => p.kind === 'CL')
   const dlmmPools = ARB_POOLS.filter(p => p.kind === 'DLMM')
 
@@ -408,11 +448,16 @@ async function fetchAllStates(): Promise<PoolState[]> {
   const dlmmActiveIdContracts = dlmmPools.map(p => ({
     address: p.address, abi: LB_PAIR_ABI, functionName: 'getActiveId' as const,
   }))
+  const v3Contracts = v3Pools.flatMap(p => [
+    { address: p.address, abi: UNISWAP_V3_POOL_ABI, functionName: 'slot0' as const },
+    { address: p.address, abi: UNISWAP_V3_POOL_ABI, functionName: 'liquidity' as const },
+  ])
 
-  const results = await chunkedMulticall([...vammContracts, ...clContracts, ...dlmmActiveIdContracts])
+  const results = await chunkedMulticall([...vammContracts, ...clContracts, ...dlmmActiveIdContracts, ...v3Contracts])
   const vammResults     = results.slice(0, vammContracts.length)
   const clResults       = results.slice(vammContracts.length, vammContracts.length + clContracts.length)
   const activeIdResults = results.slice(vammContracts.length + clContracts.length)
+  const v3Results = activeIdResults.splice(dlmmActiveIdContracts.length)
 
   const vammStates: PoolState[] = vammPools.map((pool, i) => {
     const resD  = vammResults[i * 2]
@@ -491,7 +536,22 @@ async function fetchAllStates(): Promise<PoolState[]> {
     return { pool, r0: virtualR0, r1: virtualR1, onchain0: TOKENS[pool.token0].address.toLowerCase(), effFeeBps: pool.feeBps }
   })
 
-  return [...vammStates, ...clStates, ...dlmmStates].filter(s => s.r0 > 0n && s.r1 > 0n && hasRealLiquidity(s))
+  const v3States: PoolState[] = v3Pools.map((pool, i) => {
+    const slotD = v3Results[i * 2], liqD = v3Results[i * 2 + 1]
+    const slot = slotD?.status === 'success' ? slotD.result as readonly [bigint, number, number, number, number, number, boolean] : null
+    const liquidity = liqD?.status === 'success' ? liqD.result as bigint : 0n
+    const sqrtPriceX96 = slot?.[0] ?? 0n
+    if (sqrtPriceX96 === 0n || liquidity === 0n) return { pool, r0: 0n, r1: 0n, onchain0: '', effFeeBps: pool.feeBps }
+    return {
+      pool,
+      r0: (liquidity << 96n) / sqrtPriceX96,
+      r1: (liquidity * sqrtPriceX96) >> 96n,
+      onchain0: TOKENS[pool.token0].address.toLowerCase(),
+      effFeeBps: pool.feeBps,
+    }
+  })
+
+  return [...vammStates, ...clStates, ...dlmmStates, ...v3States].filter(s => s.r0 > 0n && s.r1 > 0n && hasRealLiquidity(s))
 }
 
 // Several pools in POOLS are genuinely empty -- deployed with a real gauge
@@ -1201,12 +1261,34 @@ function buildUniversalHops(hopCandidates: HopCandidate[]) {
     const tokenOut = getAddress(TOKENS[h.tokenOutSym as keyof typeof TOKENS].address)
     if (kind === 'CL') return { poolType: 1, pool: ZERO_ADDRESS, tokenIn, tokenOut, feeBps: 0, binStep: 0 }
     if (kind === 'DLMM') return { poolType: 2, pool: ZERO_ADDRESS, tokenIn, tokenOut, feeBps: 0, binStep: h.pool.pool.binStep ?? 0 }
+    if (kind === 'uniV3') return { poolType: 4, pool: getAddress(h.pool.pool.address), tokenIn, tokenOut, feeBps: h.pool.pool.v3Fee ?? 0, binStep: 0 }
     return { poolType: kind === 'uniV2' ? 3 : 0, pool: getAddress(h.pool.pool.address), tokenIn, tokenOut, feeBps: Number(h.pool.pool.feeBps), binStep: 0 }
   })
 }
 
 function hasNonVammHop(hopCandidates: HopCandidate[]): boolean {
-  return hopCandidates.some(h => h.pool.pool.kind === 'CL' || h.pool.pool.kind === 'DLMM')
+  return hopCandidates.some(h => h.pool.pool.kind === 'CL' || h.pool.pool.kind === 'DLMM' || h.pool.pool.kind === 'uniV3')
+}
+
+async function quoteMixedRouteExact(hops: HopCandidate[], amountIn: bigint): Promise<bigint> {
+  let amount = amountIn
+  for (const hop of hops) {
+    if (hop.pool.pool.kind === 'uniV3') {
+      const quote = await quoteUniswapV3ExactInput(
+        pub,
+        getAddress(TOKENS[hop.tokenInSym as keyof typeof TOKENS].address),
+        getAddress(TOKENS[hop.tokenOutSym as keyof typeof TOKENS].address),
+        hop.pool.pool.v3Fee ?? 0,
+        amount,
+      )
+      if (!quote) return 0n
+      amount = quote.amountOut
+    } else {
+      amount = amtOut(amount, hop.reserveIn, hop.reserveOut, hop.pool.effFeeBps)
+    }
+    if (amount <= 0n) return 0n
+  }
+  return amount
 }
 
 // Cyclic routes (same start/end token) that include a CL or DLMM hop can't
@@ -1221,7 +1303,10 @@ function hasNonVammHop(hopCandidates: HopCandidate[]): boolean {
 // deliver that, same as every other execution path in this file.
 async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint): Promise<ExecResult> {
   if (Date.now() < pausedUntil) return 'skipped'
-  const { tokenIn, hops: hopCandidates, amountIn, profitRaw, profitPct, label: pairLabel } = opp
+  const { tokenIn, hops: hopCandidates, amountIn, profitPct, label: pairLabel } = opp
+  const exactOut = await quoteMixedRouteExact(hopCandidates, amountIn)
+  const profitRaw = exactOut > amountIn ? exactOut - amountIn : 0n
+  if (profitRaw <= 0n) return 'skipped'
 
   console.log(`\n🔄 ARB (CL/DLMM route, via UniversalRouter): ${pairLabel}  profit ${profitPct.toFixed(3)}%  in ${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`)
 
@@ -1237,7 +1322,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
   }
   console.log(`   Est. gas cost (incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
 
-  const requiredProfit = gasFloor + 1n
+  let requiredProfit = gasFloor + 1n
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     return 'skipped'
@@ -1269,16 +1354,34 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
   const balanceBefore = balIn
 
   const hops = buildUniversalHops(hopCandidates)
-  const amountOutMin = amountIn + requiredProfit
+  let amountOutMin = amountIn + requiredProfit
   const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
 
   try {
+    let approvalGasWei = 0n
     if (needsApproval) {
       console.log('   → approve...')
       const hApprove = await wal.writeContract({
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.UniversalRouter, MAX_UINT256],
       })
-      await pub.waitForTransactionReceipt({ hash: hApprove })
+      const approvalReceipt = await pub.waitForTransactionReceipt({ hash: hApprove })
+      approvalGasWei = approvalReceipt.gasUsed * approvalReceipt.effectiveGasPrice
+    }
+
+    const gasPrice = await pub.getGasPrice()
+    const executionGas = await pub.estimateContractGas({
+      account: account.address,
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
+    })
+    const bufferedGasWei = approvalGasWei + (executionGas * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
+    const exactGasInToken = weiToToken(tokenIn.symbol, bufferedGasWei, graph)
+    if (exactGasInToken === null) throw new Error(`cannot convert exact gas cost into ${tokenIn.symbol}`)
+    requiredProfit = exactGasInToken + 1n
+    amountOutMin = amountIn + requiredProfit
+    if (profitRaw < requiredProfit) {
+      console.log('   Exact gas estimate removed profitability; not submitting')
+      return 'attempted'
     }
 
     console.log('   → simulate swapExactTokensForTokens...')
@@ -1300,7 +1403,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
       }) as bigint
       const realizedGross = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n
-      const totalGasWei = receipt.gasUsed * receipt.effectiveGasPrice
+      const totalGasWei = approvalGasWei + receipt.gasUsed * receipt.effectiveGasPrice
       const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
       const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
       const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
@@ -1555,7 +1658,7 @@ async function executeSettlementSwap(
   if (DRY_RUN) {
     console.log('   [DRY RUN] would execute -- clears gas cost, skipping actual send')
     recordArb({
-      time: new Date().toISOString(), pair: label, tokenIn: 'USDG',
+      time: new Date().toISOString(), pair: label, tokenIn: tokenIn.symbol,
       amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(opp.profitUsdg, TOKENS.USDG.decimals),
       profitPct: opp.profitPct, status: 'dry-run', route: 'internal',
     })
@@ -1615,6 +1718,7 @@ async function executeSettlementSwap(
       const realizedOutUsdg = tokenOut.symbol === 'USDG' ? realizedOut : convertSpot(realizedOut, outUsdgPath)
       const totalGasWei = approvalGasWei + receipt.gasUsed * receipt.effectiveGasPrice
       const gasUsdgActual = valueInUsdg('WETH', totalGasWei, graph)
+      const realizedGrossUsdg = realizedOutUsdg > inUsdgValue ? realizedOutUsdg - inUsdgValue : 0n
       const realizedNetUsdg = realizedOutUsdg > inUsdgValue + gasUsdgActual ? realizedOutUsdg - inUsdgValue - gasUsdgActual : 0n
 
       console.log(`   ✅ SETTLE COMPLETE — received ${formatUnits(realizedOut, tokenOut.decimals)} ${tokenOut.symbol} (~${formatUnits(realizedNetUsdg, TOKENS.USDG.decimals)} USDG net) — ${hSwap}`)
@@ -1623,9 +1727,9 @@ async function executeSettlementSwap(
       const prev = parseFloat(cumulativeProfit['USDG'] ?? '0')
       cumulativeProfit['USDG'] = (prev + parseFloat(formatUnits(realizedNetUsdg, TOKENS.USDG.decimals))).toString()
       recordArb({
-        time: new Date().toISOString(), pair: label, tokenIn: 'USDG',
+        time: new Date().toISOString(), pair: label, tokenIn: tokenIn.symbol,
         amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(realizedNetUsdg, TOKENS.USDG.decimals),
-        grossProfit: formatUnits(realizedOutUsdg, TOKENS.USDG.decimals), gasCost: formatUnits(gasUsdgActual, TOKENS.USDG.decimals),
+        grossProfit: formatUnits(realizedGrossUsdg, TOKENS.USDG.decimals), gasCost: formatUnits(gasUsdgActual, TOKENS.USDG.decimals),
         gasCostEth: formatEther(totalGasWei),
         profitPct: opp.profitPct, txHash: hSwap, status: 'success', route: 'internal',
       })
@@ -1645,7 +1749,7 @@ async function executeSettlementSwap(
     recentErrors.unshift({ time: new Date().toISOString(), message })
     recentErrors = recentErrors.slice(0, 5)
     recordArb({
-      time: new Date().toISOString(), pair: label, tokenIn: 'USDG',
+      time: new Date().toISOString(), pair: label, tokenIn: tokenIn.symbol,
       amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct: opp.profitPct, status: 'failed', error: message, route: 'internal',
     })
     return 'attempted'
@@ -2262,7 +2366,7 @@ async function tick() {
   // Settlement routes (e.g. AEON -> token -> WETH, staying in WETH) --
   // independent of whether any CYCLIC opportunity existed, only skipped if
   // one already fired above this tick.
-  if (!anyAttempted) {
+  if (!anyAttempted && !SAME_TOKEN_ONLY) {
     const settlementOpps = bases
       .flatMap(baseSym => findSettlementRoutes(graph, baseSym))
       .sort((a, b) => {
@@ -2297,7 +2401,7 @@ async function tick() {
   // Cross-venue (OpenOcean / 1inch) scan runs on its own slower cadence --
   // reuses this tick's already-fetched states/graph/balances, only adding
   // aggregator API calls, not extra pool or balance reads.
-  if (ENABLE_CROSS_VENUE && Date.now() - lastAggregatorScan >= AGGREGATOR_SCAN_INTERVAL_MS) {
+  if (!anyAttempted && ENABLE_CROSS_VENUE && Date.now() - lastAggregatorScan >= AGGREGATOR_SCAN_INTERVAL_MS) {
     lastAggregatorScan = Date.now()
     let aggAttempted = false
     try {
@@ -2307,10 +2411,14 @@ async function tick() {
         for (const o of aggOpps.slice(0, 3)) {
           console.log(`  ${o.label}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenBase.decimals)} ${o.tokenBase.symbol})`)
         }
-        for (const opp of aggOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
-          if (opp.profitPct < MIN_PROFIT_PCT) break
-          const result = await executeAggregatorArb(opp, graph, availableEthForWrap)
-          if (result === 'attempted') { aggAttempted = true; break }   // rescan before another state-changing route
+        if (ATOMIC_ONLY) {
+          console.log('  [SCAN ONLY] non-atomic cross-venue execution disabled')
+        } else {
+          for (const opp of aggOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
+            if (opp.profitPct < MIN_PROFIT_PCT) break
+            const result = await executeAggregatorArb(opp, graph, availableEthForWrap)
+            if (result === 'attempted') { aggAttempted = true; break }
+          }
         }
       }
     } catch (err: any) {
@@ -2332,10 +2440,14 @@ async function tick() {
           for (const o of externalOpps.slice(0, 3)) {
             console.log(`  ${o.label}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenBase.decimals)} ${o.tokenBase.symbol})`)
           }
-          for (const opp of externalOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
-            if (opp.profitPct < MIN_PROFIT_PCT) break
-            const result = await executeExternalArb(opp, graph, availableEthForWrap)
-            if (result === 'attempted') break
+          if (ATOMIC_ONLY) {
+            console.log('  [SCAN ONLY] non-atomic external execution disabled')
+          } else {
+            for (const opp of externalOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
+              if (opp.profitPct < MIN_PROFIT_PCT) break
+              const result = await executeExternalArb(opp, graph, availableEthForWrap)
+              if (result === 'attempted') break
+            }
           }
         }
       } catch (err: any) {
@@ -2352,18 +2464,23 @@ async function tick() {
 
 async function main() {
   const uniswapPools = await discoverUniswapPools()
+  const uniswapV3Pools = await discoverHighVolumeUniswapV3Pools()
   const { cl: clPools, dlmm: dlmmPools } = await discoverClAndDlmmPools()
   console.log(`AEON Arb Keeper`)
   console.log(`  Keeper address: ${account.address}`)
   console.log(`  Settlement tokens: ${BASE_TOKEN_OVERRIDE || SETTLEMENT_TOKENS.join(', ')} (AEON preferred on equal net profit)`)
+  console.log(`  Same-token cycles only: ${SAME_TOKEN_ONLY}`)
+  console.log(`  Atomic execution only: ${ATOMIC_ONLY}`)
   console.log(`  Max hops per cycle: ${MAX_HOPS}`)
   console.log(`  Pools monitored: ${ARB_POOLS.length}`)
   console.log(`  Uniswap V2 pools discovered: ${uniswapPools}`)
+  console.log(`  Uniswap V3 pools above $${MIN_EXTERNAL_VOLUME_USD.toLocaleString()} volume discovered: ${uniswapV3Pools}`)
   console.log(`  AEON CL pools discovered: ${clPools}  |  AEON DLMM pools discovered: ${dlmmPools}`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
-  console.log(`  Cross-venue execution: ${ENABLE_CROSS_VENUE ? 'enabled' : 'disabled (non-atomic)'}`)
+  console.log(`  Cross-venue scan: ${ENABLE_CROSS_VENUE ? 'enabled' : 'disabled'}`)
+  console.log(`  Non-atomic cross-venue execution: ${ENABLE_CROSS_VENUE && !ATOMIC_ONLY ? 'enabled' : 'disabled'}`)
   console.log(`  1inch: ${process.env.ONEINCH_API_KEY ? 'configured' : 'not configured (OpenOcean only)'}`)
   console.log(`  Dry run: ${DRY_RUN}`)
   console.log(`  Status file: ${statusPath}`)

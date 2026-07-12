@@ -211,7 +211,7 @@ export const AEON_UNIVERSAL_ROUTER_ABI = [
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'hops', type: 'tuple[]', components: [
-        { name: 'poolType', type: 'uint8'   }, // 0 = vAMM, 1 = CL, 2 = DLMM, 3 = UniV2
+        { name: 'poolType', type: 'uint8'   }, // 0 = vAMM, 1 = CL, 2 = DLMM, 3 = UniV2, 4 = UniV3
         { name: 'pool',     type: 'address' },
         { name: 'tokenIn',  type: 'address' },
         { name: 'tokenOut', type: 'address' },
@@ -1347,6 +1347,130 @@ export const AEON_LP_LOCKER_ABI = [
       { name: 'owner', type: 'address', indexed: true },
       { name: 'lpToken', type: 'address', indexed: true },
       { name: 'amount', type: 'uint256', indexed: false },
+    ],
+  },
+] as const
+
+// Token Launchpad V2 -- deployed 2026-07-11, supersedes AEON_TOKEN_LAUNCHPAD_ABI
+// above (0xf4565380...) same day. No creator/burn/lock choice anymore -- every
+// launch's LP always ends up permanently staked in a real gauge, via a
+// two-step flow (see the contracts.ts comment on AeonTokenLaunchpadV2 for why
+// gauge creation can't be atomic): launch first (LP held by the contract,
+// unstaked), then keeper/launchpad-keeper.js in aeon-protocol-v5 creates the
+// gauge and calls stakeLaunch() shortly after.
+export const AEON_TOKEN_LAUNCHPAD_V2_ABI = [
+  { name: 'launchFeeBps', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'MAX_LAUNCH_FEE_BPS', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'feeRecipient', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'address' }] },
+  { name: 'launchCount', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  {
+    name: 'launches',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: '', type: 'uint256' }],
+    outputs: [
+      { name: 'creator', type: 'address' },
+      { name: 'token', type: 'address' },
+      { name: 'quoteToken', type: 'address' },
+      { name: 'pool', type: 'address' },
+      { name: 'gauge', type: 'address' },
+      { name: 'feeBps', type: 'uint24' },
+      { name: 'totalSupply', type: 'uint256' },
+      { name: 'tokenLiquidity', type: 'uint256' },
+      { name: 'quoteLiquidity', type: 'uint256' },
+      { name: 'liquidity', type: 'uint256' },
+      { name: 'metadataURI', type: 'string' },
+    ],
+  },
+  {
+    name: 'launchTokenWithNativeLiquidity',
+    type: 'function',
+    stateMutability: 'payable',
+    inputs: [{
+      name: 'request',
+      type: 'tuple',
+      components: [
+        { name: 'name', type: 'string' },
+        { name: 'symbol', type: 'string' },
+        { name: 'metadataURI', type: 'string' },
+        { name: 'totalSupply', type: 'uint256' },
+        { name: 'tokenLiquidityAmount', type: 'uint256' },
+        { name: 'minTokenAmount', type: 'uint256' },
+        { name: 'minNativeAmount', type: 'uint256' },
+        { name: 'feeBps', type: 'uint24' },
+        { name: 'deadline', type: 'uint256' },
+      ],
+    }],
+    outputs: [
+      { name: 'token', type: 'address' },
+      { name: 'pool', type: 'address' },
+    ],
+  },
+  {
+    name: 'launchTokenWithTokenLiquidity',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [{
+      name: 'request',
+      type: 'tuple',
+      components: [
+        { name: 'name', type: 'string' },
+        { name: 'symbol', type: 'string' },
+        { name: 'metadataURI', type: 'string' },
+        { name: 'totalSupply', type: 'uint256' },
+        { name: 'tokenLiquidityAmount', type: 'uint256' },
+        { name: 'quoteToken', type: 'address' },
+        { name: 'quoteLiquidityAmount', type: 'uint256' },
+        { name: 'minTokenAmount', type: 'uint256' },
+        { name: 'minQuoteAmount', type: 'uint256' },
+        { name: 'feeBps', type: 'uint24' },
+        { name: 'deadline', type: 'uint256' },
+      ],
+    }],
+    outputs: [
+      { name: 'token', type: 'address' },
+      { name: 'pool', type: 'address' },
+    ],
+  },
+  { name: 'stakeLaunch', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'launchId', type: 'uint256' }], outputs: [] },
+  { name: 'harvestLaunchRewards', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: 'launchId', type: 'uint256' }], outputs: [] },
+  {
+    name: 'TokenLaunched',
+    type: 'event',
+    inputs: [
+      { name: 'launchId', type: 'uint256', indexed: true },
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'token', type: 'address', indexed: true },
+      { name: 'quoteToken', type: 'address', indexed: false },
+      { name: 'pool', type: 'address', indexed: false },
+      { name: 'metadataURI', type: 'string', indexed: false },
+    ],
+  },
+  {
+    name: 'LaunchStaked',
+    type: 'event',
+    inputs: [
+      { name: 'launchId', type: 'uint256', indexed: true },
+      { name: 'gauge', type: 'address', indexed: true },
+      { name: 'liquidity', type: 'uint256', indexed: false },
+    ],
+  },
+  {
+    name: 'LaunchFeePaid',
+    type: 'event',
+    inputs: [
+      { name: 'creator', type: 'address', indexed: true },
+      { name: 'quoteToken', type: 'address', indexed: false },
+      { name: 'amount', type: 'uint256', indexed: false },
+      { name: 'feeRecipient', type: 'address', indexed: false },
+    ],
+  },
+  {
+    name: 'LaunchRewardsHarvested',
+    type: 'event',
+    inputs: [
+      { name: 'launchId', type: 'uint256', indexed: true },
+      { name: 'aeonBurned', type: 'uint256', indexed: false },
     ],
   },
 ] as const
