@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Layers, Waves, Grid3x3, Search, ArrowLeft, Repeat } from 'lucide-react'
+import { Plus, Minus, ChevronDown, Loader2, CheckCircle2, Layers, Waves, Grid3x3, Search, ArrowLeft, Repeat, BarChart3, DollarSign, Activity, Radio } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useBalance, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
@@ -18,6 +18,7 @@ import { TokenIcon } from '@/components/TokenIcon'
 import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, amountsForLiquidity, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
 import { binIdToPrice, dlmmRangeSide, computeSpotDistribution } from '@/lib/dlmmMath'
 import { ConfettiBurst } from '@/components/ConfettiBurst'
+import { GlowPanel, MetricCard, ProtocolBackdrop } from '@/components/ProtocolVisuals'
 
 type PoolMode = 'vAMM' | 'CL' | 'DLMM'
 type Tab = 'add' | 'remove' | 'swap'
@@ -110,14 +111,39 @@ export default function LiquidityPage() {
 
   if (view === 'list') {
     return (
-      <div className="max-w-6xl mx-auto px-4 py-12">
-        <PoolListView onDeposit={handleDeposit} onCreatePool={() => setView('create')} />
+      <div className="relative isolate min-h-screen">
+        <ProtocolBackdrop />
+        <div className="max-w-7xl mx-auto px-4 py-12">
+          <PoolListView onDeposit={handleDeposit} onCreatePool={() => setView('create')} />
+        </div>
       </div>
     )
   }
 
   if (view === 'create') {
     return (
+      <div className="relative isolate min-h-screen">
+        <ProtocolBackdrop />
+        <div className="max-w-2xl mx-auto px-4 py-12">
+          <button
+            onClick={() => setView('list')}
+            className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors mb-4"
+          >
+            <ArrowLeft size={14} /> Back to All Pools
+          </button>
+          <div className="mb-6">
+            <h1 className="font-display font-bold text-2xl text-text-primary">Create <span className="text-aeon-400">Pool</span></h1>
+            <p className="text-sm text-text-muted mt-0.5">Deploy a new vAMM pool for any pair and seed it, directly from your wallet.</p>
+          </div>
+          <CreatePoolView onCreated={handleCreated} />
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative isolate min-h-screen">
+      <ProtocolBackdrop />
       <div className="max-w-2xl mx-auto px-4 py-12">
         <button
           onClick={() => setView('list')}
@@ -125,23 +151,6 @@ export default function LiquidityPage() {
         >
           <ArrowLeft size={14} /> Back to All Pools
         </button>
-        <div className="mb-6">
-          <h1 className="font-display font-bold text-2xl text-text-primary">Create Pool</h1>
-          <p className="text-sm text-text-muted mt-0.5">Deploy a new vAMM pool for any pair and seed it, directly from your wallet.</p>
-        </div>
-        <CreatePoolView onCreated={handleCreated} />
-      </div>
-    )
-  }
-
-  return (
-    <div className="max-w-2xl mx-auto px-4 py-12">
-      <button
-        onClick={() => setView('list')}
-        className="flex items-center gap-1.5 text-sm text-text-muted hover:text-text-primary transition-colors mb-4"
-      >
-        <ArrowLeft size={14} /> Back to All Pools
-      </button>
 
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -159,6 +168,7 @@ export default function LiquidityPage() {
       {mode === 'CL' ? <ClLiquidity initialPool={initialPool} /> :
        mode === 'DLMM' ? <DlmmLiquidity initialPool={initialPool} /> :
        <VammLiquidity initialPool={initialPool} />}
+      </div>
     </div>
   )
 }
@@ -276,6 +286,9 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
 
   const pools = usePoolListData()
   const poolCount = pools.length
+  const totalTvl = pools.reduce((sum, pool) => sum + (pool.tvlUsd ?? 0), 0)
+  const volume24h = pools.reduce((sum, pool) => sum + (pool.volUsd ?? 0), 0)
+  const feeGeneratingPools = pools.filter(pool => (pool.feesUsd ?? 0) > 0).length
 
   const filtered = pools.filter(p => {
     if (filter !== 'ALL' && p.type !== filter) return false
@@ -290,8 +303,11 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h1 className="font-display font-bold text-2xl text-text-primary">Liquidity Pools</h1>
-          <p className="text-sm text-text-muted mt-0.5">There are {poolCount} pools listed currently</p>
+          <div className="inline-flex items-center gap-2 text-2xs font-mono uppercase tracking-[0.2em] text-blue-400 mb-3">
+            <Radio size={12} /> Live liquidity network
+          </div>
+          <h1 className="font-display font-bold text-3xl sm:text-4xl text-text-primary">Liquidity <span className="text-aeon-400">Pools</span></h1>
+          <p className="text-sm text-text-muted mt-1">Explore every vAMM, concentrated-liquidity, and DLMM market in one place.</p>
         </div>
         <div className="flex items-center gap-3">
           <div className="relative">
@@ -300,7 +316,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search pools or tokens…"
-              className="bg-bg-raised border border-bg-border rounded-xl pl-9 pr-3 py-2 text-sm w-full sm:w-64 text-text-primary placeholder-text-muted focus:outline-none focus:border-aeon-400/40"
+              className="bg-bg-surface/80 border border-bg-border rounded-xl pl-9 pr-3 py-2.5 text-sm w-full sm:w-72 text-text-primary placeholder-text-muted focus:outline-none focus:border-aeon-400/40"
             />
           </div>
           <button onClick={onCreatePool} className="btn-primary text-sm py-2 px-4 flex items-center gap-1.5 whitespace-nowrap">
@@ -309,10 +325,17 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
         </div>
       </div>
 
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <MetricCard label="Total Pools" value={String(poolCount)} detail="all liquidity engines" icon={<Layers size={16} />} accent="blue" />
+        <MetricCard label="Total TVL" value={fmtUsd(totalTvl)} detail="live reserve value" icon={<DollarSign size={16} />} accent="emerald" />
+        <MetricCard label="Volume 24h" value={fmtUsd(volume24h)} detail="on-chain swap events" icon={<BarChart3 size={16} />} accent="aeon" />
+        <MetricCard label="Fee Markets" value={String(feeGeneratingPools)} detail="earning fees today" icon={<Activity size={16} />} accent="violet" />
+      </div>
+
       {/* CL/DLMM filter options restored 2026-07-12 alongside the
           CASHCAT/AEON/ETH/USDG subset of CL_POOLS/DLMM_POOLS -- see that
           comment in contracts.ts for the full history. */}
-      <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-4 w-fit">
+      <div className="flex gap-1 p-1 bg-bg-surface/80 border border-bg-border rounded-xl mb-4 w-fit shadow-[0_0_28px_-18px_rgba(255,184,0,0.45)]">
         {(['ALL', 'vAMM', 'CL', 'DLMM'] as ListFilter[]).map(f => (
           <button
             key={f}
@@ -324,7 +347,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
         ))}
       </div>
 
-      <div className="card overflow-x-auto">
+      <GlowPanel accent="aeon" className="overflow-x-auto">
         <table className="w-full text-sm min-w-[980px]">
           <thead>
             <tr className="border-b border-bg-border text-left text-xs font-mono text-text-muted uppercase tracking-wider">
@@ -379,7 +402,7 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
             )}
           </tbody>
         </table>
-      </div>
+      </GlowPanel>
     </div>
   )
 }

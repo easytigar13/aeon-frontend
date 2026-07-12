@@ -1,7 +1,7 @@
 'use client'
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Search, Copy, Check, TrendingUp, TrendingDown } from 'lucide-react'
+import { Search, Copy, Check, TrendingUp, TrendingDown, Coins, Layers, Activity, Radio } from 'lucide-react'
 import { TOKENS, POOLS, CL_POOLS, DLMM_POOLS } from '@/config/contracts'
 import { usePrices } from '@/hooks/usePrices'
 import { useDexTokenInfo } from '@/hooks/useDexTokenInfo'
@@ -10,6 +10,7 @@ import { useAllPools } from '@/hooks/useAllPools'
 import { TokenIcon, ChainBadge } from '@/components/TokenIcon'
 import { Sparkline } from '@/components/Sparkline'
 import { AddToWalletButton } from '@/components/AddToWalletButton'
+import { GlowPanel, MetricCard, ProtocolBackdrop } from '@/components/ProtocolVisuals'
 
 function fmtPrice(p: number | null): string {
   if (p === null) return '—'
@@ -58,6 +59,10 @@ export default function TokensPage() {
     return key.toLowerCase().includes(q) || t.name.toLowerCase().includes(q) || t.address.toLowerCase().includes(q)
   })
 
+  const totalPools = new Set([...POOLS, ...CL_POOLS, ...DLMM_POOLS, ...discovered].map(p => p.address.toLowerCase())).size
+  const pricedTokens = entries.filter(([key]) => (prices[key] ?? 0) > 0).length
+  const activeTokens = Object.values(poolCountBySymbol).filter(count => count > 0).length
+
   function copyAddr(addr: string) {
     navigator.clipboard.writeText(addr)
     setCopied(addr)
@@ -65,10 +70,14 @@ export default function TokensPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg-base bg-grid-pattern bg-grid">
-      <div className="max-w-6xl mx-auto px-4 py-12">
+    <div className="relative isolate min-h-screen">
+      <ProtocolBackdrop />
+      <div className="max-w-7xl mx-auto px-4 py-12">
         {/* Header */}
         <div className="mb-8">
+          <div className="inline-flex items-center gap-2 text-2xs font-mono uppercase tracking-[0.2em] text-violet-400 mb-3">
+            <Radio size={12} /> Live asset directory
+          </div>
           <h1 className="font-display font-bold text-3xl sm:text-4xl text-text-primary mb-2">
             Tradable <span className="text-aeon-400">Tokens</span>
           </h1>
@@ -77,25 +86,30 @@ export default function TokensPage() {
           </p>
         </div>
 
-        {/* Search */}
-        <div className="relative mb-6">
-          <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted" />
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search by symbol, name, or contract address..."
-            className="w-full bg-bg-surface border border-bg-border rounded-xl2 pl-11 pr-4 py-3 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-aeon-400/50 transition-colors"
-          />
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <MetricCard label="Listed Tokens" value={String(entries.length)} detail="known protocol assets" icon={<Coins size={16} />} accent="aeon" />
+          <MetricCard label="Liquidity Pools" value={String(totalPools)} detail="across every pool type" icon={<Layers size={16} />} accent="blue" />
+          <MetricCard label="Live Prices" value={String(pricedTokens)} detail="resolved on-chain" icon={<TrendingUp size={16} />} accent="emerald" />
+          <MetricCard label="Active Assets" value={String(activeTokens)} detail="with available markets" icon={<Activity size={16} />} accent="violet" />
         </div>
+
+        {/* Search */}
+        <GlowPanel accent="aeon" className="p-3 mb-6">
+          <div className="relative">
+            <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              placeholder="Search by symbol, name, or contract address..."
+              className="w-full bg-bg-base/70 border border-bg-border rounded-xl2 pl-11 pr-4 py-3 text-sm text-text-primary placeholder:text-text-muted outline-none focus:border-aeon-400/50 transition-colors"
+            />
+          </div>
+        </GlowPanel>
 
         {/* Stats strip */}
         <div className="flex items-center gap-4 mb-8 text-xs font-mono text-text-muted">
-          <span>{entries.length} tokens</span>
-          <span className="w-1 h-1 rounded-full bg-text-muted" />
-          <span>{new Set(POOLS.map(p => p.address)).size} pools</span>
-          <span className="w-1 h-1 rounded-full bg-text-muted" />
           <span className="flex items-center gap-1.5">
-            <ChainBadge size={12} /> Robinhood Chain
+            <ChainBadge size={12} /> Robinhood Chain Â· live on-chain pricing and trade history
           </span>
         </div>
 
@@ -130,14 +144,18 @@ export default function TokensPage() {
                   ? 'hover:border-emerald-400/40 hover:shadow-[0_0_32px_-14px_rgba(16,185,129,0.4)]'
                   : 'hover:border-red-400/40 hover:shadow-[0_0_32px_-14px_rgba(248,113,113,0.4)]')
               : 'hover:border-aeon-400/40 hover:shadow-[0_0_32px_-14px_rgba(255,184,0,0.35)]'
+            const topGlowClass = change !== null
+              ? (positive ? 'from-emerald-500/20' : 'from-red-500/20')
+              : 'from-aeon-400/20'
 
             return (
               <div
                 key={key}
-                className={`card group flex flex-col overflow-hidden ${glowClass}`}
+                className={`card group relative flex flex-col overflow-hidden border-bg-border/80 hover:-translate-y-1 transition-all duration-300 ${glowClass}`}
               >
+                <div className={`absolute inset-x-0 top-0 h-20 bg-gradient-to-b opacity-40 pointer-events-none ${topGlowClass} to-transparent`} />
                 {/* Main info row */}
-                <div className="flex items-start justify-between p-4 pb-3">
+                <div className="relative flex items-start justify-between p-4 pb-3">
                   <div className="flex items-center gap-3">
                     <div className="relative">
                       <TokenIcon symbol={key} size={40} imageUrl={info?.imageUrl} />

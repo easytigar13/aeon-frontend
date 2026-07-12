@@ -1,8 +1,9 @@
 'use client'
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { Activity, Copy, Check, TrendingUp, AlertTriangle, Wallet, ArrowRight } from 'lucide-react'
+import { Activity, Copy, Check, TrendingUp, AlertTriangle, Wallet, ArrowRight, Layers, CheckCircle, XCircle, Clock, Zap } from 'lucide-react'
 import { clsx } from 'clsx'
+import { GlowPanel, MetricCard, ProtocolBackdrop, type ProtocolAccent } from '@/components/ProtocolVisuals'
 
 interface Opportunity {
   pair: string
@@ -86,13 +87,17 @@ export default function BotPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg-base bg-grid-pattern bg-grid">
-      <div className="max-w-5xl mx-auto px-4 py-12">
+    <div className="relative isolate min-h-screen">
+      <ProtocolBackdrop />
+      <div className="max-w-7xl mx-auto px-4 py-12">
         {/* Header */}
         <div className="mb-8 flex items-center justify-between flex-wrap gap-4">
           <div>
-            <h1 className="font-display font-bold text-3xl sm:text-4xl text-text-primary mb-2">Arb Keeper</h1>
-            <p className="text-text-secondary">
+            <div className="inline-flex items-center gap-2 text-2xs font-mono uppercase tracking-[0.2em] text-emerald-400 mb-3">
+              <Zap size={12} /> Autonomous execution layer
+            </div>
+            <h1 className="font-display font-bold text-3xl sm:text-4xl text-text-primary mb-2">Arb <span className="text-aeon-400">Keeper</span></h1>
+            <p className="text-text-secondary max-w-3xl">
               Scans every AEON pool for price-equalization opportunities and executes them atomically
               through the on-chain AeonArbKeeper contract — it can never execute at a loss.
             </p>
@@ -121,7 +126,7 @@ export default function BotPage() {
         {hasFile && (
           <>
             {/* Wallet + fund box */}
-            <div className="card p-6 mb-6">
+            <GlowPanel accent="blue" className="p-6 mb-6">
               <div className="flex items-center gap-2 mb-3 text-text-secondary text-sm font-mono uppercase tracking-wider">
                 <Wallet size={14} /> Keeper Wallet
               </div>
@@ -139,7 +144,7 @@ export default function BotPage() {
                 This wallet's private key is held only by the operator — the website has no access to it
                 and cannot move these funds.
               </p>
-            </div>
+            </GlowPanel>
 
             {/* Stat row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
@@ -157,7 +162,7 @@ export default function BotPage() {
 
             {/* Balances + cumulative profit */}
             <div className="grid md:grid-cols-2 gap-6 mb-6">
-              <div className="card p-6">
+              <GlowPanel accent="blue" className="p-6">
                 <div className="text-text-secondary text-sm font-mono uppercase tracking-wider mb-4">Wallet Balances</div>
                 <div className="space-y-2">
                   {visibleBalances.length > 0 ? visibleBalances.map(([sym, bal]) => {
@@ -177,8 +182,8 @@ export default function BotPage() {
                     )
                   }) : <div className="text-text-muted text-sm">No balances yet</div>}
                 </div>
-              </div>
-              <div className="card p-6">
+              </GlowPanel>
+              <GlowPanel accent="emerald" className="p-6">
                 <div className="text-text-secondary text-sm font-mono uppercase tracking-wider mb-4 flex items-center gap-2">
                   <TrendingUp size={14} /> Cumulative Profit
                 </div>
@@ -190,11 +195,11 @@ export default function BotPage() {
                     </div>
                   )) : <div className="text-text-muted text-sm">No profit recorded yet</div>}
                 </div>
-              </div>
+              </GlowPanel>
             </div>
 
             {/* Current opportunities */}
-            <div className="card p-6 mb-6">
+            <GlowPanel accent="aeon" className="p-6 mb-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="text-text-secondary text-sm font-mono uppercase tracking-wider flex items-center gap-2">
                   <Activity size={14} /> Current Opportunities
@@ -219,10 +224,10 @@ export default function BotPage() {
                   ))}
                 </div>
               ) : <div className="text-text-muted text-sm">No profitable opportunities right now — that's normal, arbitrage is transient.</div>}
-            </div>
+            </GlowPanel>
 
             {/* Recent arbs */}
-            <div className="card p-6">
+            <GlowPanel accent="violet" className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="text-text-secondary text-sm font-mono uppercase tracking-wider">Recent Activity</div>
                 <Link href="/bot/trades" className="inline-flex items-center gap-1 text-aeon-400 hover:text-aeon-300 text-xs font-medium">
@@ -256,7 +261,7 @@ export default function BotPage() {
                   ))}
                 </div>
               ) : <div className="text-text-muted text-sm">No activity yet.</div>}
-            </div>
+            </GlowPanel>
           </>
         )}
       </div>
@@ -265,10 +270,12 @@ export default function BotPage() {
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="card p-4">
-      <div className="text-text-muted text-xs font-mono uppercase tracking-wider mb-1">{label}</div>
-      <div className="text-text-primary font-display font-bold text-xl">{value}</div>
-    </div>
-  )
+  const visuals: Record<string, { detail: string; icon: React.ReactNode; accent: ProtocolAccent }> = {
+    'Pools Monitored': { detail: 'live route graph', icon: <Layers size={16} />, accent: 'blue' },
+    'Arbs Executed': { detail: 'confirmed cycles', icon: <CheckCircle size={16} />, accent: 'emerald' },
+    'Arbs Failed': { detail: 'atomic reverts', icon: <XCircle size={16} />, accent: 'red' },
+    'Scan Interval': { detail: 'continuous scanning', icon: <Clock size={16} />, accent: 'violet' },
+  }
+  const v = visuals[label] ?? { detail: 'live metric', icon: <Activity size={16} />, accent: 'aeon' as const }
+  return <MetricCard label={label} value={value} detail={v.detail} icon={v.icon} accent={v.accent} />
 }
