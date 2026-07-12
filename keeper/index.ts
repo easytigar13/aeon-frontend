@@ -61,6 +61,7 @@
 import {
   createPublicClient,
   createWalletClient,
+  fallback,
   http,
   formatUnits,
   formatEther,
@@ -91,12 +92,24 @@ const tradesLogPath = process.env.TRADES_LOG_FILE ?? fileURLToPath(new URL('trad
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const RPC          = process.env.RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'
+const PRIMARY_RPC  = process.env.RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'
+const RPC_URLS     = Array.from(new Set([
+  ...((process.env.RPC_URLS ?? '').split(',').map(url => url.trim()).filter(Boolean)),
+  PRIMARY_RPC,
+  // Independent read/write proxy on the chain's Blockscout deployment. The
+  // official endpoint remains first; this is only used when it is unreachable.
+  'https://robinhoodchain.blockscout.com/api/eth-rpc',
+]))
 const PK            = (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`
 const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT ?? '0')  // consider every positive quote; execution still requires profit above the buffered gas cost
 const INTERVAL_MS    = parseInt(process.env.INTERVAL_MS ?? '1000')
 const DRY_RUN         = process.env.DRY_RUN === 'true'
 const DEADLINE_SECONDS = 120  // execution must land within 2 min of being sized, else it just reverts (no funds lost)
+const configuredBalanceUsageBps = BigInt(process.env.MAX_BALANCE_USAGE_BPS ?? '9900')
+const MAX_BALANCE_USAGE_BPS = configuredBalanceUsageBps < 1n ? 1n : configuredBalanceUsageBps > 10_000n ? 10_000n : configuredBalanceUsageBps
+const ROUTE_FAILURE_THRESHOLD = parseInt(process.env.ROUTE_FAILURE_THRESHOLD ?? '2')
+const ROUTE_COOLDOWN_MS = parseInt(process.env.ROUTE_COOLDOWN_MS ?? '60000')
+const ROUTE_MAX_COOLDOWN_MS = parseInt(process.env.ROUTE_MAX_COOLDOWN_MS ?? '900000')
 
 // Cross-venue (OpenOcean / 1inch) scan runs far less often than the internal
 // pool scan -- it costs real API calls (rate-limited, especially 1inch),
@@ -326,8 +339,12 @@ const ARB_KEEPER_ABI = [
 // ─── Clients ──────────────────────────────────────────────────────────────────
 
 const account = privateKeyToAccount(PK)
-const pub = createPublicClient({ chain: robinhoodChain, transport: http(RPC) })
-const wal = createWalletClient({ account, chain: robinhoodChain, transport: http(RPC) })
+// Keep per-endpoint failure detection short: discovery performs hundreds of
+// reads, so an unhealthy primary must fail over in seconds, not multiply an
+// 8s timeout across the entire pool set.
+const rpcTransport = fallback(RPC_URLS.map(url => http(url, { timeout: 3_000, retryCount: 0 }))) as unknown as ReturnType<typeof http>
+const pub = createPublicClient({ chain: robinhoodChain, transport: rpcTransport })
+const wal = createWalletClient({ account, chain: robinhoodChain, transport: rpcTransport })
 
 async function discoverUniswapPools(): Promise<number> {
   const ownPools = [...ARB_POOLS]
@@ -760,7 +777,7 @@ function sizingDivisor(kind: PoolKind): bigint {
 // simple-cycle enumeration up to MAX_HOPS to blow up combinatorially.
 const MAX_DFS_VISITS = 200_000
 
-function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKENS): ArbOpp[] {
+function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKENS, walletBalance: bigint): ArbOpp[] {
   const opps: ArbOpp[] = []
   const seen = new Set<string>()
   const tokenIn = TOKENS[baseSym]
@@ -772,7 +789,9 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
     if (seen.has(key)) return
     seen.add(key)
 
-    const maxIn = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
+    const poolCap = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
+    const walletCap = (walletBalance * MAX_BALANCE_USAGE_BPS) / 10_000n
+    const maxIn = poolCap < walletCap ? poolCap : walletCap
     const { amountIn, profit } = optimalTrade(hops, maxIn)
     if (profit <= 0n || amountIn <= 0n) return
 
@@ -831,7 +850,7 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
 // (output value minus input value) via the same ternary-search shape as
 // optimalTrade, just with a different objective function, since input and
 // output are different tokens here and can't be subtracted directly.
-function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKENS): SettlementOpp[] {
+function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKENS, walletBalance: bigint): SettlementOpp[] {
   const opps: SettlementOpp[] = []
   const seen = new Set<string>()
   let visits = 0
@@ -862,7 +881,9 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
       return convertSpot(out, endPath!) - convertSpot(amountIn, startPath!)
     }
 
-    const maxIn = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
+    const poolCap = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
+    const walletCap = (walletBalance * MAX_BALANCE_USAGE_BPS) / 10_000n
+    const maxIn = poolCap < walletCap ? poolCap : walletCap
     if (maxIn <= 1n) return
     let lo = 0n, hi = maxIn
     for (let i = 0; i < 100; i++) {
@@ -1209,6 +1230,8 @@ interface ExecutedArb {
   txHash?: string
   status: 'success' | 'failed' | 'dry-run'
   error?: string
+  failureCategory?: FailureCategory
+  failureStage?: FailureStage
   route: 'internal' | AggregatorSource
   venues?: string
 }
@@ -1222,6 +1245,85 @@ let consecutiveFailures = 0
 let pausedUntil = 0
 const MAX_CONSECUTIVE_FAILURES = parseInt(process.env.MAX_CONSECUTIVE_FAILURES ?? '3')
 const FAILURE_PAUSE_MS = parseInt(process.env.FAILURE_PAUSE_MS ?? '300000')
+
+type FailureCategory = 'stale_quote' | 'slippage' | 'allowance' | 'insufficient_balance' | 'rpc' | 'expired' | 'invalid_route' | 'venue_revert' | 'unknown'
+type FailureStage = 'quote' | 'approval' | 'gas_estimate' | 'simulation' | 'submission' | 'confirmation'
+
+interface DecodedFailure {
+  category: FailureCategory
+  message: string
+  routeScoped: boolean
+}
+
+interface RouteHealth {
+  failures: number
+  cooldownUntil: number
+  lastCategory: FailureCategory
+}
+
+const routeHealth = new Map<string, RouteHealth>()
+
+function routeKey(hops: HopCandidate[]): string {
+  return hops.map(h => `${h.tokenInSym}>${h.pool.pool.address.toLowerCase()}>${h.tokenOutSym}`).join('|')
+}
+
+function decodeFailure(err: any): DecodedFailure {
+  const parts = [err?.shortMessage, err?.details, err?.message, err?.cause?.shortMessage, err?.cause?.message]
+    .filter(Boolean).map(String)
+  const message = parts[0] ?? String(err)
+  const text = parts.join(' | ').toLowerCase()
+
+  if (text.includes('0xa5adf0af') || text.includes('notprofitable') || text.includes('0xbb2875c3') || text.includes('insufficientoutput') || text.includes('final simulation returned less')) {
+    return { category: 'stale_quote', message: 'Route no longer clears its required output/profit floor', routeScoped: true }
+  }
+  if (text.includes('slippage') || text.includes('amountoutmin') || text.includes('too little received')) {
+    return { category: 'slippage', message: 'Output moved below the protected minimum', routeScoped: true }
+  }
+  if (text.includes('allowance') || text.includes('transfer amount exceeds allowance') || text.includes('safe transfer from') || text.includes('stf')) {
+    return { category: 'allowance', message: 'Token approval or transferFrom failed', routeScoped: false }
+  }
+  if (text.includes('insufficient balance') || text.includes('exceeds balance')) {
+    return { category: 'insufficient_balance', message: 'Keeper balance is below the executable input', routeScoped: false }
+  }
+  if (text.includes('0x203d82d8') || text.includes('expired') || text.includes('deadline')) {
+    return { category: 'expired', message: 'Execution deadline expired before inclusion', routeScoped: true }
+  }
+  if (text.includes('0x84e505d2') || text.includes('0xbfa9e1b5') || text.includes('invalidroute') || text.includes('unknownpooltype') || text.includes('notcyclic')) {
+    return { category: 'invalid_route', message: 'Route shape or venue type is not executable', routeScoped: true }
+  }
+  if (text.includes('httprequesterror') || text.includes('http request failed') || text.includes('fetch failed') || text.includes('enotfound') || text.includes('timeout') || text.includes('429')) {
+    return { category: 'rpc', message: 'RPC request failed or timed out', routeScoped: false }
+  }
+  if (text.includes('revert') || text.includes('execution reverted')) {
+    return { category: 'venue_revert', message: message.slice(0, 240), routeScoped: true }
+  }
+  return { category: 'unknown', message: message.slice(0, 240), routeScoped: false }
+}
+
+function routeCooldownRemaining(hops: HopCandidate[]): number {
+  const health = routeHealth.get(routeKey(hops))
+  if (!health || health.cooldownUntil <= Date.now()) return 0
+  return health.cooldownUntil - Date.now()
+}
+
+function registerRouteFailure(hops: HopCandidate[], failure: DecodedFailure) {
+  if (!failure.routeScoped) return
+  const key = routeKey(hops)
+  const previous = routeHealth.get(key)
+  const failures = (previous?.failures ?? 0) + 1
+  let cooldownUntil = previous?.cooldownUntil ?? 0
+  if (failures >= ROUTE_FAILURE_THRESHOLD) {
+    const exponent = Math.min(6, failures - ROUTE_FAILURE_THRESHOLD)
+    const duration = Math.min(ROUTE_MAX_COOLDOWN_MS, ROUTE_COOLDOWN_MS * (2 ** exponent))
+    cooldownUntil = Date.now() + duration
+    console.warn(`   Route cooldown: ${Math.ceil(duration / 1000)}s after ${failures} ${failure.category} failures`)
+  }
+  routeHealth.set(key, { failures, cooldownUntil, lastCategory: failure.category })
+}
+
+function clearRouteFailure(hops: HopCandidate[]) {
+  routeHealth.delete(routeKey(hops))
+}
 
 // Resume counters across restarts instead of losing history every deploy/reboot.
 try {
@@ -1270,6 +1372,10 @@ async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Reco
     intervalMs: INTERVAL_MS,
     tickMs,
     poolsMonitored: ARB_POOLS.length,
+    rpcEndpointCount: RPC_URLS.length,
+    activeRouteCooldowns: Array.from(routeHealth.entries())
+      .filter(([, health]) => health.cooldownUntil > Date.now())
+      .map(([route, health]) => ({ route, failures: health.failures, category: health.lastCategory, until: new Date(health.cooldownUntil).toISOString() })),
     balances,
     lastOpportunities: lastOpps.slice(0, 20).map(o => ({
       pair: o.label,
@@ -1404,6 +1510,8 @@ async function quoteMixedRouteExact(hops: HopCandidate[], amountIn: bigint): Pro
 async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint): Promise<ExecResult> {
   if (Date.now() < pausedUntil) return 'skipped'
   const { tokenIn, hops: hopCandidates, amountIn, profitPct, label: pairLabel } = opp
+  if (routeCooldownRemaining(hopCandidates) > 0) return 'skipped'
+  let failureStage: FailureStage = 'quote'
   const venues = describeVenuePath(hopCandidates)
   const exactOut = await quoteMixedRouteExact(hopCandidates, amountIn)
   const profitRaw = exactOut > amountIn ? exactOut - amountIn : 0n
@@ -1461,6 +1569,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
   try {
     let approvalGasWei = 0n
     if (needsApproval) {
+      failureStage = 'approval'
       console.log('   → approve...')
       const hApprove = await wal.writeContract({
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.UniversalRouter, MAX_UINT256],
@@ -1469,6 +1578,17 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
       approvalGasWei = approvalReceipt.gasUsed * approvalReceipt.effectiveGasPrice
     }
 
+    // Refresh every venue quote after any approval transaction and directly
+    // before simulation. The opening-tick quote is ranking data only.
+    failureStage = 'quote'
+    const finalQuotedOut = await quoteMixedRouteExact(hopCandidates, amountIn)
+    const finalQuotedProfit = finalQuotedOut > amountIn ? finalQuotedOut - amountIn : 0n
+    if (finalQuotedProfit < requiredProfit) {
+      console.log('   Fresh executable quote no longer clears gas; not submitting')
+      return needsApproval ? 'attempted' : 'skipped'
+    }
+
+    failureStage = 'gas_estimate'
     const gasPrice = await pub.getGasPrice()
     const executionGas = await pub.estimateContractGas({
       account: account.address,
@@ -1480,23 +1600,29 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     if (exactGasInToken === null) throw new Error(`cannot convert exact gas cost into ${tokenIn.symbol}`)
     requiredProfit = exactGasInToken + 1n
     amountOutMin = amountIn + requiredProfit
-    if (profitRaw < requiredProfit) {
+    if (finalQuotedProfit < requiredProfit) {
       console.log('   Exact gas estimate removed profitability; not submitting')
       return 'attempted'
     }
 
     console.log('   → simulate swapExactTokensForTokens...')
-    await pub.simulateContract({
+    failureStage = 'simulation'
+    const simulation = await pub.simulateContract({
       account,
       address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
       args: [hops, amountIn, amountOutMin, account.address, deadline],
     })
+    if (typeof simulation.result === 'bigint' && simulation.result < amountOutMin) {
+      throw new Error('final simulation returned less than amountOutMin')
+    }
 
+    failureStage = 'submission'
     console.log('   → swapExactTokensForTokens...')
     const hSwap = await wal.writeContract({
       address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
       args: [hops, amountIn, amountOutMin, account.address, deadline],
     })
+    failureStage = 'confirmation'
     const receipt = await pub.waitForTransactionReceipt({ hash: hSwap })
 
     if (receipt.status === 'success') {
@@ -1511,6 +1637,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
       console.log(`   ✅ ARB COMPLETE (CL/DLMM route) — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hSwap}`)
       totalExecuted++
       consecutiveFailures = 0
+      clearRouteFailure(hopCandidates)
       const prev = parseFloat(cumulativeProfit[tokenIn.symbol] ?? '0')
       cumulativeProfit[tokenIn.symbol] = (prev + parseFloat(formatUnits(realizedNet, tokenIn.decimals))).toString()
       recordArb({
@@ -1524,10 +1651,14 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     }
     return 'attempted'
   } catch (err: any) {
-    const message = err?.shortMessage ?? err?.message ?? String(err)
+    const failure = decodeFailure(err)
+    const message = `[${failure.category}/${failureStage}] ${failure.message}`
+    registerRouteFailure(hopCandidates, failure)
     console.error(`   ❌ ARB FAILED (no funds lost -- amountOutMin reverts atomically): ${message}`)
     totalFailed++
-    consecutiveFailures++
+    // Route-local failures are isolated by their own cooldown and must not
+    // pause unrelated routes through the global circuit breaker.
+    if (!failure.routeScoped) consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
@@ -1536,7 +1667,8 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     recentErrors = recentErrors.slice(0, 5)
     recordArb({
       time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
-      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message, route: 'internal', venues,
+      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
+      failureCategory: failure.category, failureStage, route: 'internal', venues,
     })
     return 'attempted'
   }
@@ -1545,6 +1677,8 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
 async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint): Promise<ExecResult> {
   if (Date.now() < pausedUntil) return 'skipped'
   const { tokenIn, hops: hopCandidates, amountIn, profitRaw, profitPct, label: pairLabel } = opp
+  if (routeCooldownRemaining(hopCandidates) > 0) return 'skipped'
+  let failureStage: FailureStage = 'quote'
   const venues = describeVenuePath(hopCandidates)
 
   // AeonArbKeeper (below) is vAMM/UniV2-only -- any route touching a CL or
@@ -1618,9 +1752,11 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
   const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
 
   try {
+    failureStage = 'approval'
     console.log('   → approve...')
     const approvalGasWei = await ensureKeeperAllowance(tokenIn.address, needsApproval)
 
+    failureStage = 'gas_estimate'
     const gasPrice = await pub.getGasPrice()
     const executionGas = await pub.estimateContractGas({
       account: account.address,
@@ -1640,17 +1776,23 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     // approval confirms. A failed simulation costs no execution gas and
     // prevents submitting a route whose reserves already moved.
     console.log('   → simulate executeArb...')
-    await pub.simulateContract({
+    failureStage = 'simulation'
+    const simulation = await pub.simulateContract({
       account,
       address: CONTRACTS.ArbKeeper, abi: ARB_KEEPER_ABI, functionName: 'executeArb',
       args: [hops, amountIn, requiredProfit, deadline],
     })
+    if (typeof simulation.result === 'bigint' && simulation.result < requiredProfit) {
+      throw new Error('final simulation returned less than requiredProfit')
+    }
 
+    failureStage = 'submission'
     console.log('   → executeArb...')
     const hExec = await wal.writeContract({
       address: CONTRACTS.ArbKeeper, abi: ARB_KEEPER_ABI, functionName: 'executeArb',
       args: [hops, amountIn, requiredProfit, deadline],
     })
+    failureStage = 'confirmation'
     const receipt = await pub.waitForTransactionReceipt({ hash: hExec })
 
     if (receipt.status === 'success') {
@@ -1665,6 +1807,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
       console.log(`   ✅ ARB COMPLETE — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hExec}`)
       totalExecuted++
       consecutiveFailures = 0
+      clearRouteFailure(hopCandidates)
       const prev = parseFloat(cumulativeProfit[tokenIn.symbol] ?? '0')
       cumulativeProfit[tokenIn.symbol] = (prev + parseFloat(formatUnits(realizedNet, tokenIn.decimals))).toString()
       recordArb({
@@ -1678,10 +1821,12 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     }
     return 'attempted'
   } catch (err: any) {
-    const message = err?.shortMessage ?? err?.message ?? String(err)
+    const failure = decodeFailure(err)
+    const message = `[${failure.category}/${failureStage}] ${failure.message}`
+    registerRouteFailure(hopCandidates, failure)
     console.error(`   ❌ ARB FAILED (no funds lost -- the contract reverts atomically): ${message}`)
     totalFailed++
-    consecutiveFailures++
+    if (!failure.routeScoped) consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
@@ -1690,7 +1835,8 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     recentErrors = recentErrors.slice(0, 5)
     recordArb({
       time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
-      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message, route: 'internal', venues,
+      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
+      failureCategory: failure.category, failureStage, route: 'internal', venues,
     })
     return 'attempted'
   }
@@ -2804,7 +2950,7 @@ async function tick() {
   }
   const expectedNetUsdg = (opp: ArbOpp) => valueInUsdg(opp.tokenIn.symbol, opp.profitRaw, graph) - gasUsdgFor(opp)
   const opps = bases
-    .flatMap(baseSym => findArbs(graph, baseSym))
+    .flatMap(baseSym => findArbs(graph, baseSym, searchBalances[baseSym] ?? 0n))
     .sort((a, b) => {
       const aValue = expectedNetUsdg(a)
       const bValue = expectedNetUsdg(b)
@@ -2835,6 +2981,7 @@ async function tick() {
     }
     for (const opp of opps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
       if (opp.profitPct < MIN_PROFIT_PCT) break   // sorted descending -- nothing further qualifies either
+      if (routeCooldownRemaining(opp.hops) > 0) continue
       const result = await executeArb(opp, graph, availableEthForWrap)
       if (result === 'attempted') {
         anyAttempted = true
@@ -2851,7 +2998,7 @@ async function tick() {
   // one already fired above this tick.
   if (!anyAttempted && !SAME_TOKEN_ONLY) {
     const settlementOpps = bases
-      .flatMap(baseSym => findSettlementRoutes(graph, baseSym))
+      .flatMap(baseSym => findSettlementRoutes(graph, baseSym, searchBalances[baseSym] ?? 0n))
       .sort((a, b) => {
         if (b.profitUsdg > a.profitUsdg) return 1
         if (b.profitUsdg < a.profitUsdg) return -1
@@ -2875,6 +3022,7 @@ async function tick() {
       }
       for (const opp of settlementOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
         if (opp.profitPct < MIN_PROFIT_PCT) break
+        if (routeCooldownRemaining(opp.hops) > 0) continue
         const result = await executeSettlementSwap(opp, graph, availableEthForWrap)
         if (result === 'attempted') { anyAttempted = true; break }
       }
@@ -2968,6 +3116,9 @@ async function main() {
   lastPoolRefresh = Date.now()
   console.log(`AEON Arb Keeper`)
   console.log(`  Keeper address: ${account.address}`)
+  console.log(`  RPC endpoints with automatic failover: ${RPC_URLS.length}`)
+  console.log(`  Max wallet balance per opportunity: ${Number(MAX_BALANCE_USAGE_BPS) / 100}%`)
+  console.log(`  Route cooldown: after ${ROUTE_FAILURE_THRESHOLD} failures, ${ROUTE_COOLDOWN_MS}ms base`)
   console.log(`  Settlement tokens: ${BASE_TOKEN_OVERRIDE || SETTLEMENT_TOKENS.join(', ')} (AEON preferred on equal net profit)`)
   console.log(`  Same-token cycles only: ${SAME_TOKEN_ONLY}`)
   console.log(`  Atomic execution only: ${ATOMIC_ONLY}`)
