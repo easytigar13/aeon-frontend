@@ -11,6 +11,9 @@ interface Trade {
   amountIn: string
   profit: string
   profitPct: number
+  grossProfit?: string
+  gasCost?: string
+  gasCostEth?: string
   txHash?: string
   status: 'success' | 'failed' | 'dry-run'
   error?: string
@@ -112,8 +115,9 @@ export default function BotTradesPage() {
                   <th className="text-left px-4 py-3">Pair</th>
                   <th className="text-left px-4 py-3">Route</th>
                   <th className="text-right px-4 py-3">Amount In</th>
-                  <th className="text-right px-4 py-3">Profit</th>
+                  <th className="text-right px-4 py-3">Net Profit</th>
                   <th className="text-right px-4 py-3">Profit %</th>
+                  <th className="text-right px-4 py-3">Gas</th>
                   <th className="text-left px-4 py-3">Status</th>
                   <th className="text-left px-4 py-3">Tx</th>
                 </tr>
@@ -136,6 +140,9 @@ export default function BotTradesPage() {
                       {t.status === 'success' ? `+${parseFloat(t.profit).toFixed(6)} ${t.tokenIn}` : '—'}
                     </td>
                     <td className="px-4 py-3 text-right text-text-secondary font-mono">{t.profitPct.toFixed(3)}%</td>
+                    <td className="px-4 py-3 text-right text-text-muted font-mono whitespace-nowrap">
+                      {t.gasCost ? `${parseFloat(t.gasCost).toFixed(6)} ${t.tokenIn}` : '—'}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={clsx(
                         'inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-mono',
@@ -158,7 +165,7 @@ export default function BotTradesPage() {
                   </tr>
                 ))}
                 {!loading && trades.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-12 text-center text-text-muted">No trades yet.</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-12 text-center text-text-muted">No trades yet.</td></tr>
                 )}
               </tbody>
             </table>

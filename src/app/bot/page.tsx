@@ -9,6 +9,10 @@ interface Opportunity {
   profitPct: number
   amountIn: string
   tokenIn: string
+  grossProfit?: string
+  grossProfitUsd?: number
+  expectedNetUsd?: number
+  venues?: string
 }
 
 interface ExecutedArb {
@@ -18,6 +22,9 @@ interface ExecutedArb {
   amountIn: string
   profit: string
   profitPct: number
+  grossProfit?: string
+  gasCost?: string
+  gasCostEth?: string
   txHash?: string
   status: 'success' | 'failed' | 'dry-run'
   error?: string
@@ -39,6 +46,8 @@ interface BotStatus {
   totalArbsExecuted?: number
   totalArbsFailed?: number
   recentErrors?: { time: string; message: string }[]
+  consecutiveFailures?: number
+  pausedUntil?: string | null
 }
 
 const STALE_AFTER_MS = 15_000
@@ -135,6 +144,12 @@ export default function BotPage() {
               <StatCard label="Scan Interval" value={status.intervalMs ? `${status.intervalMs}ms` : '—'} />
             </div>
 
+            {status.pausedUntil && new Date(status.pausedUntil).getTime() > Date.now() && (
+              <div className="card p-4 mb-6 border-red-500/30 text-red-400 text-sm">
+                Execution paused until {new Date(status.pausedUntil).toLocaleTimeString()} after {status.consecutiveFailures ?? 0} consecutive failures.
+              </div>
+            )}
+
             {/* Balances + cumulative profit */}
             <div className="grid md:grid-cols-2 gap-6 mb-6">
               <div className="card p-6">
@@ -171,9 +186,11 @@ export default function BotPage() {
               {status.lastOpportunities && status.lastOpportunities.length > 0 ? (
                 <div className="space-y-2">
                   {status.lastOpportunities.map((o, i) => (
-                    <div key={i} className="flex justify-between items-center text-sm py-1.5 border-b border-bg-border last:border-0">
+                    <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center text-sm py-1.5 border-b border-bg-border last:border-0">
                       <span className="font-mono text-text-primary">{o.pair}</span>
+                      {o.venues && <span className="text-violet-400 font-mono text-xs">{o.venues}</span>}
                       <span className="text-text-secondary">{o.amountIn} {o.tokenIn}</span>
+                      <span className="text-emerald-400 font-mono">net est. {o.expectedNetUsd != null ? `$${o.expectedNetUsd.toFixed(4)}` : '—'} (gross {o.grossProfit ?? '—'} {o.tokenIn})</span>
                       <span className="text-aeon-400 font-mono">{o.profitPct.toFixed(3)}%</span>
                     </div>
                   ))}
@@ -207,7 +224,7 @@ export default function BotPage() {
                       </div>
                       <span className="text-text-muted text-xs">{new Date(a.time).toLocaleTimeString()}</span>
                       <span className={a.status === 'success' ? 'text-emerald-400 font-mono' : 'text-text-muted font-mono'}>
-                        {a.status === 'success' ? `+${parseFloat(a.profit).toFixed(6)} ${a.tokenIn}` : a.status}
+                        {a.status === 'success' ? `net +${parseFloat(a.profit).toFixed(6)} ${a.tokenIn}${a.gasCost ? ` (gas ${parseFloat(a.gasCost).toFixed(6)})` : ''}` : a.status}
                       </span>
                     </div>
                   ))}

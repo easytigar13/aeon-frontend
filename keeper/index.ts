@@ -21,11 +21,9 @@
  *
  * Before ever sending a transaction, this also checks the quoted profit
  * against a live gas-cost estimate (converted into whatever token the arb
- * trades, with a 1.3x buffer) PLUS a minimum net-profit floor (default
- * $0.05 via MIN_NET_PROFIT_USD, expressed through USDG) -- clearing gas by
- * a rounding error isn't worth the risk of a stale quote or a beaten race.
- * See gasCostFloorInToken() and minNetProfitInToken() below. That combined
- * floor is also passed on-chain as minProfit, so even a live reserve shift
+ * trades, with a 1.3x buffer). Any profit above that buffered gas cost is
+ * executable, even one smallest token unit. See gasCostFloorInToken() below.
+ * That floor is also passed on-chain as minProfit, so even a live reserve shift
  * between quoting and inclusion can't result in a trade that nets less.
  *
  * This process never leaves funds stuck between calls and holds no custody
@@ -93,7 +91,7 @@ const tradesLogPath = process.env.TRADES_LOG_FILE ?? fileURLToPath(new URL('trad
 
 const RPC          = process.env.RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'
 const PK            = (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`
-const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT ?? '1')  // skip arbs below this % -- a cheap first-pass filter; the real profit-after-gas gate is still gasCostFloorInToken + MIN_NET_PROFIT_USD
+const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT ?? '0')  // consider every positive quote; execution still requires profit above the buffered gas cost
 const INTERVAL_MS    = parseInt(process.env.INTERVAL_MS ?? '1000')
 const DRY_RUN         = process.env.DRY_RUN === 'true'
 const DEADLINE_SECONDS = 120  // execution must land within 2 min of being sized, else it just reverts (no funds lost)
@@ -103,6 +101,7 @@ const DEADLINE_SECONDS = 120  // execution must land within 2 min of being sized
 // unlike the internal scan which is pure RPC reads.
 const AGGREGATOR_SCAN_INTERVAL_MS = parseInt(process.env.AGGREGATOR_SCAN_INTERVAL_MS ?? '30000')
 const AGGREGATOR_SLIPPAGE_PCT = parseFloat(process.env.AGGREGATOR_SLIPPAGE_PCT ?? '0.5')
+const ENABLE_CROSS_VENUE = process.env.ENABLE_CROSS_VENUE === 'true'
 
 // Native ETH isn't one of the pool tokens (everything trades WETH), but
 // it's economically fungible with WETH via wrap/unwrap -- whatever's spare
@@ -111,14 +110,6 @@ const AGGREGATOR_SLIPPAGE_PCT = parseFloat(process.env.AGGREGATOR_SLIPPAGE_PCT ?
 // fetchBalances() and ensureWethBalance()). This amount is NEVER touched --
 // it's what keeps the bot able to pay for its own future transactions.
 const GAS_RESERVE_ETH = parseFloat(process.env.GAS_RESERVE_ETH ?? '0.005')
-
-// Clearing gas isn't the same as being WORTH doing -- a trade that nets
-// $0.001 after gas is technically profitable but not worth the risk of a
-// stale quote or a beaten race for a rounding error. Requires profit AFTER
-// gas to be worth at least this much, expressed via USDG (roughly
-// $1-pegged) as the reference so it works for whatever token a cycle trades
-// in -- see minNetProfitInToken() below.
-const MIN_NET_PROFIT_USD = parseFloat(process.env.MIN_NET_PROFIT_USD ?? '0.05')
 
 // Every cycle starts AND ends in the SAME token -- a real cycle can't mix
 // currencies, since there'd be nothing enforcing you actually end up ahead
@@ -133,7 +124,9 @@ const MIN_NET_PROFIT_USD = parseFloat(process.env.MIN_NET_PROFIT_USD ?? '0.05')
 // supported, but each extra hop adds its own fee drag, so very deep cycles
 // rarely clear it in practice. Hard-capped at 10 regardless of the env override.
 const BASE_TOKEN_OVERRIDE = (process.env.BASE_TOKEN ?? '').trim() as keyof typeof TOKENS | ''
-const MAX_HOPS = Math.max(2, Math.min(parseInt(process.env.MAX_HOPS ?? '6'), 10))
+const MAX_HOPS = Math.max(2, Math.min(parseInt(process.env.MAX_HOPS ?? '12'), 16))
+const SETTLEMENT_TOKENS = ['AEON', 'USDG', 'WETH'] as const
+const SETTLEMENT_PRIORITY: Record<string, number> = { AEON: 0, USDG: 1, WETH: 2 }
 
 if (!PK || PK.length < 66) {
   console.error('Set KEEPER_PRIVATE_KEY in keeper/.env (copy keeper/.env.example first)')
@@ -163,7 +156,15 @@ const ARB_POOLS = POOLS
     token0: p.token0 as keyof typeof TOKENS,
     token1: p.token1 as keyof typeof TOKENS,
     feeBps: BigInt(parseFeeBps(p.fee)),
+    isUniV2: false,
   }))
+
+const UNISWAP_V2_FACTORY = '0x8bcEaA40B9AcdfAedF85AdF4FF01F5Ad6517937f' as `0x${string}`
+const UNISWAP_FEE_BPS = 30n
+// ROBINFUN charges transfer tax when its official Uniswap pair is involved.
+// AeonArbKeeper uses standard V2 exact-input math, so those pairs cannot be
+// executed safely until the contract re-measures received amounts per hop.
+const UNISWAP_UNSUPPORTED_TOKENS = new Set<keyof typeof TOKENS>(['ROBINFUN'])
 
 // AEON isn't listed on any external aggregator (confirmed -- nothing to
 // compare against), and the Robinhood tokenized stocks only exist inside
@@ -187,6 +188,12 @@ const PAIR_ABI = [
   { name: 'token0', type: 'function', stateMutability: 'view',
     inputs: [], outputs: [{ type: 'address' }] },
 ] as const
+
+const UNISWAP_FACTORY_ABI = [{
+  name: 'getPair', type: 'function', stateMutability: 'view',
+  inputs: [{ name: 'tokenA', type: 'address' }, { name: 'tokenB', type: 'address' }],
+  outputs: [{ name: 'pair', type: 'address' }],
+}] as const
 
 const ARB_KEEPER_ABI = [
   {
@@ -217,6 +224,38 @@ const ARB_KEEPER_ABI = [
 const account = privateKeyToAccount(PK)
 const pub = createPublicClient({ chain: robinhoodChain, transport: http(RPC) })
 const wal = createWalletClient({ account, chain: robinhoodChain, transport: http(RPC) })
+
+async function discoverUniswapPools(): Promise<number> {
+  const ownPools = [...ARB_POOLS]
+  const seenPairs = new Set<string>()
+  const calls = ownPools.map(pool => ({
+    address: UNISWAP_V2_FACTORY,
+    abi: UNISWAP_FACTORY_ABI,
+    functionName: 'getPair' as const,
+    args: [TOKENS[pool.token0].address, TOKENS[pool.token1].address] as const,
+  }))
+  const results = await pub.multicall({ contracts: calls, allowFailure: true })
+  let added = 0
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i]
+    if (result.status !== 'success') continue
+    const address = (result.result as string).toLowerCase()
+    if (address === '0x0000000000000000000000000000000000000000' || seenPairs.has(address)) continue
+    seenPairs.add(address)
+    const source = ownPools[i]
+    if (UNISWAP_UNSUPPORTED_TOKENS.has(source.token0) || UNISWAP_UNSUPPORTED_TOKENS.has(source.token1)) continue
+    ARB_POOLS.push({
+      name: `Uniswap ${source.token0}/${source.token1}`,
+      address: getAddress(address),
+      token0: source.token0,
+      token1: source.token1,
+      feeBps: UNISWAP_FEE_BPS,
+      isUniV2: true,
+    })
+    added++
+  }
+  return added
+}
 
 // ─── Math (mirrors AeonPoolRH.swap()'s own constant-product formula) ─────────
 
@@ -315,6 +354,27 @@ interface ArbOpp {
   amountIn:  bigint
   profitRaw: bigint
   profitPct: number
+  expectedNetUsd?: number
+}
+
+// A SettlementOpp is NOT a cycle -- it starts in one SETTLEMENT_TOKEN and
+// deliberately ends in a DIFFERENT one (e.g. AEON -> token -> WETH, staying
+// in WETH). AeonArbKeeper can't run these (it hard-reverts on any route that
+// doesn't close back to its own starting token -- see NotCyclic in the
+// contract), so these execute via AeonRouter's plain multi-hop swap instead.
+// "Profit" here means the USDG-equivalent value of the output exceeds the
+// USDG-equivalent value of the input by enough to clear gas -- see
+// executeSettlementSwap() for how that's turned into an on-chain amountOutMin.
+interface SettlementOpp {
+  tokenIn:    typeof TOKENS[keyof typeof TOKENS]
+  tokenOut:   typeof TOKENS[keyof typeof TOKENS]
+  hops:       HopCandidate[]
+  label:      string
+  amountIn:   bigint
+  amountOut:  bigint
+  profitUsdg: bigint
+  profitPct:  number
+  expectedNetUsd?: number
 }
 
 function buildGraph(states: PoolState[]): Map<string, HopCandidate[]> {
@@ -425,6 +485,104 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
   return opps
 }
 
+// Companion search to findArbs: instead of only closing back to baseSym,
+// this also registers a candidate at EVERY settlement token reached along
+// the way (other than baseSym itself, which findArbs already covers). The
+// DFS still continues past a settlement token too, in case a longer route
+// through it is even better -- hitting one doesn't force a stop, it's just
+// also a valid place to stop. Sizing maximizes USDG-denominated profit
+// (output value minus input value) via the same ternary-search shape as
+// optimalTrade, just with a different objective function, since input and
+// output are different tokens here and can't be subtracted directly.
+function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKENS): SettlementOpp[] {
+  const opps: SettlementOpp[] = []
+  const seen = new Set<string>()
+  let visits = 0
+  let capped = false
+
+  const usdgPathCache = new Map<string, HopCandidate[] | null>()
+  function usdgPath(sym: string): HopCandidate[] | null {
+    if (usdgPathCache.has(sym)) return usdgPathCache.get(sym)!
+    const path = sym === 'USDG' ? [] : findConversionPath(graph, sym, 'USDG')
+    usdgPathCache.set(sym, path)
+    return path
+  }
+
+  const startPath = usdgPath(baseSym)
+
+  function tryOpp(hops: HopCandidate[], endSym: string) {
+    const key = hops.map(h => h.pool.pool.address).join('>') + '=>' + endSym
+    if (seen.has(key)) return
+    seen.add(key)
+    if (startPath === null) return
+
+    const endPath = usdgPath(endSym)
+    if (endPath === null) return
+
+    function profitUsdgAt(amountIn: bigint): bigint {
+      const out = cycleOut(amountIn, hops)
+      if (out === 0n) return -1n
+      return convertSpot(out, endPath!) - convertSpot(amountIn, startPath!)
+    }
+
+    const maxIn = hops[0].reserveIn / 4n
+    if (maxIn <= 1n) return
+    let lo = 0n, hi = maxIn
+    for (let i = 0; i < 100; i++) {
+      const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n
+      if (profitUsdgAt(m1) < profitUsdgAt(m2)) lo = m1; else hi = m2
+      if (hi - lo < 2n) break
+    }
+    const amountIn = (lo + hi) / 2n
+    const profitUsdg = profitUsdgAt(amountIn)
+    if (profitUsdg <= 0n || amountIn <= 0n) return
+
+    const inUsdg = convertSpot(amountIn, startPath)
+    if (inUsdg <= 0n) return
+    const profitPct = Number(profitUsdg * 10000n / inUsdg) / 100
+    if (profitPct < 0.02 || profitPct > 50) return
+
+    const amountOut = cycleOut(amountIn, hops)
+    if (amountOut <= 0n) return
+
+    opps.push({
+      tokenIn: TOKENS[baseSym], tokenOut: TOKENS[endSym as keyof typeof TOKENS], hops, amountIn, amountOut, profitUsdg, profitPct,
+      label: [baseSym, ...hops.map(h => h.tokenOutSym)].join('→'),
+    })
+  }
+
+  const path: HopCandidate[] = []
+  const visited = new Set<string>([baseSym])
+
+  function dfs(currentSym: string) {
+    if (capped) return
+    if (++visits > MAX_DFS_VISITS) { capped = true; return }
+
+    for (const edge of graph.get(currentSym) ?? []) {
+      if (path.length > 0 && edge.pool.pool.address === path[path.length - 1].pool.pool.address) continue
+      if (edge.tokenOutSym === baseSym) continue   // the cyclic case -- findArbs already covers it
+
+      if ((SETTLEMENT_TOKENS as readonly string[]).includes(edge.tokenOutSym)) {
+        tryOpp([...path, edge], edge.tokenOutSym)
+      }
+
+      if (path.length >= MAX_HOPS - 1) continue
+      if (visited.has(edge.tokenOutSym)) continue
+
+      visited.add(edge.tokenOutSym)
+      path.push(edge)
+      dfs(edge.tokenOutSym)
+      path.pop()
+      visited.delete(edge.tokenOutSym)
+    }
+  }
+
+  dfs(baseSym)
+  if (capped) console.warn(`[warn] settlement search from ${baseSym} hit its ${MAX_DFS_VISITS}-visit safety cap -- results may be incomplete this tick`)
+
+  return opps
+}
+
 // ─── Gas-cost floor ───────────────────────────────────────────────────────────
 //
 // A quoted swap profit isn't real profit until it clears what the two
@@ -438,6 +596,7 @@ const GAS_SAFETY_MULT_PCT = 130n   // require 1.30x the estimate -- buffer for g
 const APPROVE_GAS_FALLBACK = 60_000n
 const EXEC_ARB_BASE_GAS = 100_000n
 const EXEC_ARB_GAS_PER_HOP = 70_000n
+const MAX_UINT256 = (1n << 256n) - 1n
 
 // BFS shortest path (by hop count) from fromSym to toSym through the pool
 // graph. Used only to convert a WETH-denominated gas cost into whatever
@@ -470,21 +629,39 @@ function convertSpot(amountIn: bigint, path: HopCandidate[]): bigint {
   return amt
 }
 
+// Inverse of convertSpot: given a DESIRED output at the end of `path`, how
+// much input (in path[0]'s own FROM token) would spot-price to that --
+// walks the same path backwards, inverting each hop's ratio. Used to turn a
+// "must be worth at least $X" requirement into a same-unit amountOutMin for
+// whatever token a settlement route actually ends in.
+function convertSpotReverse(desiredOut: bigint, path: HopCandidate[]): bigint {
+  let amt = desiredOut
+  for (let i = path.length - 1; i >= 0; i--) {
+    const edge = path[i]
+    if (edge.reserveOut === 0n) return 0n
+    amt = (amt * edge.reserveIn) / edge.reserveOut
+  }
+  return amt
+}
+
 // Returns the gas cost floor expressed in tokenInSym's own raw units, or
 // null if there's no live WETH price path for that token right now -- in
 // which case the caller skips rather than guess at an unverifiable conversion.
 async function gasCostFloorInToken(
-  tokenInSym: string, tokenInAddress: `0x${string}`, hopCount: number, graph: Map<string, HopCandidate[]>,
+  tokenInSym: string, tokenInAddress: `0x${string}`, hopCount: number, graph: Map<string, HopCandidate[]>, needsApproval = true,
 ): Promise<bigint | null> {
   const gasPrice = await pub.getGasPrice()
 
-  let approveGas = APPROVE_GAS_FALLBACK
-  try {
-    approveGas = await pub.estimateContractGas({
-      address: tokenInAddress, abi: ERC20_ABI, functionName: 'approve',
-      args: [CONTRACTS.ArbKeeper, 1n], account: account.address,
-    })
-  } catch { /* executeArb can't be pre-simulated without an existing approval, so this is the one leg we can estimate live; fall back to a conservative fixed guess if even this fails */ }
+  let approveGas = 0n
+  if (needsApproval) {
+    approveGas = APPROVE_GAS_FALLBACK
+    try {
+      approveGas = await pub.estimateContractGas({
+        address: tokenInAddress, abi: ERC20_ABI, functionName: 'approve',
+        args: [CONTRACTS.ArbKeeper, MAX_UINT256], account: account.address,
+      })
+    } catch { /* fall back to a conservative fixed approval estimate */ }
+  }
 
   const execGas = EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * BigInt(hopCount)
   const gasCostWei = ((approveGas + execGas) * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
@@ -496,16 +673,16 @@ async function gasCostFloorInToken(
   return convertSpot(gasCostWei, path)
 }
 
-// Returns MIN_NET_PROFIT_USD expressed in tokenSym's own raw units (via a
-// live USDG price path), or null if there's no route right now -- same
-// "skip rather than guess" rule as the gas floor above.
-async function minNetProfitInToken(tokenSym: string, graph: Map<string, HopCandidate[]>): Promise<bigint | null> {
-  const usdgAmount = parseUnits(String(MIN_NET_PROFIT_USD), TOKENS.USDG.decimals)
-  if (tokenSym === 'USDG') return usdgAmount
+function valueInUsdg(tokenSym: string, amount: bigint, graph: Map<string, HopCandidate[]>): bigint {
+  if (tokenSym === 'USDG') return amount
+  const path = findConversionPath(graph, tokenSym, 'USDG')
+  return path ? convertSpot(amount, path) : 0n
+}
 
-  const path = findConversionPath(graph, 'USDG', tokenSym)
-  if (!path) return null
-  return convertSpot(usdgAmount, path)
+function weiToToken(tokenSym: string, amountWei: bigint, graph: Map<string, HopCandidate[]>): bigint | null {
+  if (tokenSym === 'WETH') return amountWei
+  const path = findConversionPath(graph, 'WETH', tokenSym)
+  return path ? convertSpot(amountWei, path) : null
 }
 
 // ─── Balances / candidate base tokens ─────────────────────────────────────────
@@ -551,10 +728,13 @@ async function fetchBalances(): Promise<BalancesResult> {
 // actually trade. Pass searchBalances here, not balances, so spare native
 // ETH counts toward WETH.
 function candidateBaseTokens(searchBalances: Record<string, bigint>): (keyof typeof TOKENS)[] {
-  if (BASE_TOKEN_OVERRIDE) return [BASE_TOKEN_OVERRIDE]
-  return Object.entries(searchBalances)
-    .filter(([sym, bal]) => bal >= minRawUnits(TOKENS[sym as keyof typeof TOKENS].decimals))
-    .map(([sym]) => sym as keyof typeof TOKENS)
+  if (BASE_TOKEN_OVERRIDE) {
+    if (!(SETTLEMENT_TOKENS as readonly string[]).includes(BASE_TOKEN_OVERRIDE)) return []
+    return [BASE_TOKEN_OVERRIDE]
+  }
+  return SETTLEMENT_TOKENS.filter(sym =>
+    (searchBalances[sym] ?? 0n) >= minRawUnits(TOKENS[sym].decimals)
+  ) as (keyof typeof TOKENS)[]
 }
 
 // Wraps just enough native ETH into WETH to cover `needed`, if the current
@@ -667,6 +847,9 @@ interface ExecutedArb {
   amountIn: string
   profit: string
   profitPct: number
+  grossProfit?: string
+  gasCost?: string
+  gasCostEth?: string
   txHash?: string
   status: 'success' | 'failed' | 'dry-run'
   error?: string
@@ -678,6 +861,10 @@ let cumulativeProfit: Record<string, string> = {}
 let totalExecuted = 0
 let totalFailed = 0
 let recentErrors: { time: string; message: string }[] = []
+let consecutiveFailures = 0
+let pausedUntil = 0
+const MAX_CONSECUTIVE_FAILURES = parseInt(process.env.MAX_CONSECUTIVE_FAILURES ?? '3')
+const FAILURE_PAUSE_MS = parseInt(process.env.FAILURE_PAUSE_MS ?? '300000')
 
 // Resume counters across restarts instead of losing history every deploy/reboot.
 try {
@@ -708,7 +895,7 @@ function recordArb(arb: ExecutedArb) {
   }
 }
 
-async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Record<string, bigint>, nativeEth: bigint) {
+async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Record<string, bigint>, nativeEth: bigint, graph: Map<string, HopCandidate[]>) {
   const balances: Record<string, string> = { ETH: formatEther(nativeEth) }
   for (const [sym, bal] of Object.entries(rawBalances)) {
     balances[sym] = formatUnits(bal, TOKENS[sym as keyof typeof TOKENS].decimals)
@@ -727,11 +914,17 @@ async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Reco
       profitPct: Number(o.profitPct.toFixed(4)),
       amountIn: formatUnits(o.amountIn, o.tokenIn.decimals),
       tokenIn: o.tokenIn.symbol,
+      grossProfit: formatUnits(o.profitRaw, o.tokenIn.decimals),
+      grossProfitUsd: Number(formatUnits(valueInUsdg(o.tokenIn.symbol, o.profitRaw, graph), TOKENS.USDG.decimals)),
+      expectedNetUsd: o.expectedNetUsd,
+      venues: o.hops.map(h => h.pool.pool.isUniV2 ? 'Uniswap' : 'AEON').join(' -> '),
     })),
     recentArbs: recentArbs.slice(0, 30),
     cumulativeProfit,
     totalArbsExecuted: totalExecuted,
     totalArbsFailed: totalFailed,
+    consecutiveFailures,
+    pausedUntil: pausedUntil > Date.now() ? new Date(pausedUntil).toISOString() : null,
     recentErrors: recentErrors.slice(0, 5),
   }
 
@@ -754,7 +947,18 @@ const REDIS_STATUS_SYNC_INTERVAL_MS = parseInt(process.env.REDIS_STATUS_SYNC_INT
 
 type ExecResult = 'skipped' | 'attempted'
 
+async function ensureKeeperAllowance(tokenAddress: `0x${string}`, needsApproval: boolean): Promise<bigint> {
+  if (!needsApproval) return 0n
+  const hash = await wal.writeContract({
+    address: tokenAddress, abi: ERC20_ABI, functionName: 'approve',
+    args: [CONTRACTS.ArbKeeper, MAX_UINT256],
+  })
+  const receipt = await pub.waitForTransactionReceipt({ hash })
+  return receipt.gasUsed * receipt.effectiveGasPrice
+}
+
 async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint): Promise<ExecResult> {
+  if (Date.now() < pausedUntil) return 'skipped'
   const { tokenIn, hops: hopCandidates, amountIn, profitRaw, profitPct, label: pairLabel } = opp
 
   console.log(`\n🔄 ARB: ${pairLabel}  profit ${profitPct.toFixed(3)}%  in ${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`)
@@ -763,22 +967,24 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
   // BEFORE spending anything on approve, so dry-run output shows exactly
   // what a live run would decide. No live WETH price path for this token =
   // no way to verify profit clears gas cost, so it skips rather than guess.
-  const gasFloor = await gasCostFloorInToken(tokenIn.symbol, tokenIn.address, hopCandidates.length, graph)
+  const allowance = await pub.readContract({
+    address: tokenIn.address, abi: ERC20_ABI, functionName: 'allowance',
+    args: [account.address, CONTRACTS.ArbKeeper],
+  }) as bigint
+  const needsApproval = allowance < amountIn
+  const gasFloor = await gasCostFloorInToken(tokenIn.symbol, tokenIn.address, hopCandidates.length, graph, needsApproval)
   if (gasFloor === null) {
     console.warn(`   ⚠ No live WETH price path for ${tokenIn.symbol} -- can't verify profit clears gas cost, skipping for safety`)
     return 'skipped'
   }
   console.log(`   Est. gas cost (incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
 
-  const minNetProfit = await minNetProfitInToken(tokenIn.symbol, graph)
-  if (minNetProfit === null) {
-    console.warn(`   ⚠ No live USDG price path for ${tokenIn.symbol} -- can't verify the $${MIN_NET_PROFIT_USD} net-profit floor, skipping for safety`)
-    return 'skipped'
-  }
-  const requiredProfit = gasFloor + minNetProfit
-  console.log(`   Required profit (gas + $${MIN_NET_PROFIT_USD} floor): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
+  // Strictly profitable after the buffered gas estimate, with no additional
+  // percentage or dollar floor: one raw unit of net profit is enough.
+  let requiredProfit = gasFloor + 1n
+  console.log(`   Required profit (buffered gas + 1 raw unit): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
   if (profitRaw < requiredProfit) {
-    console.log(`   Profit doesn't clear gas + $${MIN_NET_PROFIT_USD} floor, skipping`)
+    console.log('   Profit does not clear the buffered gas cost, skipping')
     return 'skipped'
   }
 
@@ -805,44 +1011,75 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     console.warn(`   ⚠ Insufficient balance: have ${formatUnits(balIn, tokenIn.decimals)}, need ${formatUnits(amountIn, tokenIn.decimals)}`)
     return 'skipped'
   }
+  const balanceBefore = balIn
 
   const hops = hopCandidates.map(h => ({
     pool: getAddress(h.pool.pool.address),
     tokenIn: getAddress(TOKENS[h.tokenInSym as keyof typeof TOKENS].address),
     tokenOut: getAddress(TOKENS[h.tokenOutSym as keyof typeof TOKENS].address),
-    isUniV2: false,
+    isUniV2: h.pool.pool.isUniV2,
     feeBps: Number(h.pool.pool.feeBps),
   }))
   // Enforced on-chain too, not just here: if live reserves shift between this
   // quote and inclusion, AeonArbKeeper reverts rather than complete a trade
-  // that no longer clears gas + the $ floor.
-  const minProfit = requiredProfit > 1n ? requiredProfit : 1n
+  // that no longer clears the buffered gas cost.
   const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
 
   try {
     console.log('   → approve...')
-    const hApprove = await wal.writeContract({
-      address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve',
-      args: [CONTRACTS.ArbKeeper, amountIn],
+    const approvalGasWei = await ensureKeeperAllowance(tokenIn.address, needsApproval)
+
+    const gasPrice = await pub.getGasPrice()
+    const executionGas = await pub.estimateContractGas({
+      account: account.address,
+      address: CONTRACTS.ArbKeeper, abi: ARB_KEEPER_ABI, functionName: 'executeArb',
+      args: [hops, amountIn, requiredProfit, deadline],
     })
-    await pub.waitForTransactionReceipt({ hash: hApprove })
+    const bufferedGasWei = approvalGasWei + (executionGas * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
+    const exactGasInToken = weiToToken(tokenIn.symbol, bufferedGasWei, graph)
+    if (exactGasInToken === null) throw new Error(`cannot convert exact gas cost into ${tokenIn.symbol}`)
+    requiredProfit = exactGasInToken + 1n
+    if (profitRaw < requiredProfit) {
+      console.log('   Exact gas estimate removed profitability; not submitting')
+      return needsApproval ? 'attempted' : 'skipped'
+    }
+
+    // Re-run the complete call against the latest chain state after the
+    // approval confirms. A failed simulation costs no execution gas and
+    // prevents submitting a route whose reserves already moved.
+    console.log('   → simulate executeArb...')
+    await pub.simulateContract({
+      account,
+      address: CONTRACTS.ArbKeeper, abi: ARB_KEEPER_ABI, functionName: 'executeArb',
+      args: [hops, amountIn, requiredProfit, deadline],
+    })
 
     console.log('   → executeArb...')
     const hExec = await wal.writeContract({
       address: CONTRACTS.ArbKeeper, abi: ARB_KEEPER_ABI, functionName: 'executeArb',
-      args: [hops, amountIn, minProfit, deadline],
+      args: [hops, amountIn, requiredProfit, deadline],
     })
     const receipt = await pub.waitForTransactionReceipt({ hash: hExec })
 
     if (receipt.status === 'success') {
+      const balanceAfter = await pub.readContract({
+        address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+      }) as bigint
+      const realizedGross = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n
+      const totalGasWei = approvalGasWei + receipt.gasUsed * receipt.effectiveGasPrice
+      const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
+      const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
+      const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
       console.log(`   ✅ ARB COMPLETE — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hExec}`)
       totalExecuted++
+      consecutiveFailures = 0
       const prev = parseFloat(cumulativeProfit[tokenIn.symbol] ?? '0')
-      cumulativeProfit[tokenIn.symbol] = (prev + parseFloat(formatUnits(profitRaw, tokenIn.decimals))).toString()
+      cumulativeProfit[tokenIn.symbol] = (prev + parseFloat(formatUnits(realizedNet, tokenIn.decimals))).toString()
       recordArb({
         time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
-        amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(profitRaw, tokenIn.decimals),
-        profitPct, txHash: hExec, status: 'success', route: 'internal',
+        amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(realizedNet, tokenIn.decimals),
+        grossProfit: formatUnits(realizedGross, tokenIn.decimals), gasCost: formatUnits(actualGasInToken, tokenIn.decimals),
+        gasCostEth: formatEther(totalGasWei), profitPct: realizedNetPct, txHash: hExec, status: 'success', route: 'internal',
       })
     } else {
       throw new Error('transaction reverted')
@@ -852,11 +1089,181 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     const message = err?.shortMessage ?? err?.message ?? String(err)
     console.error(`   ❌ ARB FAILED (no funds lost -- the contract reverts atomically): ${message}`)
     totalFailed++
+    consecutiveFailures++
+    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      pausedUntil = Date.now() + FAILURE_PAUSE_MS
+      console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
+    }
     recentErrors.unshift({ time: new Date().toISOString(), message })
     recentErrors = recentErrors.slice(0, 5)
     recordArb({
       time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
       amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message, route: 'internal',
+    })
+    return 'attempted'
+  }
+}
+
+// ─── Settlement swap (starts in one settlement token, ends in another) ──────
+//
+// Not atomic in the AeonArbKeeper sense -- can't be, the contract rejects
+// any route that doesn't close back to its own start token. This goes
+// through AeonRouter's plain swapExactTokensForTokens instead, over the
+// FULL multi-hop route in one transaction. Still can't execute for nothing:
+// amountOutMin is computed here as "the smallest output that would still be
+// worth at least input value + gas, in live USDG terms" -- not a slippage
+// percentage. If reserves moved enough since quoting that the route can't
+// deliver that, the whole transaction reverts and only gas is spent.
+
+const SETTLEMENT_SWAP_GAS_BASE = EXEC_ARB_BASE_GAS
+const SETTLEMENT_SWAP_GAS_PER_HOP = EXEC_ARB_GAS_PER_HOP
+
+async function executeSettlementSwap(
+  opp: SettlementOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint,
+): Promise<ExecResult> {
+  if (Date.now() < pausedUntil) return 'skipped'
+  const { tokenIn, tokenOut, hops: hopCandidates, amountIn, label } = opp
+
+  console.log(`\n🔀 SETTLE: ${label} → ${tokenOut.symbol}  in ${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`)
+
+  const inUsdgPath = tokenIn.symbol === 'USDG' ? [] : findConversionPath(graph, tokenIn.symbol, 'USDG')
+  const outUsdgPath = tokenOut.symbol === 'USDG' ? [] : findConversionPath(graph, tokenOut.symbol, 'USDG')
+  if (inUsdgPath === null || outUsdgPath === null) {
+    console.warn(`   ⚠ No live USDG price path for ${tokenIn.symbol}/${tokenOut.symbol} -- can't verify profit clears gas cost, skipping for safety`)
+    return 'skipped'
+  }
+
+  const allowance = await pub.readContract({
+    address: tokenIn.address, abi: ERC20_ABI, functionName: 'allowance',
+    args: [account.address, CONTRACTS.AeonRouter],
+  }) as bigint
+  const needsApproval = allowance < amountIn
+
+  const gasPrice = await pub.getGasPrice()
+  let approveGasEstimate = 0n
+  if (needsApproval) {
+    approveGasEstimate = APPROVE_GAS_FALLBACK
+    try {
+      approveGasEstimate = await pub.estimateContractGas({
+        address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve',
+        args: [CONTRACTS.AeonRouter, MAX_UINT256], account: account.address,
+      })
+    } catch { /* fall back to a conservative fixed approval estimate */ }
+  }
+  const swapGasEstimate = SETTLEMENT_SWAP_GAS_BASE + SETTLEMENT_SWAP_GAS_PER_HOP * BigInt(hopCandidates.length)
+  const gasWei = ((approveGasEstimate + swapGasEstimate) * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
+  const gasUsdg = valueInUsdg('WETH', gasWei, graph)
+  console.log(`   Est. gas cost: ~${formatUnits(gasUsdg, TOKENS.USDG.decimals)} USDG`)
+
+  const inUsdgValue = tokenIn.symbol === 'USDG' ? amountIn : convertSpot(amountIn, inUsdgPath)
+  const requiredOutUsdg = inUsdgValue + gasUsdg + 1n
+  const amountOutMin = tokenOut.symbol === 'USDG' ? requiredOutUsdg : convertSpotReverse(requiredOutUsdg, outUsdgPath)
+  if (amountOutMin <= 0n || opp.amountOut < amountOutMin) {
+    console.log('   Profit does not clear the estimated gas cost, skipping')
+    return 'skipped'
+  }
+
+  if (DRY_RUN) {
+    console.log('   [DRY RUN] would execute -- clears gas cost, skipping actual send')
+    recordArb({
+      time: new Date().toISOString(), pair: label, tokenIn: 'USDG',
+      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(opp.profitUsdg, TOKENS.USDG.decimals),
+      profitPct: opp.profitPct, status: 'dry-run', route: 'internal',
+    })
+    return 'attempted'
+  }
+
+  let balIn = await pub.readContract({
+    address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+  }) as bigint
+  if (balIn < amountIn && tokenIn.symbol === 'WETH') {
+    balIn = await ensureWethBalance(amountIn, availableEthForWrap)
+  }
+  if (balIn < amountIn && tokenIn.symbol !== 'USDG') {
+    balIn = await ensureBaseTokenFunded(tokenIn.symbol as keyof typeof TOKENS, amountIn, graph)
+  }
+  if (balIn < amountIn) {
+    console.warn(`   ⚠ Insufficient balance: have ${formatUnits(balIn, tokenIn.decimals)}, need ${formatUnits(amountIn, tokenIn.decimals)}`)
+    return 'skipped'
+  }
+  const balanceBeforeOut = await pub.readContract({
+    address: tokenOut.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+  }) as bigint
+
+  const route = hopCandidates.map(h => ({
+    tokenIn: getAddress(TOKENS[h.tokenInSym as keyof typeof TOKENS].address),
+    tokenOut: getAddress(TOKENS[h.tokenOutSym as keyof typeof TOKENS].address),
+    pool: getAddress(h.pool.pool.address),
+    poolType: 0,
+    feeBps: Number(h.pool.pool.feeBps),
+  }))
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
+
+  try {
+    let approvalGasWei = 0n
+    if (needsApproval) {
+      console.log('   → approve...')
+      const hApprove = await wal.writeContract({
+        address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, MAX_UINT256],
+      })
+      const approveReceipt = await pub.waitForTransactionReceipt({ hash: hApprove })
+      approvalGasWei = approveReceipt.gasUsed * approveReceipt.effectiveGasPrice
+    }
+
+    console.log('   → simulate swapExactTokensForTokens...')
+    await pub.simulateContract({
+      account,
+      address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [route, amountIn, amountOutMin, account.address, deadline],
+    })
+
+    console.log('   → swapExactTokensForTokens...')
+    const hSwap = await wal.writeContract({
+      address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [route, amountIn, amountOutMin, account.address, deadline],
+    })
+    const receipt = await pub.waitForTransactionReceipt({ hash: hSwap })
+
+    if (receipt.status === 'success') {
+      const balanceAfterOut = await pub.readContract({
+        address: tokenOut.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+      }) as bigint
+      const realizedOut = balanceAfterOut > balanceBeforeOut ? balanceAfterOut - balanceBeforeOut : 0n
+      const realizedOutUsdg = tokenOut.symbol === 'USDG' ? realizedOut : convertSpot(realizedOut, outUsdgPath)
+      const totalGasWei = approvalGasWei + receipt.gasUsed * receipt.effectiveGasPrice
+      const gasUsdgActual = valueInUsdg('WETH', totalGasWei, graph)
+      const realizedNetUsdg = realizedOutUsdg > inUsdgValue + gasUsdgActual ? realizedOutUsdg - inUsdgValue - gasUsdgActual : 0n
+
+      console.log(`   ✅ SETTLE COMPLETE — received ${formatUnits(realizedOut, tokenOut.decimals)} ${tokenOut.symbol} (~${formatUnits(realizedNetUsdg, TOKENS.USDG.decimals)} USDG net) — ${hSwap}`)
+      totalExecuted++
+      consecutiveFailures = 0
+      const prev = parseFloat(cumulativeProfit['USDG'] ?? '0')
+      cumulativeProfit['USDG'] = (prev + parseFloat(formatUnits(realizedNetUsdg, TOKENS.USDG.decimals))).toString()
+      recordArb({
+        time: new Date().toISOString(), pair: label, tokenIn: 'USDG',
+        amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(realizedNetUsdg, TOKENS.USDG.decimals),
+        grossProfit: formatUnits(realizedOutUsdg, TOKENS.USDG.decimals), gasCost: formatUnits(gasUsdgActual, TOKENS.USDG.decimals),
+        gasCostEth: formatEther(totalGasWei),
+        profitPct: opp.profitPct, txHash: hSwap, status: 'success', route: 'internal',
+      })
+    } else {
+      throw new Error('transaction reverted')
+    }
+    return 'attempted'
+  } catch (err: any) {
+    const message = err?.shortMessage ?? err?.message ?? String(err)
+    console.error(`   ❌ SETTLE FAILED (no funds lost -- amountOutMin reverts atomically): ${message}`)
+    totalFailed++
+    consecutiveFailures++
+    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      pausedUntil = Date.now() + FAILURE_PAUSE_MS
+      console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
+    }
+    recentErrors.unshift({ time: new Date().toISOString(), message })
+    recentErrors = recentErrors.slice(0, 5)
+    recordArb({
+      time: new Date().toISOString(), pair: label, tokenIn: 'USDG',
+      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct: opp.profitPct, status: 'failed', error: message, route: 'internal',
     })
     return 'attempted'
   }
@@ -976,6 +1383,7 @@ async function scanAggregatorArbs(
 }
 
 async function executeAggregatorArb(opp: AggOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint): Promise<ExecResult> {
+  if (Date.now() < pausedUntil) return 'skipped'
   const { tokenBase, tokenMid, ourPool, amountIn, midOutEstimate, quote, profitRaw, profitPct, label } = opp
 
   console.log(`\n🔀 CROSS-VENUE ARB: ${label}  profit ${profitPct.toFixed(3)}%  in ${formatUnits(amountIn, tokenBase.decimals)} ${tokenBase.symbol}`)
@@ -987,14 +1395,9 @@ async function executeAggregatorArb(opp: AggOpp, graph: Map<string, HopCandidate
   }
   console.log(`   Est. gas cost (2 tx pairs, incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenBase.decimals)} ${tokenBase.symbol}`)
 
-  const minNetProfit = await minNetProfitInToken(tokenBase.symbol, graph)
-  if (minNetProfit === null) {
-    console.warn(`   ⚠ No live USDG price path for ${tokenBase.symbol} -- can't verify the $${MIN_NET_PROFIT_USD} net-profit floor, skipping for safety`)
-    return 'skipped'
-  }
-  const requiredProfit = gasFloor + minNetProfit
+  const requiredProfit = gasFloor + 1n
   if (profitRaw < requiredProfit) {
-    console.log(`   Profit doesn't clear gas + $${MIN_NET_PROFIT_USD} floor, skipping`)
+    console.log('   Profit does not clear the buffered gas cost, skipping')
     return 'skipped'
   }
 
@@ -1085,7 +1488,7 @@ async function executeAggregatorArb(opp: AggOpp, graph: Map<string, HopCandidate
 
   const freshProfit = freshTx.amountOut - amountIn
   if (freshProfit < requiredProfit) {
-    const message = `leg 1 filled, leg 2 no longer clears gas + $${MIN_NET_PROFIT_USD} floor after re-quote -- holding ${formatUnits(midReceived, tokenMid.decimals)} ${tokenMid.symbol}`
+    const message = `leg 1 filled, leg 2 no longer clears the buffered gas cost after re-quote -- holding ${formatUnits(midReceived, tokenMid.decimals)} ${tokenMid.symbol}`
     console.warn(`   ⚠ ${message}`)
     recordArb({
       time: new Date().toISOString(), pair: label, tokenIn: tokenBase.symbol,
@@ -1158,10 +1561,35 @@ async function tick() {
   const { balances, searchBalances, nativeEth, availableEthForWrap } = await fetchBalances()
   const bases = candidateBaseTokens(searchBalances)
   const graph = buildGraph(states)
+  const rankingGasPrice = await pub.getGasPrice()
+  const expectedNetUsdg = (opp: ArbOpp) => {
+    const gross = valueInUsdg(opp.tokenIn.symbol, opp.profitRaw, graph)
+    const gasUnits = EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * BigInt(opp.hops.length)
+    const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
+    const gasUsdg = valueInUsdg('WETH', gasWei, graph)
+    return gross > gasUsdg ? gross - gasUsdg : 0n
+  }
   const opps = bases
     .flatMap(baseSym => findArbs(graph, baseSym))
-    .sort((a, b) => b.profitPct - a.profitPct)
+    .sort((a, b) => {
+      const aValue = expectedNetUsdg(a)
+      const bValue = expectedNetUsdg(b)
+      if (bValue > aValue) return 1
+      if (bValue < aValue) return -1
+      return (SETTLEMENT_PRIORITY[a.tokenIn.symbol] ?? 99) - (SETTLEMENT_PRIORITY[b.tokenIn.symbol] ?? 99)
+    })
+  for (const opp of opps) {
+    opp.expectedNetUsd = Number(formatUnits(expectedNetUsdg(opp), TOKENS.USDG.decimals))
+  }
   const tickMs = Date.now() - t0
+
+  // Candidates were all sized from the same opening snapshot. Once one is
+  // submitted (successfully or not), stop and rescan fresh state before
+  // considering another route -- this avoids paying gas for stale
+  // candidates after the first transaction changes pool reserves. Applies
+  // across BOTH cyclic and settlement routes: at most one state-changing
+  // attempt per tick, whichever kind fires first.
+  let anyAttempted = false
 
   if (opps.length === 0) {
     process.stdout.write(`\r[${new Date().toISOString()}] No arb found (${tickMs}ms) — ${states.length}/${ARB_POOLS.length} pools live, base tokens: ${bases.join(',') || 'none'}`)
@@ -1170,30 +1598,50 @@ async function tick() {
     for (const o of opps.slice(0, 5)) {
       console.log(`  ${o.label}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenIn.decimals)} ${o.tokenIn.symbol})`)
     }
-    // MIN_PROFIT_PCT is a cheap first-pass filter before the RPC-costly gas
-    // check inside executeArb; try EVERY candidate in descending profit
-    // order (up to the cap below) rather than stopping at the first one
-    // that clears gas -- if several different opportunities are genuinely
-    // profitable in the same tick, take all of them, not just the best one.
-    // Later candidates in this loop were sized against the tick's opening
-    // snapshot, so one that no longer makes sense after an earlier trade
-    // moved reserves just reverts safely (AeonArbKeeper re-derives
-    // everything from live state) -- wastes a little gas, never money.
-    let anyAttempted = false
     for (const opp of opps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
       if (opp.profitPct < MIN_PROFIT_PCT) break   // sorted descending -- nothing further qualifies either
       const result = await executeArb(opp, graph, availableEthForWrap)
-      if (result === 'attempted') anyAttempted = true
+      if (result === 'attempted') {
+        anyAttempted = true
+        break
+      }
     }
     if (!anyAttempted && opps[0].profitPct < MIN_PROFIT_PCT) {
       console.log(`  Best profit ${opps[0].profitPct.toFixed(3)}% below ${MIN_PROFIT_PCT}% threshold, skipping`)
     }
   }
 
+  // Settlement routes (e.g. AEON -> token -> WETH, staying in WETH) --
+  // independent of whether any CYCLIC opportunity existed, only skipped if
+  // one already fired above this tick.
+  if (!anyAttempted) {
+    const settlementOpps = bases
+      .flatMap(baseSym => findSettlementRoutes(graph, baseSym))
+      .sort((a, b) => {
+        if (b.profitUsdg > a.profitUsdg) return 1
+        if (b.profitUsdg < a.profitUsdg) return -1
+        return (SETTLEMENT_PRIORITY[a.tokenOut.symbol] ?? 99) - (SETTLEMENT_PRIORITY[b.tokenOut.symbol] ?? 99)
+      })
+    for (const opp of settlementOpps) {
+      opp.expectedNetUsd = Number(formatUnits(opp.profitUsdg, TOKENS.USDG.decimals))
+    }
+    if (settlementOpps.length > 0) {
+      console.log(`\n[${new Date().toISOString()}] ${settlementOpps.length} settlement-route opportunities:`)
+      for (const o of settlementOpps.slice(0, 5)) {
+        console.log(`  ${o.label}→${o.tokenOut.symbol}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenIn.decimals)} ${o.tokenIn.symbol})`)
+      }
+      for (const opp of settlementOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
+        if (opp.profitPct < MIN_PROFIT_PCT) break
+        const result = await executeSettlementSwap(opp, graph, availableEthForWrap)
+        if (result === 'attempted') { anyAttempted = true; break }
+      }
+    }
+  }
+
   // Cross-venue (OpenOcean / 1inch) scan runs on its own slower cadence --
   // reuses this tick's already-fetched states/graph/balances, only adding
   // aggregator API calls, not extra pool or balance reads.
-  if (Date.now() - lastAggregatorScan >= AGGREGATOR_SCAN_INTERVAL_MS) {
+  if (ENABLE_CROSS_VENUE && Date.now() - lastAggregatorScan >= AGGREGATOR_SCAN_INTERVAL_MS) {
     lastAggregatorScan = Date.now()
     try {
       const aggOpps = await scanAggregatorArbs(states, searchBalances, bases)
@@ -1204,7 +1652,8 @@ async function tick() {
         }
         for (const opp of aggOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
           if (opp.profitPct < MIN_PROFIT_PCT) break
-          await executeAggregatorArb(opp, graph, availableEthForWrap)   // try every candidate, not just the first attempted
+          const result = await executeAggregatorArb(opp, graph, availableEthForWrap)
+          if (result === 'attempted') break   // rescan before another state-changing route
         }
       }
     } catch (err: any) {
@@ -1215,18 +1664,21 @@ async function tick() {
     }
   }
 
-  await writeStatus(opps, tickMs, balances, nativeEth)
+  await writeStatus(opps, tickMs, balances, nativeEth, graph)
 }
 
 async function main() {
+  const uniswapPools = await discoverUniswapPools()
   console.log(`AEON Arb Keeper`)
   console.log(`  Keeper address: ${account.address}`)
-  console.log(`  Base token: ${BASE_TOKEN_OVERRIDE || 'auto (every held token above dust, re-evaluated each tick)'}`)
+  console.log(`  Settlement tokens: ${BASE_TOKEN_OVERRIDE || SETTLEMENT_TOKENS.join(', ')} (AEON preferred on equal net profit)`)
   console.log(`  Max hops per cycle: ${MAX_HOPS}`)
   console.log(`  Pools monitored: ${ARB_POOLS.length}`)
+  console.log(`  Uniswap V2 pools discovered: ${uniswapPools}`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
+  console.log(`  Cross-venue execution: ${ENABLE_CROSS_VENUE ? 'enabled' : 'disabled (non-atomic)'}`)
   console.log(`  1inch: ${process.env.ONEINCH_API_KEY ? 'configured' : 'not configured (OpenOcean only)'}`)
   console.log(`  Dry run: ${DRY_RUN}`)
   console.log(`  Status file: ${statusPath}`)
