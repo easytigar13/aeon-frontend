@@ -547,6 +547,7 @@ interface ArbOpp {
   profitRaw: bigint
   profitPct: number
   expectedNetUsd?: number
+  gasCostUsd?: number
 }
 
 // A SettlementOpp is NOT a cycle -- it starts in one SETTLEMENT_TOKEN and
@@ -567,6 +568,7 @@ interface SettlementOpp {
   profitUsdg: bigint
   profitPct:  number
   expectedNetUsd?: number
+  gasCostUsd?: number
 }
 
 function buildGraph(states: PoolState[]): Map<string, HopCandidate[]> {
@@ -1122,6 +1124,7 @@ async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Reco
       grossProfit: formatUnits(o.profitRaw, o.tokenIn.decimals),
       grossProfitUsd: Number(formatUnits(valueInUsdg(o.tokenIn.symbol, o.profitRaw, graph), TOKENS.USDG.decimals)),
       expectedNetUsd: o.expectedNetUsd,
+      gasCostUsd: o.gasCostUsd,
       venues: o.hops.map(h => h.pool.pool.kind).join(' -> '),
     })),
     recentArbs: recentArbs.slice(0, 30),
@@ -1926,13 +1929,12 @@ async function tick() {
   // figure too, and a trade that doesn't clear gas needs to show as
   // negative there, not as a misleading "$0.0000" sitting next to a
   // positive-looking gross profit number.
-  const expectedNetUsdg = (opp: ArbOpp) => {
-    const gross = valueInUsdg(opp.tokenIn.symbol, opp.profitRaw, graph)
+  const gasUsdgFor = (opp: ArbOpp) => {
     const gasUnits = EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * BigInt(opp.hops.length)
     const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
-    const gasUsdg = valueInUsdg('WETH', gasWei, graph)
-    return gross - gasUsdg
+    return valueInUsdg('WETH', gasWei, graph)
   }
+  const expectedNetUsdg = (opp: ArbOpp) => valueInUsdg(opp.tokenIn.symbol, opp.profitRaw, graph) - gasUsdgFor(opp)
   const opps = bases
     .flatMap(baseSym => findArbs(graph, baseSym))
     .sort((a, b) => {
@@ -1944,6 +1946,7 @@ async function tick() {
     })
   for (const opp of opps) {
     opp.expectedNetUsd = Number(formatUnits(expectedNetUsdg(opp), TOKENS.USDG.decimals))
+    opp.gasCostUsd = Number(formatUnits(gasUsdgFor(opp), TOKENS.USDG.decimals))
   }
   const tickMs = Date.now() - t0
 
@@ -1995,6 +1998,7 @@ async function tick() {
       const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
       const gasUsdg = valueInUsdg('WETH', gasWei, graph)
       opp.expectedNetUsd = Number(formatUnits(opp.profitUsdg - gasUsdg, TOKENS.USDG.decimals))
+      opp.gasCostUsd = Number(formatUnits(gasUsdg, TOKENS.USDG.decimals))
     }
     if (settlementOpps.length > 0) {
       console.log(`\n[${new Date().toISOString()}] ${settlementOpps.length} settlement-route opportunities:`)

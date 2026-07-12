@@ -12,6 +12,7 @@ interface Opportunity {
   grossProfit?: string
   grossProfitUsd?: number
   expectedNetUsd?: number
+  gasCostUsd?: number
   venues?: string
 }
 
@@ -191,7 +192,8 @@ export default function BotPage() {
                       {o.venues && <span className="text-violet-400 font-mono text-xs">{o.venues}</span>}
                       <span className="text-text-secondary">{o.amountIn} {o.tokenIn}</span>
                       <span className={clsx('font-mono', o.expectedNetUsd != null && o.expectedNetUsd < 0 ? 'text-red-400' : 'text-emerald-400')}>
-                        net est. {o.expectedNetUsd != null ? `${o.expectedNetUsd < 0 ? '-' : ''}$${Math.abs(o.expectedNetUsd).toFixed(4)}` : '—'} (gross {o.grossProfit ?? '—'} {o.tokenIn})
+                        net est. {o.expectedNetUsd != null ? `${o.expectedNetUsd < 0 ? '-' : ''}$${Math.abs(o.expectedNetUsd).toFixed(4)}` : '—'} (gross {o.grossProfit ?? '—'} {o.tokenIn}
+                        {o.gasCostUsd != null && <>, gas <span className="text-text-muted">${o.gasCostUsd.toFixed(4)}</span></>})
                       </span>
                       <span className="text-aeon-400 font-mono">{o.profitPct.toFixed(3)}%</span>
                     </div>
