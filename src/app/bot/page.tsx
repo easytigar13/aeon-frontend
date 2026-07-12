@@ -74,6 +74,9 @@ export default function BotPage() {
 
   const hasFile = status && status.updatedAt
   const isOnline = hasFile && (Date.now() - new Date(status.updatedAt!).getTime()) < STALE_AFTER_MS
+  const visibleBalances = status?.balances
+    ? Object.entries(status.balances).filter(([, balance]) => parseFloat(balance) > 0.0001)
+    : []
 
   function copyAddr() {
     if (!status?.keeperAddress) return
@@ -157,7 +160,7 @@ export default function BotPage() {
               <div className="card p-6">
                 <div className="text-text-secondary text-sm font-mono uppercase tracking-wider mb-4">Wallet Balances</div>
                 <div className="space-y-2">
-                  {status.balances && Object.entries(status.balances).length > 0 ? Object.entries(status.balances).map(([sym, bal]) => {
+                  {visibleBalances.length > 0 ? visibleBalances.map(([sym, bal]) => {
                     const num = parseFloat(bal)
                     // A tiny dust balance (e.g. 0.00003) rounds to "0" at 4
                     // decimals, making it look identical to a token never
