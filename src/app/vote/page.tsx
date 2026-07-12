@@ -241,29 +241,57 @@ export default function VotePage() {
 
   // vAPR per pool: the annualized $ return a pool's LPs get from the AEON
   // emissions voting currently directs to it, relative to its own TVL --
-  // distinct from "APR" above (trading-fee yield). Mirrors EmissionsEngineRH's
-  // real on-chain formula (emissionBudgetUSD = feesUSD / EMISSION_RATIO,
-  // toVoter = 95% of the resulting mint) rather than guessing a number, but
-  // projects this epoch's fee budget from live 24h volume instead of reading
-  // EmissionsEngineRH's own 3-epoch rolling average -- this is a fresh
-  // deployment and that history is still genuinely empty (feeHistory is all
-  // zeros pre-genesis-flip), so a live-volume projection is the only estimate
-  // that reflects anything real right now. Same category of extrapolation the
-  // "APR" column already makes from a single day of volume.
+  // distinct from "APR" above (trading-fee yield).
+  //
+  // Previously projected this epoch's fee budget from live trailing-week
+  // volume instead of reading EmissionsEngineRH's own 3-epoch rolling
+  // average -- justified at the time by feeHistory being "all zeros
+  // pre-genesis-flip". Checked live on-chain (2026-07-12): that's no longer
+  // true. updatePeriod() has run once (feeHistoryIndex=1, lastMintAmount≈2.94
+  // AEON), so feeHistory[0]≈$0.57 is real, and the live-volume projection
+  // was overstating vAPR by ignoring two things the real contract enforces:
+  //   1. smoothedFeesUSD is an average of actual SNAPSHOTTED epoch fees
+  //      (only updated once per week, at the epoch flip), not continuous
+  //      trailing volume -- these can differ hugely mid-epoch.
+  //   2. tokensToMint is hard-capped at lastMintAmount * CIRCUIT_BREAKER (3x)
+  //      once a mint has happened -- no matter how high live volume runs,
+  //      the next real mint provably cannot exceed 3x the last one.
+  // This now replicates EmissionsEngineRH.updatePeriod()'s exact math
+  // (_rollingAverage -> emissionBudgetUSD -> rawMint -> circuit-breaker cap
+  // -> toVoter) using the real on-chain feeHistory/lastMintAmount, so vAPR
+  // reflects what the next mint can actually be, not a live-volume guess.
   const { data: onChainTotalWeight } = useReadContract({
     address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'totalWeight',
   })
   const aeonPrice = prices['AEON'] ?? null
 
-  // Uses the real trailing-week fee total directly rather than extrapolating
-  // a single day's volume ×7 -- the old approach zeroed out the whole
-  // week's projection whenever today specifically had no volume, even with
-  // real trading earlier in the week.
-  const totalFeesUSDWeek = POOLS.reduce((sum, pool) => {
-    const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
-    return volWeek !== null ? sum + volWeek * parseFeeRate(pool.fee) : sum
-  }, 0)
-  const projectedWeeklyToVoterUSD = (totalFeesUSDWeek / 10) * 0.95 // EMISSION_RATIO=10, TO_VOTER_BPS=9500
+  const { data: feeHistoryRaw } = useReadContracts({
+    contracts: [0, 1, 2].map(i => ({
+      address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'feeHistory', args: [BigInt(i)],
+    } as const)),
+  })
+  const { data: lastMintAmountRaw } = useReadContract({
+    address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount',
+  })
+
+  const feeHistory = (feeHistoryRaw ?? []).map(r => (r.status === 'success' ? (r.result as bigint) : undefined))
+  const nonZeroFees = feeHistory.filter((v): v is bigint => v !== undefined && v > 0n)
+  // Mirrors _rollingAverage(): average of the nonzero slots only (not always
+  // ÷3) -- with just one real snapshot so far, this is exactly that one value.
+  const smoothedFeesUSD = nonZeroFees.length > 0
+    ? Number(formatUnits(nonZeroFees.reduce((a, b) => a + b, 0n), 18)) / nonZeroFees.length
+    : 0
+  const lastMintAmount = lastMintAmountRaw !== undefined ? Number(formatUnits(lastMintAmountRaw as bigint, 18)) : 0
+
+  const EMISSION_RATIO = 10
+  const TO_VOTER_SHARE = 0.95
+  const CIRCUIT_BREAKER = 3
+
+  const emissionBudgetUSD = smoothedFeesUSD / EMISSION_RATIO
+  const rawMintAeon = aeonPrice && aeonPrice > 0 ? emissionBudgetUSD / aeonPrice : 0
+  const tokensToMintAeon = lastMintAmount > 0 ? Math.min(rawMintAeon, lastMintAmount * CIRCUIT_BREAKER) : rawMintAeon
+  const toVoterAeon = tokensToMintAeon * TO_VOTER_SHARE
+  const projectedWeeklyToVoterUSD = aeonPrice ? toVoterAeon * aeonPrice : 0
 
   const vaprByAddr: Record<string, number | null> = {}
   for (const pool of POOLS) {
