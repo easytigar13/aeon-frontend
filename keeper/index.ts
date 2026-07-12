@@ -105,10 +105,15 @@ const ENABLE_CROSS_VENUE = process.env.ENABLE_CROSS_VENUE === 'true'
 
 // Native ETH isn't one of the pool tokens (everything trades WETH), but
 // it's economically fungible with WETH via wrap/unwrap -- whatever's spare
-// above this reserve counts as WETH capacity for discovery and sizing, and
+// above the reserve counts as WETH capacity for discovery and sizing, and
 // gets wrapped on demand right before a trade that actually needs it (see
-// fetchBalances() and ensureWethBalance()). This amount is NEVER touched --
-// it's what keeps the bot able to pay for its own future transactions.
+// fetchBalances() and ensureWethBalance()). This is just a configured
+// FLOOR, not the actual reserve used -- computeMinGasReserveWei() (see
+// fetchBalances()) takes the larger of this and 3x a live, current-gas-price
+// worst-case transaction cost, every tick, so the real reserve never
+// silently falls behind if gas prices rise. Either way, the reserve is
+// NEVER touched -- it's what keeps the bot able to pay for its own future
+// transactions no matter what.
 const GAS_RESERVE_ETH = parseFloat(process.env.GAS_RESERVE_ETH ?? '0.005')
 
 // Every cycle starts AND ends in the SAME token -- a real cycle can't mix
@@ -903,7 +908,24 @@ interface BalancesResult {
   availableEthForWrap: bigint
 }
 
-async function fetchBalances(): Promise<BalancesResult> {
+// The reserve is never just a fixed ETH amount -- it's whichever is LARGER
+// of GAS_RESERVE_ETH (a user-configured floor) and 3x a live, worst-case
+// single-transaction gas estimate (deepest allowed cycle + an approval),
+// at the CURRENT gas price. This is deliberately separate from
+// GAS_SAFETY_MULT_PCT (which buffers whether one specific trade is
+// profitable) -- this is a standing float that must never run out, so it
+// gets its own, larger multiplier and reprices every tick against live gas
+// prices rather than trusting a number picked once and forgotten.
+const GAS_RESERVE_SAFETY_MULT = 3n
+function computeMinGasReserveWei(gasPrice: bigint): bigint {
+  const worstCaseGasUnits = APPROVE_GAS_FALLBACK + EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * BigInt(MAX_HOPS)
+  const bufferedCostWei = (worstCaseGasUnits * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
+  const dynamicReserveWei = bufferedCostWei * GAS_RESERVE_SAFETY_MULT
+  const staticReserveWei = parseEther(String(GAS_RESERVE_ETH))
+  return dynamicReserveWei > staticReserveWei ? dynamicReserveWei : staticReserveWei
+}
+
+async function fetchBalances(gasPrice: bigint): Promise<BalancesResult> {
   const distinctSymbols = Array.from(new Set(ARB_POOLS.flatMap(p => [p.token0, p.token1])))
   const balances: Record<string, bigint> = {}
   await Promise.all(distinctSymbols.map(async sym => {
@@ -917,7 +939,7 @@ async function fetchBalances(): Promise<BalancesResult> {
   let availableEthForWrap = 0n
   try {
     nativeEth = await pub.getBalance({ address: account.address })
-    const reserveWei = parseEther(String(GAS_RESERVE_ETH))
+    const reserveWei = computeMinGasReserveWei(gasPrice)
     availableEthForWrap = nativeEth > reserveWei ? nativeEth - reserveWei : 0n
   } catch { /* leave at 0 if this read fails -- WETH search balance just won't include it this tick */ }
 
@@ -1921,10 +1943,10 @@ async function tick() {
     return
   }
 
-  const { balances, searchBalances, nativeEth, availableEthForWrap } = await fetchBalances()
+  const rankingGasPrice = await pub.getGasPrice()
+  const { balances, searchBalances, nativeEth, availableEthForWrap } = await fetchBalances(rankingGasPrice)
   const bases = candidateBaseTokens(searchBalances)
   const graph = buildGraph(states)
-  const rankingGasPrice = await pub.getGasPrice()
   // Signed, NOT floored at zero -- this feeds the dashboard's "net est."
   // figure too, and a trade that doesn't clear gas needs to show as
   // negative there, not as a misleading "$0.0000" sitting next to a
