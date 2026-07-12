@@ -156,12 +156,22 @@ export default function BotPage() {
               <div className="card p-6">
                 <div className="text-text-secondary text-sm font-mono uppercase tracking-wider mb-4">Wallet Balances</div>
                 <div className="space-y-2">
-                  {status.balances && Object.entries(status.balances).length > 0 ? Object.entries(status.balances).map(([sym, bal]) => (
-                    <div key={sym} className="flex justify-between text-sm">
-                      <span className="text-text-secondary">{sym}</span>
-                      <span className="text-text-primary font-mono">{parseFloat(bal).toLocaleString(undefined, { maximumFractionDigits: 4 })}</span>
-                    </div>
-                  )) : <div className="text-text-muted text-sm">No balances yet</div>}
+                  {status.balances && Object.entries(status.balances).length > 0 ? Object.entries(status.balances).map(([sym, bal]) => {
+                    const num = parseFloat(bal)
+                    // A tiny dust balance (e.g. 0.00003) rounds to "0" at 4
+                    // decimals, making it look identical to a token never
+                    // held at all -- show more precision below 0.001 so a
+                    // real (if small) balance is never hidden.
+                    const display = num > 0 && num < 0.001
+                      ? num.toLocaleString(undefined, { maximumFractionDigits: 10 })
+                      : num.toLocaleString(undefined, { maximumFractionDigits: 4 })
+                    return (
+                      <div key={sym} className="flex justify-between text-sm">
+                        <span className="text-text-secondary">{sym}</span>
+                        <span className="text-text-primary font-mono">{display}</span>
+                      </div>
+                    )
+                  }) : <div className="text-text-muted text-sm">No balances yet</div>}
                 </div>
               </div>
               <div className="card p-6">
