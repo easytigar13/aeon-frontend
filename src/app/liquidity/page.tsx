@@ -10,7 +10,7 @@ import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, 
 import { ERC20_ABI, LIQUIDITY_HELPER_V2_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WHITELIST_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { useAllPools } from '@/hooks/useAllPools'
-import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
+import { usePoolStats, useClPoolStats, useDlmmPoolStats, useDiscoveredPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { useClPositions } from '@/hooks/useClPositions'
 import { useDlmmPositions } from '@/hooks/useDlmmPositions'
@@ -192,6 +192,7 @@ function usePoolListData(): UnifiedPool[] {
   const dlmmPoolStats  = useDlmmPoolStats(prices)
   const volResult      = useVolume24h(prices)
   const { discovered }  = useAllPools()
+  const discoveredStats = useDiscoveredPoolStats(discovered, prices)
 
   const vamm: UnifiedPool[] = POOLS.map(p => {
     const tvlUsd = poolStats.find(s => s.address === p.address)?.tvlUsd ?? null
@@ -215,13 +216,18 @@ function usePoolListData(): UnifiedPool[] {
   })
 
   // Pools anyone created themselves via Create Pool, discovered live from
-  // AeonFactoryRH.allPools() rather than hardcoded -- no gauge/TVL indexing
-  // yet (those still key off the static POOLS list), but they show up and
-  // are addable/swappable immediately instead of being invisible until
-  // someone manually wires them into contracts.ts.
+  // AeonFactoryRH.allPools() rather than hardcoded. TVL is now computed
+  // (reserves-based, same derivation as the static list, priced off
+  // whichever side is a known token) -- volume/fees/APR still aren't
+  // indexed (needs event-log scanning keyed off a known pool address ahead
+  // of time), so those stay null. They show up and are addable/swappable
+  // immediately either way, instead of being invisible until someone
+  // manually wires them into contracts.ts.
   const vammDiscovered: UnifiedPool[] = discovered.map(p => ({
     type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address,
-    feeLabel: p.fee, tvlUsd: null, volUsd: null, feesUsd: null, volUsdWeek: null, feesUsdWeek: null, aprPct: null,
+    feeLabel: p.fee,
+    tvlUsd: discoveredStats.find(s => s.address === p.address)?.tvlUsd ?? null,
+    volUsd: null, feesUsd: null, volUsdWeek: null, feesUsdWeek: null, aprPct: null,
   }))
 
   // CL_POOLS/DLMM_POOLS are currently empty (see contracts.ts comment), so

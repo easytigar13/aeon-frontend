@@ -4,6 +4,7 @@ import { formatUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, TOKENS, CONTRACTS } from '@/config/contracts'
 import { PAIR_ABI, VOTER_ABI, ERC20_ABI } from '@/config/abis'
 import type { PriceMap } from './usePrices'
+import type { DiscoveredPool } from './useAllPools'
 
 export interface PoolStat {
   address: string
@@ -57,6 +58,53 @@ export function usePoolStats(prices: PriceMap): PoolStat[] {
       votesWei: votes,
       votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : '0',
     }
+  })
+}
+
+// Dynamically-discovered pools (anyone's Create Pool, or a launchpad-created
+// token) previously always showed tvlUsd: null -- "no indexing yet" was a
+// deliberate scope cut, not a bug, but it reads as "this pool is empty/dead"
+// even when it has real reserves (confirmed: a launched ACAT/WETH pool with
+// real 0.001 WETH + 800M ACAT showed "$—" everywhere purely because nothing
+// ever queried its reserves). Same reserves-based TVL derivation as
+// usePoolStats above, just built from DiscoveredPool's own real addresses
+// instead of a TOKENS symbol lookup (the non-WETH/AEON/etc side of a
+// launchpad pool has no known price of its own, so this only ever prices
+// off whichever side IS a known token -- same "valA*2 estimate" fallback
+// already used for every static pool). Volume/fees/APR still aren't indexed
+// for these (needs event-log scanning keyed off a known pool address ahead
+// of time) -- that's the next gap if it's ever worth closing.
+export function useDiscoveredPoolStats(discovered: DiscoveredPool[], prices: PriceMap): PoolStat[] {
+  const contracts = discovered.flatMap(p => ([
+    { address: p.address, abi: PAIR_ABI, functionName: 'getReserves' } as const,
+  ]))
+  const { data } = useReadContracts({ contracts, query: { enabled: discovered.length > 0, refetchInterval: 30000 } })
+
+  return discovered.map((pool, i) => {
+    const reserves = data?.[i]?.status === 'success' ? data[i].result as readonly [bigint, bigint, number] : undefined
+    let tvlUsd: number | null = null
+
+    if (reserves) {
+      // token0Address/token1Address are already the real on-chain
+      // token0()/token1() (see useAllPools) -- no reordering needed, unlike
+      // usePoolStats above where the static TOKENS entry's declared order
+      // has to be checked against the pool's actual on-chain order.
+      const [rA, rB] = reserves
+
+      const priceA = prices[pool.token0] ?? null
+      const priceB = prices[pool.token1] ?? null
+      const decA = TOKENS[pool.token0 as keyof typeof TOKENS]?.decimals ?? 18
+      const decB = TOKENS[pool.token1 as keyof typeof TOKENS]?.decimals ?? 18
+
+      const valA = priceA !== null ? Number(formatUnits(rA, decA)) * priceA : null
+      const valB = priceB !== null ? Number(formatUnits(rB, decB)) * priceB : null
+
+      if (valA !== null && valB !== null) tvlUsd = valA + valB
+      else if (valA !== null) tvlUsd = valA * 2
+      else if (valB !== null) tvlUsd = valB * 2
+    }
+
+    return { address: pool.address, tvlUsd, votesWei: 0n, votesFormatted: '0' }
   })
 }
 
