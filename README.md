@@ -54,7 +54,8 @@ Full breakdown at [aeonprotocol.net/docs](https://aeonprotocol.net/docs).
 | Gauge Factory | `0x044f2A04Ca5D521293E6687D9a2953cf2B27a3C1` |
 | Buyback Engine | `0xe159282352fbD7aF64C22d581cf6338C382b7c5A` |
 | Fee Distributor | `0x772C2Ba92278D47B3A76b3f97b26A5c74d7F7975` |
-| Emissions Engine | `0xf34feaA8a05b81D8FC0c66cA8F0621475e88C8b6` |
+| Emissions Engine | `0xbF021C27F317b7e8B23d47B9063c5551D8527986` |
+| Protocol Burn Reward Distributor | `0xA258263aA1eE6870344336A17a1D94E18b7Af568` |
 | Oracle | `0x5A1E28EE00C4e83De000C7ffa5b59B22B45BD9BD` |
 | Factory | `0xD8495E398Fd7F0293Ccfca4a16181216CfDa6ED6` |
 | Router | `0x4d188106175De919a971B0cB6F8A0e3E885a3410` |

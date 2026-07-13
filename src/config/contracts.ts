@@ -17,7 +17,8 @@ export const CONTRACTS = {
   // Multi-gauge engine/controller activated 2026-07-13. Existing vAMM
   // gauges remain on AeonVoter; the controller directly funds the existing
   // CL/DLMM gauges without migrating pools, NFTs, bins, or staked positions.
-  EmissionsEngine:     '0x68E65b61Bf32AB509E4F042b54BbA5eD4beFC69e' as `0x${string}`,
+  EmissionsEngine:     '0xbF021C27F317b7e8B23d47B9063c5551D8527986' as `0x${string}`,
+  ProtocolBurnRewardDistributor: '0xA258263aA1eE6870344336A17a1D94E18b7Af568' as `0x${string}`,
   MultiGaugeController:'0x63f61916cDAABa76556723A75EE3690deCA9bd9A' as `0x${string}`,
   AeonOracle:          '0x5A1E28EE00C4e83De000C7ffa5b59B22B45BD9BD' as `0x${string}`,
   ConstantUsdFeed:     '0x182e8039659F8110D47a87BEad1FAAaEf981781d' as `0x${string}`,
