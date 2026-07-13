@@ -10,6 +10,7 @@ import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENG
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
+import { projectNextEmission } from '@/lib/emissionsProjection'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const
 
@@ -305,6 +306,9 @@ export default function VotePage() {
   const { data: lastMintAmountRaw } = useReadContract({
     address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount',
   })
+  const { data: feeHistoryIndexRaw } = useReadContract({
+    address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'feeHistoryIndex',
+  })
   const { data: multiGaugeBpsRaw } = useReadContract({
     address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'multiGaugeBps',
   })
@@ -316,22 +320,44 @@ export default function VotePage() {
     query: { enabled: multiEpoch !== undefined },
   })
 
-  const feeHistory = (feeHistoryRaw ?? []).map(r => (r.status === 'success' ? (r.result as bigint) : undefined))
-  const nonZeroFees = feeHistory.filter((v): v is bigint => v !== undefined && v > 0n)
-  // Mirrors _rollingAverage(): average of the nonzero slots only (not always
-  // ÷3) -- with just one real snapshot so far, this is exactly that one value.
-  const smoothedFeesUSD = nonZeroFees.length > 0
-    ? Number(formatUnits(nonZeroFees.reduce((a, b) => a + b, 0n), 18)) / nonZeroFees.length
-    : 0
+  const feeHistory = (feeHistoryRaw ?? []).map(r =>
+    r.status === 'success' ? Number(formatUnits(r.result as bigint, 18)) : null
+  )
   const lastMintAmount = lastMintAmountRaw !== undefined ? Number(formatUnits(lastMintAmountRaw as bigint, 18)) : 0
 
-  const EMISSION_RATIO = 10
   const TO_VOTER_SHARE = 0.95
-  const CIRCUIT_BREAKER = 3
 
-  const emissionBudgetUSD = smoothedFeesUSD / EMISSION_RATIO
-  const rawMintAeon = aeonPrice && aeonPrice > 0 ? emissionBudgetUSD / aeonPrice : 0
-  const tokensToMintAeon = lastMintAmount > 0 ? Math.min(rawMintAeon, lastMintAmount * CIRCUIT_BREAKER) : rawMintAeon
+  // Use the same live fee estimate shown on the dashboard, and project it
+  // into the exact rolling-history slot the next epoch flip will write.
+  // This keeps VAPR connected to fees as they rise/fall instead of leaving
+  // it frozen on the previous finalized $0.57 snapshot for the whole week.
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+  const now = Date.now()
+  const elapsedDays = (now - Math.floor(now / WEEK_MS) * WEEK_MS) / (24 * 60 * 60 * 1000)
+  const seenEmissionPools = new Set<string>()
+  const emissionPools = [...POOLS, ...CL_POOLS, ...DLMM_POOLS].filter(pool => {
+    const address = pool.address.toLowerCase()
+    if (seenEmissionPools.has(address)) return false
+    seenEmissionPools.add(address)
+    return true
+  })
+  const hasLiveFeeData = Object.keys(volResult.byPoolWeek).length > 0
+  const liveEpochFeesUSD = hasLiveFeeData
+    ? emissionPools.reduce((sum, pool) => {
+        const volumeWeek = volResult.byPoolWeek[pool.address.toLowerCase()]
+        return volumeWeek === undefined ? sum : sum + (volumeWeek / 7) * elapsedDays * parseFeeRate(pool.fee)
+      }, 0)
+    : null
+  const emissionProjection = feeHistoryIndexRaw !== undefined && feeHistory.length === 3
+    ? projectNextEmission({
+        feeHistoryUSD: feeHistory,
+        feeHistoryIndex: Number(feeHistoryIndexRaw),
+        liveEpochFeesUSD,
+        previousMintAeon: lastMintAmount,
+        aeonPriceUSD: aeonPrice,
+      })
+    : null
+  const tokensToMintAeon = emissionProjection?.projectedMintAeon ?? 0
   const multiGaugeShare = currentMultiWeight && currentMultiWeight > 0n
     ? Number(multiGaugeBpsRaw ?? 0n) / 10_000
     : 0
@@ -617,8 +643,8 @@ export default function VotePage() {
 
           <div className="card overflow-hidden">
             <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-bg-border">
-              {['Pool', 'Type', 'TVL', 'Volume 24h', '7d gross fee APR', 'Projected gauge vAPR', ''].map((h, i) => (
-                <div key={h + i} title={i === 4 ? 'Trailing 7-day gross swap fees annualized: fees7d ÷ TVL × 365/7.' : i === 5 ? 'Projected next-epoch AEON rewards annualized and divided by gauge-staked TVL only.' : undefined} className={clsx('text-2xs font-mono text-text-muted uppercase tracking-wider', i === 0 ? 'col-span-3' : i === 1 ? 'col-span-1' : i === 6 ? 'col-span-1 text-right' : 'col-span-2')}>{h}</div>
+              {['Pool', 'Type', 'TVL', 'Volume 24h', '7d gross fee APR', 'Live projected vAPR', ''].map((h, i) => (
+                <div key={h + i} title={i === 4 ? 'Trailing 7-day gross swap fees annualized: fees7d ÷ TVL × 365/7.' : i === 5 ? 'Live current-epoch fees projected into the next rolling snapshot, then the 10:1 rule, 3× cap, gauge vote share and staked TVL. Refreshes every minute.' : undefined} className={clsx('text-2xs font-mono text-text-muted uppercase tracking-wider', i === 0 ? 'col-span-3' : i === 1 ? 'col-span-1' : i === 6 ? 'col-span-1 text-right' : 'col-span-2')}>{h}</div>
               ))}
             </div>
 

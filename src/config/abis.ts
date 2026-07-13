@@ -471,6 +471,13 @@ export const EMISSIONS_ENGINE_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
+    name: 'feeHistoryIndex',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
     name: 'activePeriod',
     type: 'function',
     stateMutability: 'view',

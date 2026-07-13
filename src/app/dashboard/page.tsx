@@ -10,6 +10,7 @@ import { clsx } from 'clsx'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
+import { projectNextEmission } from '@/lib/emissionsProjection'
 
 function fmtUsd(n: number | null, compact = false): string {
   if (n === null) return '$—'
@@ -186,6 +187,7 @@ export default function DashboardPage() {
   const { data: veTokenCount }  = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId', ...LIVE })
   const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight', ...LIVE })
   const { data: weeklyEmissions } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount', ...LIVE })
+  const { data: feeHistoryIndexRaw } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'feeHistoryIndex', ...LIVE })
   const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.FeeDistributor,  abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD', ...LIVE })
   const { data: emissionFeeHistoryRaw } = useReadContracts({
     contracts: [0, 1, 2].map(i => ({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'feeHistory' as const, args: [BigInt(i)] as const })),
@@ -211,18 +213,6 @@ export default function DashboardPage() {
   const blendedFeePct  = 0.003 // ~0.3% blended across pools
   const aeonPrice      = prices.AEON ?? null
 
-  // Exact next-epoch model used by EmissionsEngineRH: non-zero 3-epoch fee
-  // average, 10:1 fee budget, then the 3x circuit-breaker against last mint.
-  const emissionHistory = (emissionFeeHistoryRaw ?? [])
-    .filter(r => r.status === 'success' && (r.result as bigint) > 0n)
-    .map(r => Number(formatUnits(r.result as bigint, 18)))
-  const smoothedEpochFees = emissionHistory.length > 0 ? emissionHistory.reduce((a, b) => a + b, 0) / emissionHistory.length : 0
-  const previousMint = weeklyEmissions ? Number(formatUnits(weeklyEmissions as bigint, 18)) : 0
-  const rawNextMint = aeonPrice && aeonPrice > 0 ? (smoothedEpochFees / 10) / aeonPrice : 0
-  const projectedEmissionsAeon = aeonPrice && aeonPrice > 0
-    ? (previousMint > 0 ? Math.min(rawNextMint, previousMint * 3) : rawNextMint)
-    : null
-
   // Fees this epoch — FeeDistributorV3.lastEpochFeesUSD only updates once per
   // epoch (on distribute()), so mid-epoch it's still reporting the PREVIOUS
   // epoch's already-finalized total, not what's actually accrued so far this
@@ -244,6 +234,27 @@ export default function DashboardPage() {
       : (volume24h !== null)
         ? volume24h * elapsedDays * blendedFeePct
         : null
+
+  // Live next-epoch model. The next updatePeriod() first writes this
+  // epoch's fee snapshot into feeHistory[feeHistoryIndex % 3], then takes
+  // the non-zero rolling average and applies the 10:1 rule and 3x cap.
+  // Projecting that write is the key difference from the old display,
+  // which misleadingly used only already-finalized historical fees.
+  const emissionHistory = (emissionFeeHistoryRaw ?? []).map(result =>
+    result.status === 'success' ? Number(formatUnits(result.result as bigint, 18)) : null
+  )
+  const previousMint = weeklyEmissions ? Number(formatUnits(weeklyEmissions as bigint, 18)) : 0
+  const emissionProjectionReady = feeHistoryIndexRaw !== undefined && emissionHistory.length === 3 && aeonPrice !== null
+  const liveEmissionProjection = emissionProjectionReady
+    ? projectNextEmission({
+        feeHistoryUSD: emissionHistory,
+        feeHistoryIndex: Number(feeHistoryIndexRaw),
+        liveEpochFeesUSD: feesThisEpoch,
+        previousMintAeon: previousMint,
+        aeonPriceUSD: aeonPrice,
+      })
+    : null
+  const projectedEmissionsAeon = liveEmissionProjection?.projectedMintAeon ?? null
 
   const burnedPct = aeonSupply && totalBurned && aeonSupply > 0n
     ? ((Number(totalBurned) / Number(aeonSupply)) * 100).toFixed(2)
@@ -346,7 +357,7 @@ export default function DashboardPage() {
                 { label: 'Epoch Ends',          value: `${days}d ${hours}h remaining` },
                 { label: 'Total Votes',         value: totalVotes !== undefined ? `${fmt18(totalVotes)} veAEON` : '—' },
                 { label: 'Estimated gross fees this epoch', value: feesThisEpoch !== null ? fmtUsd(feesThisEpoch, true) : '$—' },
-                { label: 'Next-epoch emission estimate', value: projectedEmissionsAeon !== null ? `~${projectedEmissionsAeon.toLocaleString(undefined, { maximumFractionDigits: 3 })} AEON` : '— AEON' },
+                { label: 'Live next-epoch emission estimate', value: projectedEmissionsAeon !== null ? `~${projectedEmissionsAeon.toLocaleString(undefined, { maximumFractionDigits: 3 })} AEON${liveEmissionProjection?.circuitBreakerActive ? ' · capped' : ''}` : '— AEON' },
               ].map(item => (
                 <div key={item.label} className="flex justify-between items-center gap-3">
                   <span className="text-sm text-text-muted">{item.label}</span>
