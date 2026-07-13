@@ -74,7 +74,7 @@ import * as dotenv from 'dotenv'
 import * as fs from 'fs'
 import { fileURLToPath } from 'url'
 import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES } from '../src/config/contracts'
-import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, WETH_ABI } from '../src/config/abis'
+import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
 import { writeBotStatus, appendTrade, isBotStoreConfigured } from '../src/lib/botStore'
@@ -128,6 +128,7 @@ const ATOMIC_ONLY = process.env.ATOMIC_ONLY !== 'false'
 // Re-run idempotent venue discovery so newly created pools and pools that
 // cross the external-volume threshold become routeable without a restart.
 const POOL_REFRESH_INTERVAL_MS = parseInt(process.env.POOL_REFRESH_INTERVAL_MS ?? '600000')
+const MULTI_GAUGE_DISTRIBUTION_INTERVAL_MS = parseInt(process.env.MULTI_GAUGE_DISTRIBUTION_INTERVAL_MS ?? '900000')
 
 // Native ETH isn't one of the pool tokens (everything trades WETH), but
 // it's economically fungible with WETH via wrap/unwrap -- whatever's spare
@@ -3034,6 +3035,63 @@ async function executeExternalArb(opp: ExternalArbOpp, graph: Map<string, HopCan
 // ─── Main loop ────────────────────────────────────────────────────────────────
 
 let lastAggregatorScan = 0
+let lastMultiGaugeDistribution = 0
+
+const MULTI_GAUGE_POOLS = Array.from(new Set([
+  ...Object.keys(CL_GAUGES),
+  ...Object.keys(DLMM_GAUGES),
+])).map(address => getAddress(address) as `0x${string}`)
+
+// Permissionless maintenance for the vote-weighted CL/DLMM reward stream.
+// Reads eight epochs so a temporary keeper outage cannot strand an older
+// allocation. A transaction is sent only when claimable AEON is nonzero.
+async function distributeMultiGaugeRewards() {
+  if (Date.now() - lastMultiGaugeDistribution < MULTI_GAUGE_DISTRIBUTION_INTERVAL_MS) return
+  lastMultiGaugeDistribution = Date.now()
+
+  const currentEpoch = await pub.readContract({
+    address: CONTRACTS.MultiGaugeController,
+    abi: MULTI_GAUGE_CONTROLLER_ABI,
+    functionName: 'currentEpoch',
+  })
+
+  for (let lookback = 0n; lookback < 8n; lookback++) {
+    const offset = lookback * 604800n
+    if (offset > currentEpoch) break
+    const epoch = currentEpoch - offset
+    const reads = await pub.multicall({
+      contracts: MULTI_GAUGE_POOLS.map(pool => ({
+        address: CONTRACTS.MultiGaugeController,
+        abi: MULTI_GAUGE_CONTROLLER_ABI,
+        functionName: 'claimable' as const,
+        args: [pool, epoch] as const,
+      })),
+      allowFailure: true,
+    })
+    const fundedPools = MULTI_GAUGE_POOLS.filter((_, i) =>
+      reads[i]?.status === 'success' && BigInt(reads[i].result as bigint) > 0n
+    )
+    if (fundedPools.length === 0) continue
+
+    const totalClaimable = reads.reduce((sum, result) =>
+      result.status === 'success' ? sum + BigInt(result.result as bigint) : sum, 0n
+    )
+    if (DRY_RUN) {
+      console.log(`[multi-gauge dry run] epoch ${epoch}: ${fundedPools.length} gauges, ${formatUnits(totalClaimable, 18)} AEON claimable`)
+      continue
+    }
+
+    const { request } = await pub.simulateContract({
+      account,
+      address: CONTRACTS.MultiGaugeController,
+      abi: MULTI_GAUGE_CONTROLLER_ABI,
+      functionName: 'distributeBatch',
+      args: [fundedPools, epoch],
+    })
+    const { hash } = await writeContractTracked(request, `multi-gauge distribution epoch ${epoch}`)
+    console.log(`[multi-gauge] forwarded ${formatUnits(totalClaimable, 18)} AEON to ${fundedPools.length} gauges: ${hash}`)
+  }
+}
 
 // Bounds how many candidates get a real gas-floor check (each costs RPC
 // calls) before giving up for the tick -- sorted descending by profitPct,
@@ -3042,6 +3100,15 @@ const EXECUTION_CANDIDATES_PER_TICK = 10
 
 async function tick() {
   const t0 = Date.now()
+
+  try {
+    await distributeMultiGaugeRewards()
+  } catch (err: any) {
+    const message = err?.message ?? String(err)
+    console.error(`[multi-gauge distribution error] ${message}`)
+    recentErrors.unshift({ time: new Date().toISOString(), message })
+    recentErrors = recentErrors.slice(0, 5)
+  }
 
   if (Date.now() - lastPoolRefresh >= POOL_REFRESH_INTERVAL_MS) {
     lastPoolRefresh = Date.now()

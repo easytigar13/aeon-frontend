@@ -5,8 +5,8 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CONTRACTS } from '@/config/contracts'
-import { VOTING_ESCROW_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI } from '@/config/abis'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS } from '@/config/contracts'
+import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -59,6 +59,8 @@ function fmtUsd(n: number | null): string {
 }
 
 interface VoteAllocation { pool: string; poolAddress: `0x${string}`; weight: number }
+interface VotePool { name: string; token0: string; token1: string; type: string; fee: string; address: `0x${string}` }
+type VoteMode = 'vAMM' | 'CL_DLMM'
 
 export default function VotePage() {
   const [mounted, setMounted] = useState(false)
@@ -71,6 +73,7 @@ export default function VotePage() {
   const [tokenIdInput,  setTokenIdInput]  = useState('')
   const [allocations,   setAllocations]   = useState<VoteAllocation[]>([])
   const [search,        setSearch]        = useState('')
+  const [voteMode,      setVoteMode]      = useState<VoteMode>('vAMM')
 
   // Safe conversion — BigInt throws on non-integer strings
   const tokenId = (() => {
@@ -131,6 +134,20 @@ export default function VotePage() {
     functionName: 'voted',
     args: tokenId ? [tokenId] : undefined,
     query: { enabled: !!tokenId },
+  })
+
+  const { data: multiEpoch } = useReadContract({
+    address: CONTRACTS.MultiGaugeController,
+    abi: MULTI_GAUGE_CONTROLLER_ABI,
+    functionName: 'currentEpoch',
+  })
+
+  const { data: multiHasVoted, refetch: refetchMultiHasVoted } = useReadContract({
+    address: CONTRACTS.MultiGaugeController,
+    abi: MULTI_GAUGE_CONTROLLER_ABI,
+    functionName: 'hasVoted',
+    args: multiEpoch !== undefined && tokenId !== undefined ? [multiEpoch, tokenId] : undefined,
+    query: { enabled: multiEpoch !== undefined && tokenId !== undefined },
   })
 
   const { data: lastVotedTs } = useReadContract({
@@ -211,8 +228,11 @@ export default function VotePage() {
   const isActivating = activateStep !== 'idle'
 
   useEffect(() => {
-    if (txSuccess) { refetchHasVoted() }
-  }, [txSuccess])
+    if (txSuccess) {
+      if (voteMode === 'vAMM') refetchHasVoted()
+      else refetchMultiHasVoted()
+    }
+  }, [txSuccess, voteMode, refetchHasVoted, refetchMultiHasVoted])
 
   useEffect(() => {
     if (resetSuccess) { refetchHasVoted() }
@@ -285,6 +305,16 @@ export default function VotePage() {
   const { data: lastMintAmountRaw } = useReadContract({
     address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount',
   })
+  const { data: multiGaugeBpsRaw } = useReadContract({
+    address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'multiGaugeBps',
+  })
+  const { data: currentMultiWeight } = useReadContract({
+    address: CONTRACTS.MultiGaugeController,
+    abi: MULTI_GAUGE_CONTROLLER_ABI,
+    functionName: 'totalWeight',
+    args: multiEpoch !== undefined ? [multiEpoch] : undefined,
+    query: { enabled: multiEpoch !== undefined },
+  })
 
   const feeHistory = (feeHistoryRaw ?? []).map(r => (r.status === 'success' ? (r.result as bigint) : undefined))
   const nonZeroFees = feeHistory.filter((v): v is bigint => v !== undefined && v > 0n)
@@ -302,7 +332,10 @@ export default function VotePage() {
   const emissionBudgetUSD = smoothedFeesUSD / EMISSION_RATIO
   const rawMintAeon = aeonPrice && aeonPrice > 0 ? emissionBudgetUSD / aeonPrice : 0
   const tokensToMintAeon = lastMintAmount > 0 ? Math.min(rawMintAeon, lastMintAmount * CIRCUIT_BREAKER) : rawMintAeon
-  const toVoterAeon = tokensToMintAeon * TO_VOTER_SHARE
+  const multiGaugeShare = currentMultiWeight && currentMultiWeight > 0n
+    ? Number(multiGaugeBpsRaw ?? 0n) / 10_000
+    : 0
+  const toVoterAeon = tokensToMintAeon * TO_VOTER_SHARE * (1 - multiGaugeShare)
   const projectedWeeklyToVoterUSD = aeonPrice ? toVoterAeon * aeonPrice : 0
 
   const vaprByAddr: Record<string, number | null> = {}
@@ -320,9 +353,12 @@ export default function VotePage() {
   const totalWeight = allocations.reduce((s, a) => s + a.weight, 0)
   const remaining   = 100 - totalWeight
 
-  const filteredPools = POOLS.filter(p =>
+  const availablePools: VotePool[] = voteMode === 'vAMM' ? POOLS : [...CL_POOLS, ...DLMM_POOLS]
+  const filteredPools = availablePools.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase())
   )
+
+  const hasVotedForMode = voteMode === 'vAMM' ? !!hasVoted : !!multiHasVoted
 
   const isOwner = nftOwner && address && nftOwner.toLowerCase() === address.toLowerCase()
 
@@ -330,7 +366,7 @@ export default function VotePage() {
   // UI limit, so this stays correct as more pools get added.
   const MAX_VOTE_POOLS = 30
 
-  function addPool(pool: typeof POOLS[number]) {
+  function addPool(pool: VotePool) {
     if (allocations.length >= MAX_VOTE_POOLS) return
     if (allocations.find(a => a.poolAddress === pool.address)) return
     const share = Math.floor(remaining / (MAX_VOTE_POOLS - allocations.length + 1))
@@ -357,7 +393,17 @@ export default function VotePage() {
     if (!tokenId || !isOwner || totalWeight !== 100 || allocations.length === 0) return
     const poolAddresses = allocations.map(a => a.poolAddress)
     const weights       = allocations.map(a => BigInt(Math.round(a.weight * 100)))
-    writeContract({ address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'vote', args: [tokenId, poolAddresses, weights] })
+    if (voteMode === 'vAMM') {
+      writeContract({ address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'vote', args: [tokenId, poolAddresses, weights] })
+    } else {
+      writeContract({ address: CONTRACTS.MultiGaugeController, abi: MULTI_GAUGE_CONTROLLER_ABI, functionName: 'vote', args: [tokenId, poolAddresses, weights] })
+    }
+  }
+
+  function changeVoteMode(mode: VoteMode) {
+    setVoteMode(mode)
+    setAllocations([])
+    setSearch('')
   }
 
   function handleReset() {
@@ -442,12 +488,12 @@ export default function VotePage() {
                     </div>
                     <div className="flex justify-between text-xs">
                       <span className="text-text-muted">Has Voted</span>
-                      <span className={clsx('font-mono', hasVoted ? 'text-yellow-400' : 'text-emerald-400')}>
-                        {hasVoted === undefined ? '—' : hasVoted ? 'Yes (reset first)' : 'No'}
+                      <span className={clsx('font-mono', hasVotedForMode ? 'text-yellow-400' : 'text-emerald-400')}>
+                        {voteMode === 'vAMM' && hasVoted === undefined ? '—' : voteMode === 'CL_DLMM' && multiHasVoted === undefined ? '—' : hasVotedForMode ? 'Yes' : 'No'}
                       </span>
                     </div>
-                    {hasVoted && <CurrentVotes tokenId={tokenId} />}
-                    {hasVoted && (
+                    {hasVotedForMode && <CurrentVotes tokenId={tokenId} mode={voteMode} epoch={multiEpoch} />}
+                    {voteMode === 'vAMM' && hasVoted && (
                       <div className="space-y-1 mt-1">
                         <button onClick={handleReset} disabled={isResetting || !canReset} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
                           {isResetting ? 'Resetting…' : canReset ? 'Reset Vote' : `Reset unlocks in ${resetCountdown()}`}
@@ -533,14 +579,18 @@ export default function VotePage() {
 
             <button
               onClick={handleVote}
-              disabled={isBusy || (isConnected && (totalWeight !== 100 || allocations.length === 0 || !tokenId || !isOwner || !!hasVoted))}
+              disabled={isBusy || (isConnected && (totalWeight !== 100 || allocations.length === 0 || !tokenId || !isOwner || hasVotedForMode))}
               className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
             >
               <Vote size={16} />
               {!isConnected ? 'Connect Wallet' : isBusy ? 'Voting...' : 'Cast Vote'}
             </button>
             {isConnected && !tokenId && <p className="text-2xs text-text-muted text-center mt-2">Enter your veNFT ID above to vote</p>}
-            {isConnected && tokenId && hasVoted && <p className="text-2xs text-yellow-400 text-center mt-2">Reset your vote first before re-voting</p>}
+            {isConnected && tokenId && hasVotedForMode && (
+              <p className="text-2xs text-yellow-400 text-center mt-2">
+                {voteMode === 'vAMM' ? 'Reset your vAMM vote first before re-voting' : 'CL/DLMM votes renew next epoch'}
+              </p>
+            )}
           </div>
 
           {/* Epoch info */}
@@ -554,10 +604,15 @@ export default function VotePage() {
         <div className="lg:col-span-2">
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
             <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search pools..." className="input-base flex-1 text-sm py-2" />
+            <div className="flex rounded-xl border border-bg-border bg-bg-base p-1">
+              <button onClick={() => changeVoteMode('vAMM')} className={clsx('px-3 py-1.5 rounded-lg text-xs font-mono transition-colors', voteMode === 'vAMM' ? 'bg-blue-400/15 text-blue-400' : 'text-text-muted')}>vAMM</button>
+              <button onClick={() => changeVoteMode('CL_DLMM')} className={clsx('px-3 py-1.5 rounded-lg text-xs font-mono transition-colors', voteMode === 'CL_DLMM' ? 'bg-violet-400/15 text-violet-400' : 'text-text-muted')}>CL + DLMM</button>
+            </div>
           </div>
           <p className="text-2xs text-text-muted mb-3 -mt-1">
-            Every vAMM pool is votable, including new ones as they launch — up to {MAX_VOTE_POOLS} at once, matching the on-chain limit.
-            CL and DLMM pools aren't listed yet: they don't have gauges, so voting for one would revert.
+            {voteMode === 'vAMM'
+              ? `Every vAMM pool remains on the legacy voter — up to ${MAX_VOTE_POOLS} at once.`
+              : `Existing CL and DLMM positions now receive automatic vote-weighted AEON emissions. Votes are epoch-scoped and renew weekly.`}
           </p>
 
           <div className="card overflow-hidden">
@@ -613,17 +668,29 @@ export default function VotePage() {
 // The unique pools this tokenId could possibly have voted for — de-duped by
 // address, matching how AeonVoterV2 tracks votes per pool (not per fee tier).
 const UNIQUE_VOTE_POOLS = POOLS.filter((p, i, arr) => arr.findIndex(x => x.address === p.address) === i)
+const UNIQUE_MULTI_VOTE_POOLS = [...CL_POOLS, ...DLMM_POOLS]
+  .filter((p, i, arr) => arr.findIndex(x => x.address === p.address) === i)
 
-function CurrentVotes({ tokenId }: { tokenId: bigint | undefined }) {
-  const { data } = useReadContracts({
+function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; mode: VoteMode; epoch: bigint | undefined }) {
+  const { data: legacyData } = useReadContracts({
     contracts: UNIQUE_VOTE_POOLS.map(p => ({
       address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'getVotes' as const,
       args: tokenId !== undefined ? [tokenId, p.address] as const : undefined,
     })),
-    query: { enabled: tokenId !== undefined, refetchInterval: 15000 },
+    query: { enabled: mode === 'vAMM' && tokenId !== undefined, refetchInterval: 15000 },
+  })
+  const { data: multiData } = useReadContracts({
+    contracts: UNIQUE_MULTI_VOTE_POOLS.map(p => ({
+      address: CONTRACTS.MultiGaugeController, abi: MULTI_GAUGE_CONTROLLER_ABI, functionName: 'votes' as const,
+      args: tokenId !== undefined && epoch !== undefined ? [epoch, tokenId, p.address] as const : undefined,
+    })),
+    query: { enabled: mode === 'CL_DLMM' && tokenId !== undefined && epoch !== undefined, refetchInterval: 15000 },
   })
 
-  const rows = UNIQUE_VOTE_POOLS
+  const votePools = mode === 'vAMM' ? UNIQUE_VOTE_POOLS : UNIQUE_MULTI_VOTE_POOLS
+  const data = mode === 'vAMM' ? legacyData : multiData
+
+  const rows = votePools
     .map((pool, i) => ({ pool, weight: data?.[i]?.status === 'success' ? data[i].result as bigint : 0n }))
     .filter(r => r.weight > 0n)
 

@@ -14,7 +14,11 @@ export const CONTRACTS = {
   AeonGaugeFactory:    '0x044f2A04Ca5D521293E6687D9a2953cf2B27a3C1' as `0x${string}`,
   BuybackEngine:       '0xe159282352fbD7aF64C22d581cf6338C382b7c5A' as `0x${string}`,
   FeeDistributor:      '0x772C2Ba92278D47B3A76b3f97b26A5c74d7F7975' as `0x${string}`,
-  EmissionsEngine:     '0xf34feaA8a05b81D8FC0c66cA8F0621475e88C8b6' as `0x${string}`,
+  // Multi-gauge engine/controller activated 2026-07-13. Existing vAMM
+  // gauges remain on AeonVoter; the controller directly funds the existing
+  // CL/DLMM gauges without migrating pools, NFTs, bins, or staked positions.
+  EmissionsEngine:     '0x68E65b61Bf32AB509E4F042b54BbA5eD4beFC69e' as `0x${string}`,
+  MultiGaugeController:'0x63f61916cDAABa76556723A75EE3690deCA9bd9A' as `0x${string}`,
   AeonOracle:          '0x5A1E28EE00C4e83De000C7ffa5b59B22B45BD9BD' as `0x${string}`,
   ConstantUsdFeed:     '0x182e8039659F8110D47a87BEad1FAAaEf981781d' as `0x${string}`,
   // Old factory (2026-07-02 genesis deploy) has an AeonPoolRH baked into its
@@ -157,14 +161,10 @@ export const CONTRACTS = {
   AeonTokenLaunchpadV2: '0x06825A8969593b83cCcC793f82463e892Fb7641e' as `0x${string}`,
 } as const
 
-// Deployed 2026-07-05: parallel staking + AEON-rewards contracts for CL and
-// DLMM pools, keyed by pool address. NOT wired into AeonVoterV2's automatic
-// vote-weighted emissions — that voter's gaugeFactory can only ever be set
-// once (already is, permanently, to a factory that only deploys plain
-// ERC20-LP-token gauges), and CL positions are NFTs / DLMM positions are
-// per-bin share tokens, neither of which fit that shape. These gauges take
-// a governor-funded discretionary AEON budget via notifyRewardAmount()
-// instead of the automatic stream vAMM gauges get.
+// Deployed 2026-07-05: CL/DLMM staking gauges, keyed by pool address.
+// Upgraded in place on 2026-07-13: their governor roles now point to the
+// MultiGaugeController above, which supplies automatic vote-weighted AEON
+// emissions. Pools, CL NFTs, DLMM bins, and existing stakes were not moved.
 // Redeployed 2026-07-05 (v2) to add per-user staked-position enumeration
 // (getStakedTokenIds / getStakedBinIds) — needed for the frontend to show
 // "your staked positions" at all, since staking transfers custody away from
@@ -398,15 +398,9 @@ export const ALGEBRA_CONTRACTS = {
   quoterV2:                    '0x0fC2Ac0217FC9dF2577Be3519be07e6612775Eab' as `0x${string}`,
 } as const
 
-// Removed from the frontend entirely 2026-07-10, per explicit user request:
-// CL rewards are governor-funded-discretionary, not the automatic
-// vote-weighted emissions vAMM gauges get (see AeonClGauge.sol header / the
-// declined project_unified_voting_plan memory for why that can't be fixed
-// without migrating every vAMM staker too). Partially restored 2026-07-12,
+// Removed from the frontend entirely 2026-07-10, then partially restored 2026-07-12,
 // per explicit user request -- only the CASHCAT/AEON/ETH/USDG subset (the
-// VIRTUAL and ROBINFUN pairs stay hidden/commented below). The reward-model
-// caveat above still applies to what's restored, just no longer a reason to
-// hide these 6 specifically. All 6 addresses re-verified on-chain (real
+// VIRTUAL and ROBINFUN pairs stay hidden/commented below). All 6 addresses re-verified on-chain (real
 // bytecode) before restoring. On-chain pools/gauges were never touched by
 // the original removal -- 3 of these 6 pairs (AEON/ETH, AEON/USDG, ETH/USDG)
 // have real staked positions; CASHCAT/AEON, CASHCAT/USDG, CASHCAT/ETH are

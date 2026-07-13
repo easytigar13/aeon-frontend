@@ -478,6 +478,13 @@ export const EMISSIONS_ENGINE_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
+    name: 'multiGaugeBps',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
     name: 'genesisDone',
     type: 'function',
     stateMutability: 'view',
@@ -952,6 +959,44 @@ export const VOTER_ABI = [
     stateMutability: 'view',
     inputs: [{ name: 'gauge', type: 'address' }],
     outputs: [{ name: '', type: 'address' }],
+  },
+] as const
+
+export const MULTI_GAUGE_CONTROLLER_ABI = [
+  {
+    name: 'vote', type: 'function', stateMutability: 'nonpayable', outputs: [],
+    inputs: [
+      { name: 'tokenId', type: 'uint256' },
+      { name: 'poolVote', type: 'address[]' },
+      { name: 'allocation', type: 'uint256[]' },
+    ],
+  },
+  { name: 'currentEpoch', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  {
+    name: 'hasVoted', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'epoch', type: 'uint256' }, { name: 'tokenId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+  {
+    name: 'votes', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'epoch', type: 'uint256' }, { name: 'tokenId', type: 'uint256' }, { name: 'pool', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'weights', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'epoch', type: 'uint256' }, { name: 'pool', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  { name: 'totalWeight', type: 'function', stateMutability: 'view', inputs: [{ name: 'epoch', type: 'uint256' }], outputs: [{ name: '', type: 'uint256' }] },
+  {
+    name: 'claimable', type: 'function', stateMutability: 'view',
+    inputs: [{ name: 'pool', type: 'address' }, { name: 'epoch', type: 'uint256' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'distributeBatch', type: 'function', stateMutability: 'nonpayable',
+    inputs: [{ name: 'poolList', type: 'address[]' }, { name: 'epoch', type: 'uint256' }],
+    outputs: [{ name: 'total', type: 'uint256' }],
   },
 ] as const
 
