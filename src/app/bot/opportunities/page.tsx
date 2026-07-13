@@ -16,7 +16,7 @@ interface Opportunity {
   venues?: string
 }
 
-const STALE_AFTER_MS = 15_000
+const STALE_AFTER_MS = 60_000
 
 export default function BotOpportunitiesPage() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])

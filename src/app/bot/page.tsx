@@ -61,11 +61,17 @@ interface BotStatus {
   outcomeCounters?: Record<'detected' | 'executed' | 'belowGas' | 'insufficientBalance' | 'simulationFailed' | 'staleQuote' | 'reverted', number>
 }
 
-const STALE_AFTER_MS = 15_000
+type ProfitRange = 'today' | 'sevenDays' | 'month' | 'all'
+
+// A full 93-pool scan plus final simulation can legitimately exceed 15s.
+// Treat that as busy, not offline; PM2/process failures still age out quickly.
+const STALE_AFTER_MS = 60_000
 
 export default function BotPage() {
   const [status, setStatus] = useState<BotStatus | null>(null)
   const [copied, setCopied] = useState(false)
+  const [profitRange, setProfitRange] = useState<ProfitRange>('today')
+  const [profitSummaries, setProfitSummaries] = useState<Record<string, Record<string, string>>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -81,8 +87,26 @@ export default function BotPage() {
     return () => { cancelled = true; clearInterval(id) }
   }, [])
 
+  useEffect(() => {
+    let cancelled = false
+    async function pollProfit() {
+      try {
+        const res = await fetch('/api/bot/trades?summary=1', { cache: 'no-store' })
+        const data = await res.json()
+        if (!cancelled) setProfitSummaries(data.summaries ?? {})
+      } catch { /* retain the last successful summary */ }
+    }
+    pollProfit()
+    const id = setInterval(pollProfit, 15_000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [])
+
   const hasFile = status && status.updatedAt
   const isOnline = hasFile && (Date.now() - new Date(status.updatedAt!).getTime()) < STALE_AFTER_MS
+  const executionReady = isOnline && status?.gasReserve?.healthy !== false && !status?.pausedUntil
+  const displayedProfit = profitRange === 'all'
+    ? (status?.cumulativeProfit ?? {})
+    : (profitSummaries[profitRange] ?? {})
   const visibleBalances = status?.balances
     ? Object.entries(status.balances).filter(([, balance]) => parseFloat(balance) > 0.0001)
     : []
@@ -112,10 +136,10 @@ export default function BotPage() {
           </div>
           <div className={clsx(
             'inline-flex items-center gap-2 px-3 py-1.5 rounded-full border font-mono text-xs font-bold tracking-wider uppercase',
-            isOnline ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-red-500/10 border-red-500/30 text-red-400'
+            executionReady ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : isOnline ? 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400' : 'bg-red-500/10 border-red-500/30 text-red-400'
           )}>
-            <span className={clsx('w-2 h-2 rounded-full', isOnline ? 'bg-emerald-400 animate-pulse-slow' : 'bg-red-400')} />
-            {isOnline ? (status?.dryRun ? 'Online · Dry Run' : 'Online · Live') : 'Offline'}
+            <span className={clsx('w-2 h-2 rounded-full', executionReady ? 'bg-emerald-400 animate-pulse-slow' : isOnline ? 'bg-yellow-400 animate-pulse-slow' : 'bg-red-400')} />
+            {!isOnline ? 'Offline' : status?.dryRun ? 'Online · Dry Run' : !status?.gasReserve?.healthy ? 'Online · Refilling Gas' : status?.pausedUntil ? 'Online · Safety Pause' : 'Online · Live'}
           </div>
         </div>
 
@@ -222,16 +246,28 @@ export default function BotPage() {
                 </div>
               </GlowPanel>
               <GlowPanel accent="emerald" className="p-6">
-                <div className="text-text-secondary text-sm font-mono uppercase tracking-wider mb-4 flex items-center gap-2">
-                  <TrendingUp size={14} /> Cumulative Profit
+                <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                  <div className="text-text-secondary text-sm font-mono uppercase tracking-wider flex items-center gap-2">
+                    <TrendingUp size={14} /> Profit
+                  </div>
+                  <div className="flex rounded-lg bg-bg-base p-0.5 border border-bg-border">
+                    {([
+                      ['today', 'Today'], ['sevenDays', '7 Days'], ['month', 'Month'], ['all', 'All Time'],
+                    ] as [ProfitRange, string][]).map(([range, label]) => (
+                      <button key={range} onClick={() => setProfitRange(range)} className={clsx(
+                        'px-2 py-1 rounded-md text-2xs font-mono transition-colors',
+                        profitRange === range ? 'bg-emerald-400/15 text-emerald-400' : 'text-text-muted hover:text-text-secondary',
+                      )}>{label}</button>
+                    ))}
+                  </div>
                 </div>
                 <div className="space-y-2">
-                  {status.cumulativeProfit && Object.entries(status.cumulativeProfit).length > 0 ? Object.entries(status.cumulativeProfit).map(([sym, amt]) => (
+                  {Object.entries(displayedProfit).length > 0 ? Object.entries(displayedProfit).map(([sym, amt]) => (
                     <div key={sym} className="flex justify-between text-sm">
                       <span className="text-text-secondary">{sym}</span>
                       <span className="text-emerald-400 font-mono">+{parseFloat(amt).toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
                     </div>
-                  )) : <div className="text-text-muted text-sm">No profit recorded yet</div>}
+                  )) : <div className="text-text-muted text-sm">No successful profit in this period</div>}
                 </div>
               </GlowPanel>
             </div>

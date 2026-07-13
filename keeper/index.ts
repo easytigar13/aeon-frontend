@@ -73,7 +73,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import * as dotenv from 'dotenv'
 import * as fs from 'fs'
 import { fileURLToPath } from 'url'
-import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES } from '../src/config/contracts'
+import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES, UNISWAP_POOLS } from '../src/config/contracts'
 import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
@@ -110,8 +110,13 @@ const MAX_BALANCE_USAGE_BPS = configuredBalanceUsageBps < 1n ? 1n : configuredBa
 const ROUTE_FAILURE_THRESHOLD = parseInt(process.env.ROUTE_FAILURE_THRESHOLD ?? '2')
 const ROUTE_COOLDOWN_MS = parseInt(process.env.ROUTE_COOLDOWN_MS ?? '60000')
 const ROUTE_MAX_COOLDOWN_MS = parseInt(process.env.ROUTE_MAX_COOLDOWN_MS ?? '900000')
-const PENDING_TX_TIMEOUT_MS = parseInt(process.env.PENDING_TX_TIMEOUT_MS ?? '45000')
+const PENDING_TX_TIMEOUT_MS = parseInt(process.env.PENDING_TX_TIMEOUT_MS ?? '6000')
 const REPLACEMENT_GAS_BUMP_BPS = BigInt(process.env.REPLACEMENT_GAS_BUMP_BPS ?? '1250')
+// Robinhood Chain competitors consistently submit EIP-1559 transactions with
+// a max-fee cap around 2x the current gas price. The cap is not what is paid;
+// it gives the sequencer room to include the transaction if base fees move
+// between signing and inclusion. Keep priority fee at zero, matching the L2.
+const TX_FEE_HEADROOM_BPS = BigInt(process.env.TX_FEE_HEADROOM_BPS ?? '20000')
 
 // Cross-venue (OpenOcean / 1inch) scan runs far less often than the internal
 // pool scan -- it costs real API calls (rate-limited, especially 1inch),
@@ -119,10 +124,11 @@ const REPLACEMENT_GAS_BUMP_BPS = BigInt(process.env.REPLACEMENT_GAS_BUMP_BPS ?? 
 const AGGREGATOR_SCAN_INTERVAL_MS = parseInt(process.env.AGGREGATOR_SCAN_INTERVAL_MS ?? '30000')
 const AGGREGATOR_SLIPPAGE_PCT = parseFloat(process.env.AGGREGATOR_SLIPPAGE_PCT ?? '0.5')
 const ENABLE_CROSS_VENUE = process.env.ENABLE_CROSS_VENUE === 'true'
-// Safety defaults: an arbitrage must close in its starting token and all
-// legs must settle atomically. Non-atomic routes may still be observed, but
-// are never signed while ATOMIC_ONLY is enabled.
-const SAME_TOKEN_ONLY = process.env.SAME_TOKEN_ONLY !== 'false'
+// Settlement routes may start in AEON/USDG/WETH and finish in any of those
+// three assets. They still execute every hop atomically and enforce a live
+// USDG-equivalent output floor above input value + gas. Set true to restore
+// the stricter same-token-only mode.
+const SAME_TOKEN_ONLY = process.env.SAME_TOKEN_ONLY === 'true'
 const ATOMIC_ONLY = process.env.ATOMIC_ONLY !== 'false'
 
 // Re-run idempotent venue discovery so newly created pools and pools that
@@ -142,6 +148,10 @@ const MULTI_GAUGE_DISTRIBUTION_INTERVAL_MS = parseInt(process.env.MULTI_GAUGE_DI
 // NEVER touched -- it's what keeps the bot able to pay for its own future
 // transactions no matter what.
 const GAS_RESERVE_ETH = parseFloat(process.env.GAS_RESERVE_ETH ?? '0.005')
+// A refill targets 120% of the live reserve so the unwrap transaction and the
+// next arb do not immediately put the wallet below the floor again.
+const GAS_REFILL_TARGET_BPS = BigInt(process.env.GAS_REFILL_TARGET_BPS ?? '12000')
+const GAS_REFILL_RETRY_MS = parseInt(process.env.GAS_REFILL_RETRY_MS ?? '30000')
 
 // Every cycle starts AND ends in the SAME token -- a real cycle can't mix
 // currencies, since there'd be nothing enforcing you actually end up ahead
@@ -222,6 +232,25 @@ const UNISWAP_FEE_BPS = 30n
 // AeonArbKeeper uses standard V2 exact-input math, so those pairs cannot be
 // executed safely until the contract re-measures received amounts per hop.
 const UNISWAP_UNSUPPORTED_TOKENS = new Set<keyof typeof TOKENS>(['ROBINFUN'])
+// Seed explicitly verified V2-compatible pools, including factories outside
+// the primary discovery factory. Dynamic discovery below de-duplicates these
+// by address when it encounters the same pair.
+for (const p of UNISWAP_POOLS) {
+  const token0 = p.token0 as keyof typeof TOKENS
+  const token1 = p.token1 as keyof typeof TOKENS
+  if (!(token0 in TOKENS) || !(token1 in TOKENS)) continue
+  if (UNISWAP_UNSUPPORTED_TOKENS.has(token0) || UNISWAP_UNSUPPORTED_TOKENS.has(token1)) continue
+  if (ARB_POOLS.some(existing => existing.address.toLowerCase() === p.address.toLowerCase())) continue
+  ARB_POOLS.push({
+    name: p.name,
+    address: p.address,
+    token0,
+    token1,
+    feeBps: BigInt(parseFeeBps(p.fee)),
+    isUniV2: true,
+    kind: 'uniV2',
+  })
+}
 const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?? '1000000')
 // Explicit user-requested external token pins. These remain in V3/V4
 // discovery even if the general exclusion policy is tightened later.
@@ -723,6 +752,8 @@ interface SettlementOpp {
   profitPct:  number
   expectedNetUsd?: number
   gasCostUsd?: number
+  routeScore?: number
+  reliabilityPct?: number
 }
 
 function buildGraph(states: PoolState[]): Map<string, HopCandidate[]> {
@@ -801,11 +832,12 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
     if (profit <= 0n || amountIn <= 0n) return
 
     const profitPct = Number(profit * 10000n / amountIn) / 100
-    // Dust filter on the low end; a sanity ceiling on the high end -- a
+    // No percentage floor: even a tiny positive edge may execute when its
+    // absolute profit clears exact gas. Keep only a sanity ceiling -- a
     // >50% "arb" on a live AMM is essentially always a data artifact
     // (a pool this script's own liquidity floor let through by a hair),
     // never a real opportunity, so treat it as a bug signal, not a trade.
-    if (profitPct < 0.02 || profitPct > 50) return
+    if (profitPct > 50) return
 
     opps.push({
       tokenIn, hops, amountIn, profitRaw: profit, profitPct,
@@ -903,7 +935,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
     const inUsdg = convertSpot(amountIn, startPath)
     if (inUsdg <= 0n) return
     const profitPct = Number(profitUsdg * 10000n / inUsdg) / 100
-    if (profitPct < 0.02 || profitPct > 50) return
+    if (profitPct > 50) return
 
     const amountOut = cycleOut(amountIn, hops)
     if (amountOut <= 0n) return
@@ -1148,6 +1180,81 @@ async function ensureWethBalance(needed: bigint, availableEthForWrap: bigint): P
   return current
 }
 
+let lastGasRefillAttempt = 0
+
+// The configured reserve is an operating target, not a trading shutdown.
+// When native ETH drops below it, unwrap WETH 1:1 (no market swap or price
+// impact) and resume. The refill includes a buffered estimate of its own gas
+// and prefers a 20% cushion, but will accept the exact minimum when WETH is
+// tight. It never sells another token or weakens the arb profit floor.
+async function ensureNativeGasReserve(
+  nativeEth: bigint, gasReserveWei: bigint, gasPrice: bigint, graph: Map<string, HopCandidate[]>,
+): Promise<boolean> {
+  if (nativeEth >= gasReserveWei) return true
+  if (DRY_RUN) return false
+  if (Date.now() - lastGasRefillAttempt < GAS_REFILL_RETRY_MS) return false
+  lastGasRefillAttempt = Date.now()
+
+  let currentNative = nativeEth
+  let wethBalance = await pub.readContract({
+    address: TOKENS.WETH.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+  }) as bigint
+
+  const withdrawGas = await pub.estimateContractGas({
+    account: account.address,
+    address: TOKENS.WETH.address,
+    abi: WETH_ABI,
+    functionName: 'withdraw',
+    args: [1n],
+  }).catch(() => 55_000n)
+  const refillGasCost = (withdrawGas * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
+  if (currentNative <= refillGasCost) {
+    console.error(`   ⚠ Cannot self-refill gas: native ETH is below the buffered cost of an unwrap transaction`)
+    return false
+  }
+
+  const targetWei = (gasReserveWei * GAS_REFILL_TARGET_BPS) / 10_000n
+  let minimumUnwrap = gasReserveWei - currentNative + refillGasCost
+  let preferredUnwrap = targetWei - currentNative + refillGasCost
+  // A settlement trade can legitimately leave the wallet with USDG/AEON
+  // and almost no WETH. Buy a small WETH operating buffer from USDG first,
+  // then unwrap it. This is maintenance funding, never part of arb P&L.
+  if (wethBalance < minimumUnwrap) {
+    const wethOperatingTarget = preferredUnwrap + refillGasCost * 3n
+    console.log(`   → WETH balance is short; buying a gas-refill buffer from USDG...`)
+    wethBalance = await ensureBaseTokenFunded('WETH', wethOperatingTarget, graph)
+    currentNative = await pub.getBalance({ address: account.address })
+    if (currentNative <= refillGasCost) {
+      console.error(`   ⚠ WETH was funded, but native ETH can no longer pay for the unwrap transaction`)
+      return false
+    }
+    minimumUnwrap = gasReserveWei - currentNative + refillGasCost
+    preferredUnwrap = targetWei - currentNative + refillGasCost
+  }
+  const unwrapAmount = wethBalance >= preferredUnwrap ? preferredUnwrap : minimumUnwrap
+  if (wethBalance < unwrapAmount) {
+    console.error(`   ⚠ Cannot self-refill gas: need ${formatEther(unwrapAmount)} WETH, have ${formatEther(wethBalance)} WETH`)
+    return false
+  }
+
+  console.log(`\n[${new Date().toISOString()}] Gas reserve refill: unwrapping ${formatEther(unwrapAmount)} WETH to restore native ETH`)
+  try {
+    const { receipt } = await writeContractTracked({
+      address: TOKENS.WETH.address,
+      abi: WETH_ABI,
+      functionName: 'withdraw',
+      args: [unwrapAmount],
+    }, 'gas reserve refill')
+    if (receipt.status !== 'success') return false
+    const after = await pub.getBalance({ address: account.address })
+    console.log(`   ✅ Gas reserve restored to ${formatEther(after)} ETH`)
+    return after >= gasReserveWei
+  } catch (err: any) {
+    console.error(`   ⚠ Gas reserve refill failed: ${err?.shortMessage ?? err?.message ?? err}`)
+    return false
+  }
+}
+
 // Inverse of amtOut() -- how much amtIn is required to receive EXACTLY
 // amtOutDesired from a pool with these reserves/fee. Same formula
 // Uniswap-V2-style routers use for getAmountIn. +1 covers integer-division
@@ -1162,8 +1269,8 @@ function amtIn(amtOutDesired: bigint, rIn: bigint, rOut: bigint, feeBps: bigint)
 const FUND_SWAP_SLIPPAGE_BUFFER_PCT = 105n   // 5% extra USDG spent, buffering against reserve drift between quote and execution
 
 // If baseSym's on-chain balance falls short of `needed`, tops it up by
-// swapping USDG -- the wallet's natural "cash" reserve -- into it via
-// AeonRouter. Unlike ensureWethBalance's free wrap, this is a REAL swap
+// swapping USDG -- the wallet's natural "cash" reserve -- into it via the
+// UniversalRouter. Unlike ensureWethBalance's free wrap, this is a REAL swap
 // with real fee/slippage, a genuine (small) cost not otherwise reflected in
 // the arb's own profitability math -- acceptable here since it only ever
 // spends USDG that would otherwise sit completely idle, and the swap's own
@@ -1179,8 +1286,9 @@ async function ensureBaseTokenFunded(
   }) as bigint
   if (current >= needed || baseSym === 'USDG') return current
 
-  // Restricted to vAMM/UniV2 edges -- this swaps via AeonRouter below, which
-  // hard-reverts on any other poolType (see AeonRouterRH.sol).
+  // Maintenance funding deliberately uses a direct, reserve-exact vAMM or
+  // UniV2 edge. CL/DLMM local-liquidity approximations are not safe for an
+  // exact shortfall purchase.
   const edge = (graph.get('USDG') ?? []).find(e => e.tokenOutSym === baseSym && (e.pool.pool.kind === 'vAMM' || e.pool.pool.kind === 'uniV2'))
   if (!edge) return current   // no direct USDG pool for this token -- can't fund it this way
 
@@ -1196,22 +1304,24 @@ async function ensureBaseTokenFunded(
 
   console.log(`   → funding ${formatUnits(shortfall, TOKENS[baseSym].decimals)} ${baseSym} by swapping ~${formatUnits(usdgToSpend, TOKENS.USDG.decimals)} USDG...`)
   try {
-    const route = [{
-      tokenIn: getAddress(TOKENS.USDG.address), tokenOut: getAddress(TOKENS[baseSym].address),
-      pool: getAddress(edge.pool.pool.address), poolType: 0, feeBps: Number(edge.pool.pool.feeBps),
-    }]
+    const route = buildUniversalHops([edge])
     const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
 
-    const hApprove = await wal.writeContract({
-      address: TOKENS.USDG.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.AeonRouter, usdgToSpend],
-    })
-    await pub.waitForTransactionReceipt({ hash: hApprove })
+    const allowance = await pub.readContract({
+      address: TOKENS.USDG.address, abi: ERC20_ABI, functionName: 'allowance',
+      args: [account.address, CONTRACTS.UniversalRouter],
+    }) as bigint
+    if (allowance < usdgToSpend) {
+      await writeContractTracked({
+        address: TOKENS.USDG.address, abi: ERC20_ABI, functionName: 'approve',
+        args: [CONTRACTS.UniversalRouter, MAX_UINT256],
+      }, `funding approval ${baseSym}`)
+    }
 
-    const hSwap = await wal.writeContract({
-      address: CONTRACTS.AeonRouter, abi: AEON_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+    await writeContractTracked({
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
       args: [route, usdgToSpend, shortfall, account.address, deadline],   // amountOutMin = the exact shortfall needed
-    })
-    await pub.waitForTransactionReceipt({ hash: hSwap })
+    }, `fund ${baseSym} from USDG`)
 
     current = await pub.readContract({
       address: TOKENS[baseSym].address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
@@ -1230,6 +1340,7 @@ interface ExecutedArb {
   tokenIn: string
   amountIn: string
   profit: string
+  profitToken?: string
   profitPct: number
   grossProfit?: string
   gasCost?: string
@@ -1383,7 +1494,7 @@ function routeReliability(hops: HopCandidate[]): number {
 // depth only break ties between otherwise similar routes, avoiding the old
 // behaviour where a fragile 8-hop quote beat a deep 2-hop route by a tiny
 // percentage-point difference.
-function scoreOpportunity(opp: ArbOpp, netUsd: number): number {
+function scoreOpportunity<T extends { hops: HopCandidate[]; amountIn: bigint; reliabilityPct?: number }>(opp: T, netUsd: number): number {
   const reliability = routeReliability(opp.hops)
   const depthUsage = opp.hops[0].reserveIn > 0n ? Number(opp.amountIn * 10_000n / opp.hops[0].reserveIn) / 10_000 : 1
   const depthFactor = Math.max(0.45, 1 - depthUsage)
@@ -1427,7 +1538,7 @@ function recordArb(arb: ExecutedArb) {
   }
 }
 
-async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Record<string, bigint>, nativeEth: bigint, gasReserveWei: bigint, gasReserveHealthy: boolean, graph: Map<string, HopCandidate[]>) {
+async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number, rawBalances: Record<string, bigint>, nativeEth: bigint, gasReserveWei: bigint, gasReserveHealthy: boolean, graph: Map<string, HopCandidate[]>) {
   const balances: Record<string, string> = { ETH: formatEther(nativeEth) }
   for (const [sym, bal] of Object.entries(rawBalances)) {
     balances[sym] = formatUnits(bal, TOKENS[sym as keyof typeof TOKENS].decimals)
@@ -1452,19 +1563,30 @@ async function writeStatus(lastOpps: ArbOpp[], tickMs: number, rawBalances: Reco
       .filter(([, health]) => health.cooldownUntil > Date.now())
       .map(([route, health]) => ({ route, failures: health.failures, category: health.lastCategory, until: new Date(health.cooldownUntil).toISOString() })),
     balances,
-    lastOpportunities: lastOpps.slice(0, 20).map(o => ({
+    lastOpportunities: lastOpps.slice(0, 20).map(o => {
+      const isSettlement = 'profitUsdg' in o
+      const grossProfit = isSettlement
+        ? formatUnits(o.profitUsdg, TOKENS.USDG.decimals)
+        : formatUnits(o.profitRaw, o.tokenIn.decimals)
+      const grossProfitUsd = isSettlement
+        ? Number(formatUnits(o.profitUsdg, TOKENS.USDG.decimals))
+        : Number(formatUnits(valueInUsdg(o.tokenIn.symbol, o.profitRaw, graph), TOKENS.USDG.decimals))
+      return {
       pair: o.label,
       profitPct: Number(o.profitPct.toFixed(4)),
       amountIn: formatUnits(o.amountIn, o.tokenIn.decimals),
       tokenIn: o.tokenIn.symbol,
-      grossProfit: formatUnits(o.profitRaw, o.tokenIn.decimals),
-      grossProfitUsd: Number(formatUnits(valueInUsdg(o.tokenIn.symbol, o.profitRaw, graph), TOKENS.USDG.decimals)),
+      tokenOut: isSettlement ? o.tokenOut.symbol : o.tokenIn.symbol,
+      grossProfit,
+      grossProfitToken: isSettlement ? 'USDG' : o.tokenIn.symbol,
+      grossProfitUsd,
       expectedNetUsd: o.expectedNetUsd,
       gasCostUsd: o.gasCostUsd,
       routeScore: o.routeScore,
       reliabilityPct: o.reliabilityPct,
       venues: o.hops.map(h => h.pool.pool.kind).join(' -> '),
-    })),
+      }
+    }),
     recentArbs: recentArbs.slice(0, 30),
     cumulativeProfit,
     totalArbsExecuted: totalExecuted,
@@ -1495,8 +1617,9 @@ type ExecResult = 'skipped' | 'attempted'
 
 async function writeContractTracked(args: any, label: string): Promise<{ hash: `0x${string}`; receipt: any }> {
   const nonce = await pub.getTransactionCount({ address: account.address, blockTag: 'pending' })
-  const initialGasPrice = await pub.getGasPrice()
-  let hash = await wal.writeContract({ ...args, nonce, gasPrice: initialGasPrice } as any)
+  const currentGasPrice = await pub.getGasPrice()
+  const initialMaxFeePerGas = (currentGasPrice * TX_FEE_HEADROOM_BPS) / 10_000n
+  let hash = await wal.writeContract({ ...args, nonce, maxFeePerGas: initialMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
   const originalHash = hash
   pendingTransaction = { hash, label, nonce, submittedAt: new Date().toISOString(), replacements: 0 }
   publishPendingTransaction()
@@ -1517,10 +1640,10 @@ async function writeContractTracked(args: any, label: string): Promise<{ hash: `
       return { hash, receipt: landed }
     }
 
-    const bumpedGasPrice = initialGasPrice + (initialGasPrice * REPLACEMENT_GAS_BUMP_BPS) / 10_000n + 1n
+    const bumpedMaxFeePerGas = initialMaxFeePerGas + (initialMaxFeePerGas * REPLACEMENT_GAS_BUMP_BPS) / 10_000n + 1n
     console.warn(`   Pending ${label} ${hash} exceeded ${PENDING_TX_TIMEOUT_MS}ms; replacing nonce ${nonce} with a ${Number(REPLACEMENT_GAS_BUMP_BPS) / 100}% gas bump`)
     try {
-      const replacementHash = await wal.writeContract({ ...args, nonce, gasPrice: bumpedGasPrice } as any)
+      const replacementHash = await wal.writeContract({ ...args, nonce, maxFeePerGas: bumpedMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
       hash = replacementHash
       pendingTransaction = { hash, label, nonce, submittedAt: new Date().toISOString(), replacements: 1 }
       publishPendingTransaction()
@@ -1999,9 +2122,11 @@ async function executeSettlementSwap(
 ): Promise<ExecResult> {
   if (Date.now() < pausedUntil) return 'skipped'
   const { tokenIn, tokenOut, hops: hopCandidates, amountIn, label } = opp
+  if (routeCooldownRemaining(hopCandidates) > 0) return 'skipped'
+  let failureStage: FailureStage = 'quote'
   const venues = describeVenuePath(hopCandidates)
 
-  console.log(`\n🔀 SETTLE: ${label} → ${tokenOut.symbol}  in ${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`)
+  console.log(`\n🔀 SETTLE: ${label}  in ${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`)
 
   const inUsdgPath = tokenIn.symbol === 'USDG' ? [] : findConversionPath(graph, tokenIn.symbol, 'USDG')
   const outUsdgPath = tokenOut.symbol === 'USDG' ? [] : findConversionPath(graph, tokenOut.symbol, 'USDG')
@@ -2045,6 +2170,7 @@ async function executeSettlementSwap(
     recordArb({
       time: new Date().toISOString(), pair: label, tokenIn: tokenIn.symbol,
       amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(opp.profitUsdg, TOKENS.USDG.decimals),
+      profitToken: 'USDG',
       profitPct: opp.profitPct, status: 'dry-run', route: 'internal', venues,
     })
     return 'attempted'
@@ -2074,14 +2200,15 @@ async function executeSettlementSwap(
     let approvalGasWei = 0n
     if (needsApproval) {
       console.log('   → approve...')
-      const hApprove = await wal.writeContract({
+      failureStage = 'approval'
+      const { receipt: approveReceipt } = await writeContractTracked({
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.UniversalRouter, MAX_UINT256],
-      })
-      const approveReceipt = await pub.waitForTransactionReceipt({ hash: hApprove })
+      }, 'settlement approval')
       approvalGasWei = approveReceipt.gasUsed * approveReceipt.effectiveGasPrice
     }
 
     console.log('   → simulate swapExactTokensForTokens...')
+    failureStage = 'simulation'
     await pub.simulateContract({
       account,
       address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
@@ -2089,11 +2216,12 @@ async function executeSettlementSwap(
     })
 
     console.log('   → swapExactTokensForTokens...')
-    const hSwap = await wal.writeContract({
+    failureStage = 'submission'
+    const { hash: hSwap, receipt } = await writeContractTracked({
       address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
       args: [hops, amountIn, amountOutMin, account.address, deadline],
-    })
-    const receipt = await pub.waitForTransactionReceipt({ hash: hSwap })
+    }, 'cross-settlement swap')
+    failureStage = 'confirmation'
 
     if (receipt.status === 'success') {
       const balanceAfterOut = await pub.readContract({
@@ -2108,12 +2236,15 @@ async function executeSettlementSwap(
 
       console.log(`   ✅ SETTLE COMPLETE — received ${formatUnits(realizedOut, tokenOut.decimals)} ${tokenOut.symbol} (~${formatUnits(realizedNetUsdg, TOKENS.USDG.decimals)} USDG net) — ${hSwap}`)
       totalExecuted++
+      outcomeCounters.executed++
       consecutiveFailures = 0
+      clearRouteFailure(hopCandidates)
       const prev = parseFloat(cumulativeProfit['USDG'] ?? '0')
       cumulativeProfit['USDG'] = (prev + parseFloat(formatUnits(realizedNetUsdg, TOKENS.USDG.decimals))).toString()
       recordArb({
         time: new Date().toISOString(), pair: label, tokenIn: tokenIn.symbol,
         amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(realizedNetUsdg, TOKENS.USDG.decimals),
+        profitToken: 'USDG',
         grossProfit: formatUnits(realizedGrossUsdg, TOKENS.USDG.decimals), gasCost: formatUnits(gasUsdgActual, TOKENS.USDG.decimals),
         gasCostEth: formatEther(totalGasWei),
         profitPct: opp.profitPct, txHash: hSwap, status: 'success', route: 'internal', venues,
@@ -2123,10 +2254,13 @@ async function executeSettlementSwap(
     }
     return 'attempted'
   } catch (err: any) {
-    const message = err?.shortMessage ?? err?.message ?? String(err)
+    const failure = decodeFailure(err)
+    countFailureOutcome(failure, failureStage)
+    registerRouteFailure(hopCandidates, failure)
+    const message = `[${failure.category}/${failureStage}] ${failure.message}`
     console.error(`   ❌ SETTLE FAILED (no funds lost -- amountOutMin reverts atomically): ${message}`)
     totalFailed++
-    consecutiveFailures++
+    if (!failure.routeScoped) consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
@@ -2136,6 +2270,7 @@ async function executeSettlementSwap(
     recordArb({
       time: new Date().toISOString(), pair: label, tokenIn: tokenIn.symbol,
       amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct: opp.profitPct, status: 'failed', error: message, route: 'internal', venues,
+      failureCategory: failure.category, failureStage,
     })
     return 'attempted'
   }
@@ -3138,9 +3273,14 @@ async function tick() {
   }
 
   const rankingGasPrice = await pub.getGasPrice()
-  const { balances, searchBalances, nativeEth, availableEthForWrap, gasReserveWei, gasReserveHealthy } = await fetchBalances(rankingGasPrice)
-  const bases = candidateBaseTokens(searchBalances)
   const graph = buildGraph(states)
+  let balanceSnapshot = await fetchBalances(rankingGasPrice)
+  if (!balanceSnapshot.gasReserveHealthy) {
+    const refilled = await ensureNativeGasReserve(balanceSnapshot.nativeEth, balanceSnapshot.gasReserveWei, rankingGasPrice, graph)
+    if (refilled) balanceSnapshot = await fetchBalances(rankingGasPrice)
+  }
+  const { balances, searchBalances, nativeEth, availableEthForWrap, gasReserveWei, gasReserveHealthy } = balanceSnapshot
+  const bases = candidateBaseTokens(searchBalances)
   // Signed, NOT floored at zero -- this feeds the dashboard's "net est."
   // figure too, and a trade that doesn't clear gas needs to show as
   // negative there, not as a misleading "$0.0000" sitting next to a
@@ -3158,12 +3298,37 @@ async function tick() {
     opp.gasCostUsd = Number(formatUnits(gasUsdgFor(opp), TOKENS.USDG.decimals))
     opp.routeScore = scoreOpportunity(opp, netUsd)
   }
-  opps.sort((a, b) => {
-    const scoreDiff = (b.routeScore ?? -Infinity) - (a.routeScore ?? -Infinity)
+  const settlementOpps = SAME_TOKEN_ONLY
+    ? []
+    : bases.flatMap(baseSym => findSettlementRoutes(graph, baseSym, searchBalances[baseSym] ?? 0n))
+  // Settlement profit is already USDG-denominated. Put it through the same
+  // post-gas and reliability score as a cycle so neither route class can
+  // starve the other merely because it is dispatched first in the code.
+  for (const opp of settlementOpps) {
+    const gasUnits = SETTLEMENT_SWAP_GAS_BASE + SETTLEMENT_SWAP_GAS_PER_HOP * BigInt(opp.hops.length)
+    const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
+    const gasUsdg = valueInUsdg('WETH', gasWei, graph)
+    const netUsd = Number(formatUnits(opp.profitUsdg - gasUsdg, TOKENS.USDG.decimals))
+    opp.expectedNetUsd = netUsd
+    opp.gasCostUsd = Number(formatUnits(gasUsdg, TOKENS.USDG.decimals))
+    opp.routeScore = scoreOpportunity(opp, netUsd)
+  }
+
+  type RankedInternalCandidate =
+    | { kind: 'cycle'; opp: ArbOpp }
+    | { kind: 'settlement'; opp: SettlementOpp }
+  const rankedCandidates: RankedInternalCandidate[] = [
+    ...opps.map(opp => ({ kind: 'cycle' as const, opp })),
+    ...settlementOpps.map(opp => ({ kind: 'settlement' as const, opp })),
+  ]
+  rankedCandidates.sort((a, b) => {
+    const scoreDiff = (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
     if (scoreDiff !== 0) return scoreDiff
-    return (SETTLEMENT_PRIORITY[a.tokenIn.symbol] ?? 99) - (SETTLEMENT_PRIORITY[b.tokenIn.symbol] ?? 99)
+    const outputA = a.kind === 'settlement' ? a.opp.tokenOut.symbol : a.opp.tokenIn.symbol
+    const outputB = b.kind === 'settlement' ? b.opp.tokenOut.symbol : b.opp.tokenIn.symbol
+    return (SETTLEMENT_PRIORITY[outputA] ?? 99) - (SETTLEMENT_PRIORITY[outputB] ?? 99)
   })
-  outcomeCounters.detected += opps.length
+  outcomeCounters.detected += rankedCandidates.length
   const tickMs = Date.now() - t0
 
   // Candidates were all sized from the same opening snapshot. Once one is
@@ -3176,59 +3341,23 @@ async function tick() {
 
   if (!gasReserveHealthy) {
     console.warn(`\n[${new Date().toISOString()}] Execution disabled: gas wallet ${formatEther(nativeEth)} ETH is below reserve ${formatEther(gasReserveWei)} ETH`)
-  } else if (opps.length === 0) {
+  } else if (rankedCandidates.length === 0) {
     process.stdout.write(`\r[${new Date().toISOString()}] No arb found (${tickMs}ms) — ${states.length}/${ARB_POOLS.length} pools live, base tokens: ${bases.join(',') || 'none'}`)
   } else {
-    console.log(`\n[${new Date().toISOString()}] ${opps.length} opportunities across ${bases.length} base token(s):`)
-    for (const o of opps.slice(0, 5)) {
+    console.log(`\n[${new Date().toISOString()}] ${rankedCandidates.length} opportunities (${opps.length} cycles, ${settlementOpps.length} cross-settlement):`)
+    for (const { opp: o } of rankedCandidates.slice(0, 5)) {
       console.log(`  ${o.label}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenIn.decimals)} ${o.tokenIn.symbol})`)
     }
-    for (const opp of opps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
-      if (opp.profitPct < MIN_PROFIT_PCT) break   // sorted descending -- nothing further qualifies either
+    for (const candidate of rankedCandidates.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
+      const { opp } = candidate
+      if ((opp.expectedNetUsd ?? -Infinity) <= 0 || opp.profitPct < MIN_PROFIT_PCT) continue
       if (routeCooldownRemaining(opp.hops) > 0) continue
-      const result = await executeArb(opp, graph, availableEthForWrap)
+      const result = candidate.kind === 'cycle'
+        ? await executeArb(opp, graph, availableEthForWrap)
+        : await executeSettlementSwap(opp, graph, availableEthForWrap)
       if (result === 'attempted') {
         anyAttempted = true
         break
-      }
-    }
-    if (!anyAttempted && opps[0].profitPct < MIN_PROFIT_PCT) {
-      console.log(`  Best profit ${opps[0].profitPct.toFixed(3)}% below ${MIN_PROFIT_PCT}% threshold, skipping`)
-    }
-  }
-
-  // Settlement routes (e.g. AEON -> token -> WETH, staying in WETH) --
-  // independent of whether any CYCLIC opportunity existed, only skipped if
-  // one already fired above this tick.
-  if (!anyAttempted && gasReserveHealthy && !SAME_TOKEN_ONLY) {
-    const settlementOpps = bases
-      .flatMap(baseSym => findSettlementRoutes(graph, baseSym, searchBalances[baseSym] ?? 0n))
-      .sort((a, b) => {
-        if (b.profitUsdg > a.profitUsdg) return 1
-        if (b.profitUsdg < a.profitUsdg) return -1
-        return (SETTLEMENT_PRIORITY[a.tokenOut.symbol] ?? 99) - (SETTLEMENT_PRIORITY[b.tokenOut.symbol] ?? 99)
-      })
-    // profitUsdg is GROSS (output value - input value, pre-gas) -- subtract
-    // an estimated gas cost here too, same reasoning as expectedNetUsdg
-    // above, so the dashboard never shows a settlement route as a "win"
-    // that gas actually eats.
-    for (const opp of settlementOpps) {
-      const gasUnits = SETTLEMENT_SWAP_GAS_BASE + SETTLEMENT_SWAP_GAS_PER_HOP * BigInt(opp.hops.length)
-      const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
-      const gasUsdg = valueInUsdg('WETH', gasWei, graph)
-      opp.expectedNetUsd = Number(formatUnits(opp.profitUsdg - gasUsdg, TOKENS.USDG.decimals))
-      opp.gasCostUsd = Number(formatUnits(gasUsdg, TOKENS.USDG.decimals))
-    }
-    if (settlementOpps.length > 0) {
-      console.log(`\n[${new Date().toISOString()}] ${settlementOpps.length} settlement-route opportunities:`)
-      for (const o of settlementOpps.slice(0, 5)) {
-        console.log(`  ${o.label}→${o.tokenOut.symbol}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenIn.decimals)} ${o.tokenIn.symbol})`)
-      }
-      for (const opp of settlementOpps.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
-        if (opp.profitPct < MIN_PROFIT_PCT) break
-        if (routeCooldownRemaining(opp.hops) > 0) continue
-        const result = await executeSettlementSwap(opp, graph, availableEthForWrap)
-        if (result === 'attempted') { anyAttempted = true; break }
       }
     }
   }
@@ -3294,7 +3423,7 @@ async function tick() {
     }
   }
 
-  await writeStatus(opps, tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
+  await writeStatus(rankedCandidates.map(candidate => candidate.opp), tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
 }
 
 interface DiscoveryCounts {
@@ -3316,7 +3445,19 @@ async function refreshPoolDiscovery(): Promise<DiscoveryCounts> {
 let lastPoolRefresh = 0
 
 async function main() {
-  const { uniswapV2: uniswapPools, uniswapV3: uniswapV3Pools, uniswapV4: uniswapV4Pools, cl: clPools, dlmm: dlmmPools } = await refreshPoolDiscovery()
+  let discoveryCounts: DiscoveryCounts | null = null
+  let retryDelayMs = 1000
+  while (!discoveryCounts) {
+    try {
+      discoveryCounts = await refreshPoolDiscovery()
+    } catch (err: any) {
+      const message = err?.message ?? String(err)
+      console.error(`[startup discovery error] ${message}; retrying in ${retryDelayMs}ms`)
+      await new Promise(r => setTimeout(r, retryDelayMs))
+      retryDelayMs = Math.min(30_000, retryDelayMs * 2)
+    }
+  }
+  const { uniswapV2: uniswapPools, uniswapV3: uniswapV3Pools, uniswapV4: uniswapV4Pools, cl: clPools, dlmm: dlmmPools } = discoveryCounts
   lastPoolRefresh = Date.now()
   console.log(`AEON Arb Keeper`)
   console.log(`  Keeper address: ${account.address}`)

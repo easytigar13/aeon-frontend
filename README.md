@@ -21,7 +21,7 @@ src/            — Next.js 14 app (swap, liquidity, earn, vote, lock, dashboard
 contracts/      — standalone helper contracts (e.g. pair discovery registry)
 integrations/   — DEX aggregator integration requests and PR drafts (1inch, Odos,
                    KyberSwap, ParaSwap, OpenOcean)
-keeper/         — price-equalization arbitrage bot across AEON pools
+keeper/         — atomic profit-ranked arb keeper across AEON, Uni V2/V3/V4, CL and DLMM pools
 ```
 
 The protocol's core smart contracts (token, voting escrow, furnace, voter, emissions

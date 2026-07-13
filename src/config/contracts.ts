@@ -469,17 +469,14 @@ export const DLMM_POOLS: {
 // // { name: 'ROBINFUN/ETH',     token0: 'WETH',     token1: 'ROBINFUN', type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x6a035f314de5ac12383a9698b000dbd7ee7c71db' as `0x${string}` },
 // // { name: 'ROBINFUN/USDG',    token0: 'ROBINFUN', token1: 'USDG',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xA41bf62FbD1EeDa210C65F7fE2B82B4f71bF819F' as `0x${string}` },
 
-// Real, independently-deployed Uniswap V2 pairs already live on Robinhood
-// Chain (factory 0x8bcEaA40B9AcdfAedF85AdF4FF01F5Ad6517937f, 898 total pairs
-// chain-wide) -- not ours, but AeonUniversalRouter can route through them
-// (poolType 3) alongside our own pools when they offer a better price.
-// Added 2026-07-05: these 4 are deeper than AEON's own corresponding pools
-// for the same tokens, confirmed via getReserves() before wiring in.
-// Standard Uniswap V2 fee (0.3%, i.e. the fixed 997/1000 factor baked into
-// every real UniV2-style pair).
+// Independently deployed V2-compatible pairs on Robinhood Chain. These are
+// not ours, but AeonUniversalRouter can route through them (poolType 3)
+// alongside our pools. Fees are explicit per pair; the VIRTUAL/WETH pool at
+// 0xD658... was verified against its live getAmountOut() quoter (25 bps).
 export const UNISWAP_POOLS = [
   { name: 'WETH/USDG',     token0: 'WETH', token1: 'USDG',    type: 'UniV2', fee: '0.3%', address: '0x8803c117ccae7B5146297876c2A25DF135141C4d' as `0x${string}` },
   { name: 'WETH/VIRTUAL',  token0: 'WETH', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0xd95e8e2Cd04c207625C6F23c974d365a5F3A91D3' as `0x${string}` },
+  { name: 'WETH/VIRTUAL',  token0: 'WETH', token1: 'VIRTUAL', type: 'UniV2', fee: '0.25%', address: '0xD65870Dc303b9CA01e07528B220C76d5fE917126' as `0x${string}` },
   { name: 'USDG/VIRTUAL',  token0: 'USDG', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D' as `0x${string}` },
   { name: 'WETH/ROBINFUN', token0: 'WETH', token1: 'ROBINFUN', type: 'UniV2', fee: '0.3%', address: '0xE53377eB912D08e1B0160E5Ea0c626CF162870fF' as `0x${string}` },
 ]
