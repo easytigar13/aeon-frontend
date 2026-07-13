@@ -350,13 +350,13 @@ export default function HomePage() {
             </h2>
             <p className="text-text-secondary text-lg max-w-xl mx-auto mb-8">
               Burn AEON permanently to receive a soulbound NFT with static voting power that never decays.
-              Earn a share of every emission's Furnace bonus, plus liquid AEON from buyback redistribution — forever.
+              Future fee-anchored emission shares are delivered directly to user wallets. Legacy buyback rewards and rewards recorded before the redirect remain claimable through the Furnace.
             </p>
             <div className="flex flex-wrap justify-center gap-4 mb-8">
               {[
                 { label: 'Voting Power', value: '1:1 with burned' },
                 { label: 'Power Decay', value: 'Never' },
-                { label: 'Rewards', value: 'Emission bonus + buyback share' },
+                { label: 'Rewards', value: 'Direct emission share + buyback' },
                 { label: 'Transferable', value: 'No — Soulbound' },
               ].map(item => (
                 <div key={item.label} className="card px-4 py-3 text-center min-w-[140px] transition-all duration-300 hover:border-aeon-400/30 hover:-translate-y-0.5">
@@ -431,19 +431,19 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 py-16">
         <Reveal className="text-center mb-12">
           <h2 className="font-display font-bold text-3xl text-text-primary mb-3">
-            {uniquePoolCount} Trading Pairs
+            {uniquePoolCount} Trading Pairs Across Three Architectures
           </h2>
-          <p className="text-text-secondary">Standard vAMM pools — full-range liquidity, zero management, real fee-anchored emissions</p>
+          <p className="text-text-secondary">vAMM, Algebra CL, and DLMM liquidity with live, vote-weighted AEON gauges</p>
         </Reveal>
 
         <div className="grid md:grid-cols-3 gap-6">
           {[
-            { name: 'Deposit both tokens', desc: 'Full-range liquidity across the entire price curve — no range management, no rebalancing.' },
-            { name: 'Earn trading fees', desc: 'Same audited-pattern fee accounting as Aerodrome/Velodrome, permissionless to claim.' },
-            { name: 'Stake for AEON emissions', desc: 'Every vAMM pool is eligible for weekly vote-weighted AEON emissions on top of fees.' },
+            { tag: 'vAMM', name: 'Full-range liquidity', desc: 'Deposit both tokens across the entire price curve with no range management or rebalancing.' },
+            { tag: 'CL', name: 'Concentrated liquidity', desc: 'Algebra Integral positions concentrate capital inside a chosen price range and stake as NFTs.' },
+            { tag: 'DLMM', name: 'Liquidity bins', desc: 'Trader Joe/LFJ Liquidity Book positions allocate capital across bins and stake in existing gauges.' },
           ].map((item, i) => (
             <Reveal key={item.name} delay={i * 100} className="card p-6 transition-all duration-300 hover:-translate-y-1 hover:border-blue-400/30 hover:shadow-[0_0_36px_-14px_rgba(96,165,250,0.4)]">
-              <span className="pool-type-vamm mb-4 inline-block">vAMM</span>
+              <span className="pool-type-vamm mb-4 inline-block">{item.tag}</span>
               <h3 className="font-display font-semibold text-text-primary mb-2">{item.name}</h3>
               <p className="text-text-secondary text-sm leading-relaxed">{item.desc}</p>
             </Reveal>
@@ -471,7 +471,7 @@ export default function HomePage() {
                 At genesis, the protocol minted 90,000 AEON exactly once. 20,000 went into AEON/ETH liquidity, 20,000 into AEON/USDG liquidity,
                 and 50,000 was burned via the Furnace and immediately voted 25,000/25,000 across both AEON pools — guaranteeing gauge weight
                 from day one. None of it went to a deployer wallet or a team allocation. After genesis, the protocol runs on pure fee-anchored
-                emissions, forever.
+                emissions, forever. The protocol burn remains voting weight; from 13 July 2026, its future fee-anchored emission-reward share funds the LP treasury rather than accumulating inside the Furnace.
               </p>
               <div className="flex gap-4 mt-4 flex-wrap">
                 <div className="flex items-center gap-2">

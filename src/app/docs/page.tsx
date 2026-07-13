@@ -137,7 +137,7 @@ export default function DocsPage() {
               {[
                 { icon: '💧', label: 'LPs add liquidity', sub: 'Earn trading fees' },
                 { icon: '🗳️', label: 'Voters direct emissions', sub: `Earn ${EPOCH_CONFIG.feeVoterSplit}% of fees from voted pools` },
-                { icon: '🔥', label: 'Furnace burns AEON', sub: 'Earn emission bonus + buyback share' },
+                { icon: '🔥', label: 'Furnace burns AEON', sub: 'Direct emission share + legacy buyback' },
               ].map(({ icon, label, sub }) => (
                 <div key={label} className="flex flex-col items-center gap-2">
                   <div className="text-2xl">{icon}</div>
@@ -185,17 +185,18 @@ export default function DocsPage() {
           <ol className="space-y-2 mb-4 ml-4 list-decimal text-sm text-text-secondary">
             <li>Protocol tallies all fees collected across every pool</li>
             <li>New AEON is minted so its USD value equals a rolling 3-epoch average of fees ÷ {EPOCH_CONFIG.emissionRatio}, converted through AEON's oracle price and capped at 3× the previous epoch's mint</li>
-            <li>{EPOCH_CONFIG.emissionVoterSplit}% of that mint goes to gauges proportional to vote weight, {EPOCH_CONFIG.emissionFurnaceSplit}% goes to the Furnace as a bonus</li>
-            <li>LPs staked in those gauges earn AEON emissions throughout the next epoch</li>
+            <li>{EPOCH_CONFIG.emissionVoterSplit}% of that mint forms the LP gauge budget. When CL/DLMM votes exist for the epoch, 20% of that LP budget is reserved for the Multi-Gauge Controller and 80% goes to legacy vAMM gauges; without CL/DLMM votes, vAMM gauges receive the full LP budget</li>
+            <li>The remaining {EPOCH_CONFIG.emissionFurnaceSplit}% is the Furnace emission-reward budget. The Protocol Burn Reward Distributor pays each user burner directly and routes the protocol-owned 50,000 AEON burn share to the LP treasury</li>
+            <li>LPs staked in vote-weighted vAMM, CL, and DLMM gauges earn AEON emissions throughout the next epoch</li>
           </ol>
 
           {/* Pool Architectures */}
           <H2 id="pool-architectures">Pool Architectures</H2>
           <P>
-            AEON's pools are standard vAMM (constant-product, x*y=k) — deposit both tokens, earn fees across the entire price curve, zero management. Same audited-pattern fee accounting as Aerodrome/Velodrome, and the only architecture that feeds AEON's official vote-weighted emissions (veNFT holders vote for vAMM gauges specifically, and LPs staked there earn AEON on top of trading fees).
+            AEON supports three active liquidity architectures: full-range vAMM pools, Algebra Integral concentrated-liquidity pools, and Trader Joe/LFJ Liquidity Book DLMM pools. Each architecture can earn trading fees and automatic weekly, vote-weighted AEON emissions when its gauge receives votes.
           </P>
           <Note>
-            Concentrated Liquidity (Algebra Integral) and DLMM (Trader Joe Liquidity Book) pools also exist on-chain for some pairs, but aren't currently available to deposit into through this app — their reward model (a separate, manually-funded AEON stream rather than the automatic weekly vote-weighted emissions vAMM pools get) isn't ready for general use yet. If you already hold a CL or DLMM position from before, it remains fully yours and safe on-chain; management through this UI is temporarily limited while this gets sorted out.
+            vAMM emissions continue through the original voter and gauges. CL and DLMM emissions are supplied by the Multi-Gauge Controller to the existing gauges. Activating the controller did not replace factories or pools, migrate CL NFTs or DLMM bins, or move existing staked positions. The Vote page exposes separate vAMM and CL + DLMM modes; CL/DLMM votes are epoch-scoped and renew weekly.
           </Note>
 
           {/* The Furnace */}
@@ -206,13 +207,16 @@ export default function DocsPage() {
 
           <H3>Burn → Soulbound NFT → Passive Income</H3>
           <P>
-            When you burn AEON in The Furnace, you receive a soulbound NFT that cannot be transferred or sold. Your share of Furnace rewards is proportional to your burned amount relative to all AEON ever burned. Voting power from burned tokens never decays, and it stacks with the protocol's own genesis burn — the protocol itself burned 50,000 AEON at launch and votes that weight every epoch.
+            When you burn AEON in The Furnace, you receive a soulbound NFT that cannot be transferred or sold. Voting power from burned tokens never decays. Future fee-anchored emission bonuses are calculated from the live burn ledger and paid directly to each user's wallet by the Protocol Burn Reward Distributor. Legacy Buyback Engine redistribution and rewards recorded before the redirect remain claimable through the original Furnace.
           </P>
+          <Note>
+            The protocol's 50,000 AEON genesis burn remains permanently burned and continues to provide its legacy vAMM voting weight. Its future fee-anchored emission-reward share is sent directly to the LP treasury at <code>0x92aAc9aeD3b93e3F6252982A716Aa683A7F650bc</code>. Previously accrued rewards in the original Furnace remain untouched, and the immutable legacy buyback route has not changed.
+          </Note>
 
           <div className="my-6 grid grid-cols-2 gap-4">
             {[
               { title: 'Lock (veNFT)', items: ['Power decays over time', 'Transferable', 'Can withdraw after lock expires', `Earn ${EPOCH_CONFIG.feeVoterSplit}% of fees from voted pools`], color: 'violet' },
-              { title: 'Furnace (Burn)', items: ['Power never decays', 'Soulbound — non-transferable', 'Cannot withdraw — permanent', 'Earn emission bonus + buyback redistribution'], color: 'aeon', highlight: true },
+              { title: 'Furnace (Burn)', items: ['Power never decays', 'Soulbound — non-transferable', 'Cannot withdraw — permanent', 'Direct emission bonus + legacy buyback share'], color: 'aeon', highlight: true },
             ].map(col => (
               <div key={col.title} className={clsx(
                 'card p-4 transition-shadow duration-300',
@@ -244,7 +248,8 @@ export default function DocsPage() {
               ['Total minted',      '90,000 AEON — once, at genesis'],
               ['AEON/ETH liquidity', '20,000 AEON seeded, paired against ETH'],
               ['AEON/USDG liquidity','20,000 AEON seeded, paired against USDG'],
-              ['Burned at genesis', '50,000 AEON — burned via the Furnace, then voted 25,000/25,000 across both AEON pools'],
+              ['Burned at genesis', '50,000 AEON — permanently burned via the Furnace, then voted 25,000/25,000 across both AEON pools'],
+              ['Protocol burn rewards', 'Future fee-anchored emission share routes to the LP treasury; the original burn never moves'],
               ['Team allocation',   '0 AEON'],
             ].map(([k, v]) => (
               <li key={k} className="flex items-start gap-2 text-sm">
@@ -292,10 +297,10 @@ export default function DocsPage() {
 
           <H2 id="guide-earn">Earn (LP + Gauge Staking)</H2>
           <Step n={1} title="Add liquidity">
-            Go to <Link href="/earn" className="text-aeon-400 hover:underline">Earn</Link>, expand a pool, and open the <strong>Add Liquidity</strong> tab. Enter the amounts for both tokens and confirm. You receive LP tokens representing your share.
+            Go to <Link href="/earn" className="text-aeon-400 hover:underline">Earn</Link> or <Link href="/liquidity" className="text-aeon-400 hover:underline">Liquidity</Link> and choose a vAMM, CL, or DLMM pool. vAMM deposits supply both tokens across the full range; CL positions choose a price range; DLMM positions allocate liquidity across bins.
           </Step>
           <Step n={2} title="Stake LP in the gauge">
-            Switch to the <strong>Earn</strong> tab inside the same pool. Approve your LP tokens, then stake them. Your LP is now earning AEON emissions every block.
+            Approve and stake the pool position in its gauge. vAMM stakes use LP tokens, CL stakes use position NFTs, and DLMM stakes use bin positions. A gauge earns AEON when it receives vote weight for the epoch.
           </Step>
           <Step n={3} title="Claim emissions">
             Claimable AEON accrues in real time. Click <strong>Claim</strong> at any time to receive it.
@@ -326,7 +331,7 @@ export default function DocsPage() {
             Navigate to <Link href="/vote" className="text-aeon-400 hover:underline">Vote</Link>. Your veNFT and its current voting power are shown at the top.
           </Step>
           <Step n={3} title="Allocate votes to pools">
-            Add pools and assign a percentage weight to each. You can split across up to 6 pools. Total must equal 100%.
+            Choose the vAMM or CL + DLMM voting mode, then add pools and assign percentage weights. Total allocation must equal 100%. CL/DLMM votes apply to the current epoch and renew weekly.
           </Step>
           <Step n={4} title="Submit your vote">
             Confirm the transaction. Your vote is locked for the rest of the epoch. At epoch end, pools you voted for receive AEON emissions proportional to your weight.
@@ -363,6 +368,8 @@ export default function DocsPage() {
             <Addr label="Voter"               address={CONTRACTS.AeonVoter} />
             <Addr label="The Furnace"         address={CONTRACTS.TheFurnace} />
             <Addr label="Emissions Engine"    address={CONTRACTS.EmissionsEngine} />
+            <Addr label="Protocol Burn Reward Distributor" address={CONTRACTS.ProtocolBurnRewardDistributor} />
+            <Addr label="Multi-Gauge Controller" address={CONTRACTS.MultiGaugeController} />
             <Addr label="Fee Distributor"     address={CONTRACTS.FeeDistributor} />
             <Addr label="Buyback Engine"      address={CONTRACTS.BuybackEngine} />
             <Addr label="Oracle"              address={CONTRACTS.AeonOracle} />

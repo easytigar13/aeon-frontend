@@ -331,7 +331,7 @@ export default function LockPage() {
             <div className="relative">
               <Flame size={32} className="text-aeon-400 mx-auto mb-3" />
               <h2 className="font-display font-bold text-xl text-text-primary mb-2">The Furnace</h2>
-              <p className="text-sm text-text-secondary leading-relaxed">Burn AEON permanently. Receive a soulbound NFT with static voting power that never decays. Earn a share of every emission's Furnace bonus, plus a share of buyback-redistributed AEON — liquid rewards without ever unstaking.</p>
+              <p className="text-sm text-text-secondary leading-relaxed">Burn AEON permanently. Receive a soulbound NFT with static voting power that never decays. Future fee-anchored emission bonuses are paid directly to your wallet; legacy buyback rewards remain claimable through the Furnace.</p>
             </div>
           </div>
 
@@ -489,7 +489,7 @@ export default function LockPage() {
                   </div>
                   <div className="text-right">
                     <div className="text-sm font-mono font-bold text-aeon-400">{furnaceBurned ? parseFloat(formatUnits(furnaceBurned, 18)).toFixed(2) : '—'} AEON burned</div>
-                    <div className="text-xs text-text-muted font-mono">Earned: {furnaceEarned ? parseFloat(formatUnits(furnaceEarned, 18)).toFixed(4) : '—'} AEON</div>
+                    <div className="text-xs text-text-muted font-mono">Legacy claimable: {furnaceEarned ? parseFloat(formatUnits(furnaceEarned, 18)).toFixed(4) : '—'} AEON</div>
                   </div>
                 </div>
                 {furnaceEarned && furnaceEarned > 0n && (
@@ -497,6 +497,7 @@ export default function LockPage() {
                     Claim {parseFloat(formatUnits(furnaceEarned, 18)).toFixed(4)} AEON
                   </button>
                 )}
+                <p className="text-2xs text-text-muted">New emission bonuses arrive directly in your wallet. This claim covers rewards recorded by the original Furnace, including legacy buyback redistribution.</p>
               </div>
             ) : (
               <div className="text-center py-4 text-text-muted text-sm">No Furnace NFT yet</div>

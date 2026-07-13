@@ -489,7 +489,7 @@ export const EPOCH_CONFIG = {
   epochLength:            604800,
   emissionRatio:           10,     // tokensToMint = feesUSD / emissionRatio / aeonPrice
   emissionVoterSplit:      95,     // of each mint: 95% to voters
-  emissionFurnaceSplit:     5,     // of each mint: 5% to Furnace bonus
+  emissionFurnaceSplit:     5,     // of each mint: 5% burn-ledger reward budget, paid through ProtocolBurnRewardDistributor
   feeVoterSplit:           80,     // of raw collected fees: 80% straight to voters
   feeBuybackSplit:         20,     // of raw collected fees: 20% to BuybackEngine
   buybackBurnSplit:        50,     // of that 20%: 50% swapped to AEON and burned

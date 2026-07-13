@@ -416,7 +416,7 @@ export default function DashboardPage() {
               {[
                 { label: 'Total Burned',       value: totalBurned !== undefined ? `${fmt18(totalBurned)} AEON` : '—' },
                 { label: '% of Supply Burned', value: `${burnedPct}%` },
-                { label: 'Buyback Burns',      value: '— AEON' },
+                { label: 'Protocol Reward Route', value: 'LP treasury' },
               ].map(item => (
                 <div key={item.label} className="flex justify-between items-center gap-3">
                   <span className="text-sm text-text-muted">{item.label}</span>
