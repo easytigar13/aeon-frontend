@@ -402,7 +402,7 @@ export default function DocsPage() {
             {[
               ['DEX Screener Adapter', 'Full spec implementation (/latest-block, /asset, /pair, /events) at /api/dexscreener/* — live, real-time, on-chain-verified. Covers all vAMM pools.'],
               ['Machine-readable pool list', '/api/v1/pools — live reserves + token metadata for every pool, for aggregators and custom bots.'],
-              ['1inch + OpenOcean aggregation', 'Both wired in as competing swap venues on the Swap page — AEON compares its own routing against both aggregators\' pathfinding and uses whichever quote is better.'],
+              ['1inch aggregation', 'Wired in as a competing swap venue on the Swap page — AEON compares its own routing against 1inch\'s pathfinding and uses whichever quote is better.'],
             ].map(([title, desc]) => (
               <li key={title} className="text-sm">
                 <span className="font-mono text-aeon-400">{title}</span>
