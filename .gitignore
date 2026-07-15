@@ -19,6 +19,13 @@ keeper/status.json
 keeper/trades.log
 keeper/pm2-*.log
 
+# Keeper bot 2 — same rules
+keeper2/.env
+keeper2/node_modules/
+keeper2/status.json
+keeper2/trades.log
+keeper2/pm2-*.log
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -32,3 +39,5 @@ tsconfig.tsbuildinfo
 
 .vercel
 .env*
+!keeper/.env.example
+!keeper2/.env.example
