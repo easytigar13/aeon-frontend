@@ -1042,10 +1042,22 @@ function convertSpotReverse(desiredOut: bigint, path: HopCandidate[]): bigint {
 // Returns the gas cost floor expressed in tokenInSym's own raw units, or
 // null if there's no live WETH price path for that token right now -- in
 // which case the caller skips rather than guess at an unverifiable conversion.
+//
+// Refreshed once at the top of every tick() (see below) instead of being
+// fetched fresh inside gasCostFloorInToken() on every single candidate --
+// gas price cannot meaningfully change within one tick, so re-fetching it
+// per-candidate was pure redundant RPC latency (up to EXECUTION_CANDIDATES_
+// PER_TICK round trips doing nothing but re-reading the same value). Pure
+// speed optimization -- same value used either way, no change to which
+// trades execute or how profit/gas floors are computed. Falls back to a
+// live fetch if somehow read before the first tick populates it (never
+// happens in normal operation).
+let cachedGasPrice: bigint | null = null
+
 async function gasCostFloorInToken(
   tokenInSym: string, tokenInAddress: `0x${string}`, hopCount: number, graph: Map<string, HopCandidate[]>, needsApproval = true,
 ): Promise<bigint | null> {
-  const gasPrice = await pub.getGasPrice()
+  const gasPrice = cachedGasPrice ?? await pub.getGasPrice()
 
   let approveGas = 0n
   if (needsApproval) {
@@ -3292,6 +3304,10 @@ const EXECUTION_CANDIDATES_PER_TICK = 10
 
 async function tick() {
   const t0 = Date.now()
+
+  try {
+    cachedGasPrice = await pub.getGasPrice()
+  } catch { /* leave null -- gasCostFloorInToken falls back to a live fetch per-candidate this tick */ }
 
   try {
     await distributeMultiGaugeRewards()
