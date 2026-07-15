@@ -133,14 +133,8 @@ async function blocksForDuration(client: NonNullable<ReturnType<typeof usePublic
   }
 }
 
-const FALLBACK_BLOCKS_7D = FALLBACK_BLOCKS_24H * 7n
-
 async function blocksFor24h(client: NonNullable<ReturnType<typeof usePublicClient>>): Promise<bigint> {
   return blocksForDuration(client, 86400, FALLBACK_BLOCKS_24H)
-}
-
-async function blocksFor7d(client: NonNullable<ReturnType<typeof usePublicClient>>): Promise<bigint> {
-  return blocksForDuration(client, 604800, FALLBACK_BLOCKS_7D)
 }
 
 export interface VolumeResult {
@@ -210,6 +204,44 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
         }
       }
       throw new Error('all candidate ranges failed')
+    }
+
+    // A single getLogs() spanning the full 7-day block range (~7x wider than
+    // 24h) reliably fails against this RPC -- confirmed: the 24h fetch above
+    // (a single one-shot call) succeeds every time, but weekWindowComplete
+    // was staying false essentially always, silently degrading every
+    // consumer of byPoolWeek (this dashboard's fee/emission projection, the
+    // vote page's vAPR) down to a frozen on-chain snapshot instead of real
+    // trailing volume. Rather than guess at a provider-side range cap, reuse
+    // the SAME block-range size already proven to succeed (range24h) and
+    // fetch 7 non-overlapping ~1-day windows in parallel, concatenating the
+    // results -- this covers the identical total span as one 7d call would,
+    // just shaped as 7 requests each sized exactly like the one that's
+    // already known to work.
+    async function fetchWeekInDayChunks(range24h: bigint, currentBlock: bigint): Promise<{ logs: any[]; complete: boolean }> {
+      const chunks: Array<{ fromBlock: bigint; toBlock: bigint }> = []
+      let toBlock = currentBlock
+      for (let i = 0; i < 7 && toBlock > 0n; i++) {
+        const fromBlock = toBlock > range24h ? toBlock - range24h : 0n
+        chunks.push({ fromBlock, toBlock })
+        toBlock = fromBlock > 0n ? fromBlock - 1n : 0n
+      }
+      try {
+        const results = await Promise.all(chunks.map(({ fromBlock, toBlock: cToBlock }) =>
+          (client as any).getLogs({
+            address: ALL_ADDRESSES,
+            topics:  [[SWAP_TOPIC, CL_SWAP_TOPIC, LB_SWAP_TOPIC]],
+            fromBlock,
+            toBlock: cToBlock,
+          })
+        ))
+        return { logs: results.flat(), complete: true }
+      } catch {
+        // A day-chunk itself failed (real network hiccup, not a range-size
+        // issue) -- fall back to the old degrading single-shot search rather
+        // than silently claim a complete window that isn't.
+        return fetchLogsForRange(range24h * 7n, currentBlock)
+      }
     }
 
     // Decode a batch of logs into {totalUsd, byPool, priceHistory} — shared
@@ -321,11 +353,11 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
       const currentBlock = await client!.getBlockNumber().catch(() => undefined)
       if (currentBlock === undefined || cancelled) return
 
-      const [range24h, range7d] = await Promise.all([blocksFor24h(client!), blocksFor7d(client!)])
+      const range24h = await blocksFor24h(client!)
 
       const [logs24h, logs7d] = await Promise.all([
         fetchLogsForRange(range24h, currentBlock).catch(e => { console.warn('useVolume24h: 24h getLogs failed', e); return null }),
-        fetchLogsForRange(range7d,  currentBlock).catch(e => { console.warn('useVolume24h: 7d getLogs failed', e);  return null }),
+        fetchWeekInDayChunks(range24h, currentBlock).catch(e => { console.warn('useVolume24h: 7d getLogs failed', e);  return null }),
       ])
 
       if (cancelled) return
