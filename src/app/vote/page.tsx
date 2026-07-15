@@ -5,7 +5,7 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
 import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
@@ -263,13 +263,60 @@ export default function VotePage() {
   // happened to trade in the exact last 24h. volWeek -> daily avg (÷7) ->
   // annualized (×365) = ×(365/7).
   const aprByAddr: Record<string, number | null> = {}
+  const feesWeekByAddr: Record<string, number | null> = {}
   for (const pool of POOLS) {
     const tvl = tvlByAddr[pool.address] ?? null
     const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
     const feesWeek = volWeek !== null ? volWeek * parseFeeRate(pool.fee) : null
+    feesWeekByAddr[pool.address] = feesWeek
     aprByAddr[pool.address] = (tvl && tvl > 0 && feesWeek !== null)
       ? (feesWeek * (365 / 7) / tvl) * 100
       : null
+  }
+
+  // "If you vote here" — FeeDistributorV3 pays 80% of a pool's RAW fees
+  // (feesVoterSplit) to voters for that specific epoch, split by
+  // poolVoteWeight(tokenId, pool, epoch) / poolTotalWeight(pool, epoch) --
+  // an EPOCH-scoped weight, distinct from the all-time cumulative
+  // weights/totalWeight the emissions vAPR above uses. Modeling the
+  // prospective outcome of submitting the CURRENT allocation sliders right
+  // now: the user's own veNFT+Furnace weight split by their chosen %,
+  // added on top of whatever's already voted for that pool this epoch.
+  const WEEK_SECONDS = 604800
+  const currentEpochSeconds = BigInt(Math.floor(Date.now() / 1000 / WEEK_SECONDS) * WEEK_SECONDS)
+  const { data: poolTotalWeightReads } = useReadContracts({
+    contracts: allocations.map(a => ({
+      address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'poolTotalWeight' as const,
+      args: [a.poolAddress, currentEpochSeconds] as const,
+    })),
+    query: { enabled: allocations.length > 0 },
+  })
+  const { data: lockedAmountRaw } = useReadContract({
+    address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI, functionName: 'lockedAmount',
+    args: tokenId ? [tokenId] : undefined,
+    query: { enabled: !!tokenId },
+  })
+  const aeonPrice = prices['AEON'] ?? null
+  const userLockedUsd = (lockedAmountRaw !== undefined && aeonPrice !== null)
+    ? parseFloat(formatUnits(lockedAmountRaw as bigint, 18)) * aeonPrice
+    : null
+  const userVoteWeight = (votingPower !== undefined ? votingPower : 0n) + furnaceWeight
+
+  function estimateVoteFeeShare(alloc: VoteAllocation, index: number): { usd: number | null; vapr: number | null } {
+    const feesWeek = feesWeekByAddr[alloc.poolAddress]
+    const totalWeightRead = poolTotalWeightReads?.[index]
+    const existingPoolWeight = totalWeightRead?.status === 'success' ? totalWeightRead.result as bigint : null
+    if (feesWeek === null || feesWeek === undefined || existingPoolWeight === null || userVoteWeight === 0n) {
+      return { usd: null, vapr: null }
+    }
+    const theirPoolWeight = (userVoteWeight * BigInt(Math.round(alloc.weight * 100))) / 10_000n
+    const newTotalWeight = existingPoolWeight + theirPoolWeight
+    if (newTotalWeight === 0n || theirPoolWeight === 0n) return { usd: 0, vapr: 0 }
+    const theirShare = Number(theirPoolWeight) / Number(newTotalWeight)
+    const voterPoolUsd = feesWeek * (EPOCH_CONFIG.feeVoterSplit / 100)
+    const usd = voterPoolUsd * theirShare
+    const vapr = userLockedUsd && userLockedUsd > 0 ? (usd * 52 / userLockedUsd) * 100 : null
+    return { usd, vapr }
   }
 
   // vAPR per pool: the annualized $ return a pool's LPs get from the AEON
@@ -287,7 +334,6 @@ export default function VotePage() {
   const { data: onChainTotalWeight } = useReadContract({
     address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'totalWeight',
   })
-  const aeonPrice = prices['AEON'] ?? null
 
   const { data: lastFeesUSDRaw } = useReadContract({
     address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastFeesUSD',
@@ -552,7 +598,9 @@ export default function VotePage() {
               </div>
             ) : (
               <div className="space-y-3">
-                {allocations.map(alloc => (
+                {allocations.map((alloc, index) => {
+                  const { usd: voteEstUsd, vapr: voteEstVapr } = estimateVoteFeeShare(alloc, index)
+                  return (
                   <div key={alloc.poolAddress} className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-sm font-medium text-text-primary">{alloc.pool}</span>
@@ -565,8 +613,18 @@ export default function VotePage() {
                         <span className="text-xs text-text-muted">%</span>
                       </div>
                     </div>
+                    {alloc.weight > 0 && (
+                      <div className="flex items-center justify-between text-2xs font-mono pl-0.5">
+                        <span className="text-text-muted">Est. fee share this epoch (80% of pool fees)</span>
+                        <span className="text-emerald-400">
+                          {voteEstUsd !== null ? fmtUsd(voteEstUsd) : '$—'}
+                          {voteEstVapr !== null && <span className="text-text-muted"> · {fmtApr(voteEstVapr)} vAPR</span>}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
 

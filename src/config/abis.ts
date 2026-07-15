@@ -946,6 +946,20 @@ export const VOTER_ABI = [
     inputs: [{ name: 'pool', type: 'address' }],
     outputs: [{ name: '', type: 'uint256' }],
   },
+  // Epoch-scoped vote weight -- distinct from the all-time cumulative
+  // `weights`/`totalWeight` above (what AEON emissions distribute against).
+  // This is what FeeDistributorV3._claimFees() actually divides by to split
+  // the 80%-of-raw-fees voter share for one specific epoch, per pool.
+  {
+    name: 'poolTotalWeight',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'pool', type: 'address' },
+      { name: 'epoch', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
   {
     name: 'totalWeight',
     type: 'function',

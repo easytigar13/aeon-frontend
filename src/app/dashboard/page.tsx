@@ -245,6 +245,25 @@ export default function DashboardPage() {
     : null
   const projectedEmissionsAeon = liveEmissionProjection?.projectedMintAeon ?? null
 
+  // Voter fee share — FeeDistributorV3 pays feeVoterSplit% (80%) of each
+  // pool's RAW trading fees directly to voters who backed that pool, in the
+  // pool's own fee token -- a completely separate stream from AEON
+  // emissions above (which pay LP gauge stakers, not voters). Per-pool
+  // basis is the SAME live weekly-volume estimate now powering the fee/APR
+  // numbers elsewhere (byPoolWeek), not the on-chain snapshot -- that
+  // snapshot only updates when the fee-collection keeper runs.
+  const feesByPool = uniquePools
+    .map(p => {
+      const volWeek = volByAddrWeek[p.address.toLowerCase()]
+      const feesWeek = volWeek !== undefined ? volWeek * parseFeeRate(p.fee) : null
+      return { pool: p, feesWeek }
+    })
+    .filter((x): x is { pool: typeof x.pool; feesWeek: number } => x.feesWeek !== null && x.feesWeek > 0)
+    .sort((a, b) => b.feesWeek - a.feesWeek)
+  const totalFeesWeekUsd = feesByPool.reduce((sum, x) => sum + x.feesWeek, 0)
+  const voterShareThisEpoch = feesThisEpoch !== null ? feesThisEpoch * (EPOCH_CONFIG.feeVoterSplit / 100) : null
+  const voterShareNextEpoch = totalFeesWeekUsd > 0 ? totalFeesWeekUsd * (EPOCH_CONFIG.feeVoterSplit / 100) : null
+
   const burnedPct = aeonSupply && totalBurned && aeonSupply > 0n
     ? ((Number(totalBurned) / Number(aeonSupply)) * 100).toFixed(2)
     : '—'
@@ -391,6 +410,42 @@ export default function DashboardPage() {
           <p className="text-2xs text-text-muted mt-4 pt-4 border-t border-bg-border">
             Projection only — the real mint locks in when the epoch actually flips, using that moment's finalized fees, live vote weight, and live AEON price. 100% goes to vote-directed LP gauges.
           </p>
+        </div>
+
+        {/* Voter Fee Share — a SEPARATE stream from AEON emissions above:
+            FeeDistributorV3 pays feeVoterSplit% (80%) of each pool's raw
+            trading fees directly to voters who backed it, in that pool's
+            own fee token, not in AEON. Per-pool split by epoch-scoped vote
+            weight -- see the Vote page for a personalized "if you vote
+            here" estimate. */}
+        <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.emerald.glow}` }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Vote size={16} className="text-emerald-400" />
+            <span className="font-display font-semibold text-text-primary">Voter Fee Share</span>
+            <span className="ml-auto text-2xs font-mono text-text-muted uppercase tracking-wider">{EPOCH_CONFIG.feeVoterSplit}% of raw fees</span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="rounded-xl border border-bg-border bg-bg-raised/60 p-3">
+              <div className="text-2xs text-text-muted uppercase font-mono">This epoch</div>
+              <div className="text-lg text-emerald-400 font-mono mt-1">{voterShareThisEpoch !== null ? fmtUsd(voterShareThisEpoch, true) : '$—'}</div>
+            </div>
+            <div className="rounded-xl border border-bg-border bg-bg-raised/60 p-3">
+              <div className="text-2xs text-text-muted uppercase font-mono">Next epoch (projected)</div>
+              <div className="text-lg text-emerald-400 font-mono mt-1">{voterShareNextEpoch !== null ? fmtUsd(voterShareNextEpoch, true) : '$—'}</div>
+            </div>
+          </div>
+          {feesByPool.length > 0 ? (
+            <div className="space-y-1.5">
+              {feesByPool.slice(0, 5).map(({ pool, feesWeek }) => (
+                <div key={pool.address} className="flex justify-between items-center gap-3 text-sm">
+                  <span className="text-text-muted">{pool.name}</span>
+                  <span className="font-mono text-text-primary">{fmtUsd(feesWeek * (EPOCH_CONFIG.feeVoterSplit / 100), true)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-text-muted text-sm">No trailing-week fee data yet</div>
+          )}
         </div>
 
         <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.aeon.glow}` }}>
