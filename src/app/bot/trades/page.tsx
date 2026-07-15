@@ -1,8 +1,10 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { ArrowLeft, ExternalLink, TrendingUp } from 'lucide-react'
 import { clsx } from 'clsx'
+import { getBotBySlug } from '@/config/bots'
 
 interface Trade {
   time: string
@@ -27,6 +29,16 @@ const LIMIT = 50
 const EXPLORER = 'https://robinhoodchain.blockscout.com'
 
 export default function BotTradesPage() {
+  return (
+    <Suspense fallback={null}>
+      <BotTradesPageInner />
+    </Suspense>
+  )
+}
+
+function BotTradesPageInner() {
+  const searchParams = useSearchParams()
+  const bot = getBotBySlug(searchParams.get('bot'))
   const [trades, setTrades] = useState<Trade[]>([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -35,23 +47,23 @@ export default function BotTradesPage() {
   const [cumulativeProfit, setCumulativeProfit] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    fetch('/api/bot/status', { cache: 'no-store' })
+    fetch(`/api/bot/status?bot=${bot.slug}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => setCumulativeProfit(d.cumulativeProfit ?? {}))
       .catch(() => {})
-  }, [])
+  }, [bot])
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    const params = new URLSearchParams({ limit: String(LIMIT), offset: String(offset) })
+    const params = new URLSearchParams({ bot: bot.slug, limit: String(LIMIT), offset: String(offset) })
     if (filter !== 'all') params.set('status', filter)
     fetch(`/api/bot/trades?${params}`, { cache: 'no-store' })
       .then(r => r.json())
       .then(d => { if (!cancelled) { setTrades(d.trades ?? []); setTotal(d.total ?? 0) } })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [offset, filter])
+  }, [bot, offset, filter])
 
   function changeFilter(f: StatusFilter) {
     setFilter(f)
@@ -69,6 +81,7 @@ export default function BotTradesPage() {
         </Link>
 
         <div className="mb-8">
+          <div className="text-2xs font-mono uppercase tracking-wider text-aeon-400 mb-1">{bot.name}</div>
           <h1 className="font-display font-bold text-3xl sm:text-4xl text-text-primary mb-2">All Trades</h1>
           <p className="text-text-secondary">Complete, unfiltered history of every arb the bot has attempted -- never truncated.</p>
         </div>

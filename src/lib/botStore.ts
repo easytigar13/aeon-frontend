@@ -22,8 +22,13 @@ export function isBotStoreConfigured(): boolean {
   return getConfig() !== null
 }
 
-const STATUS_KEY = 'aeon:bot:status'
-const TRADES_KEY = 'aeon:bot:trades'
+// botId distinguishes multiple bot instances sharing one Redis store (e.g.
+// keeper/ vs keeper2/). Omitted/empty keeps the ORIGINAL unprefixed keys --
+// existing bot #1 deployments (already-live data, already-configured env)
+// are completely unaffected. Only a bot that explicitly passes its own id
+// (see keeper2/index.ts's BOT_ID) gets a separate namespace.
+function statusKey(botId?: string): string { return botId ? `aeon:bot:status:${botId}` : 'aeon:bot:status' }
+function tradesKey(botId?: string): string { return botId ? `aeon:bot:trades:${botId}` : 'aeon:bot:trades' }
 const MAX_TRADES_IN_STORE = 1000   // caps Redis storage -- the LOCAL trades.log stays the unbounded source of truth
 
 async function upstash(command: (string | number)[]): Promise<any> {
@@ -44,26 +49,26 @@ async function upstash(command: (string | number)[]): Promise<any> {
   return body?.result
 }
 
-export async function writeBotStatus(status: unknown): Promise<void> {
-  await upstash(['set', STATUS_KEY, JSON.stringify(status)])
+export async function writeBotStatus(status: unknown, botId?: string): Promise<void> {
+  await upstash(['set', statusKey(botId), JSON.stringify(status)])
 }
 
-export async function readBotStatus(): Promise<any | null> {
-  const raw = await upstash(['get', STATUS_KEY])
+export async function readBotStatus(botId?: string): Promise<any | null> {
+  const raw = await upstash(['get', statusKey(botId)])
   if (!raw) return null
   try { return JSON.parse(raw) } catch { return null }
 }
 
 // Trades are LPUSHed (newest at the head), so lrange 0..N is always
 // newest-first without needing to reverse on read.
-export async function appendTrade(trade: unknown): Promise<void> {
+export async function appendTrade(trade: unknown, botId?: string): Promise<void> {
   if (!getConfig()) return
-  await upstash(['lpush', TRADES_KEY, JSON.stringify(trade)])
-  await upstash(['ltrim', TRADES_KEY, 0, MAX_TRADES_IN_STORE - 1])
+  await upstash(['lpush', tradesKey(botId), JSON.stringify(trade)])
+  await upstash(['ltrim', tradesKey(botId), 0, MAX_TRADES_IN_STORE - 1])
 }
 
-export async function readAllTrades(): Promise<any[]> {
-  const raw = await upstash(['lrange', TRADES_KEY, 0, MAX_TRADES_IN_STORE - 1]) as string[] | null
+export async function readAllTrades(botId?: string): Promise<any[]> {
+  const raw = await upstash(['lrange', tradesKey(botId), 0, MAX_TRADES_IN_STORE - 1]) as string[] | null
   if (!raw) return []
   return raw.map(line => { try { return JSON.parse(line) } catch { return null } }).filter(Boolean)
 }

@@ -1,8 +1,10 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { ArrowLeft, Activity } from 'lucide-react'
 import { clsx } from 'clsx'
+import { getBotBySlug } from '@/config/bots'
 
 interface Opportunity {
   pair: string
@@ -19,6 +21,16 @@ interface Opportunity {
 const STALE_AFTER_MS = 60_000
 
 export default function BotOpportunitiesPage() {
+  return (
+    <Suspense fallback={null}>
+      <BotOpportunitiesPageInner />
+    </Suspense>
+  )
+}
+
+function BotOpportunitiesPageInner() {
+  const searchParams = useSearchParams()
+  const bot = getBotBySlug(searchParams.get('bot'))
   const [opportunities, setOpportunities] = useState<Opportunity[]>([])
   const [updatedAt, setUpdatedAt] = useState<string | null>(null)
 
@@ -26,7 +38,7 @@ export default function BotOpportunitiesPage() {
     let cancelled = false
     async function poll() {
       try {
-        const res = await fetch('/api/bot/status', { cache: 'no-store' })
+        const res = await fetch(`/api/bot/status?bot=${bot.slug}`, { cache: 'no-store' })
         const data = await res.json()
         if (!cancelled) {
           setOpportunities(data.lastOpportunities ?? [])
@@ -37,7 +49,7 @@ export default function BotOpportunitiesPage() {
     poll()
     const id = setInterval(poll, 3000)
     return () => { cancelled = true; clearInterval(id) }
-  }, [])
+  }, [bot])
 
   const isLive = updatedAt && (Date.now() - new Date(updatedAt).getTime()) < STALE_AFTER_MS
 
@@ -50,6 +62,7 @@ export default function BotOpportunitiesPage() {
 
         <div className="mb-8 flex items-center justify-between flex-wrap gap-4">
           <div>
+            <div className="text-2xs font-mono uppercase tracking-wider text-aeon-400 mb-1">{bot.name}</div>
             <h1 className="font-display font-bold text-3xl sm:text-4xl text-text-primary mb-2">Current Opportunities</h1>
             <p className="text-text-secondary">
               Every route the bot is evaluating right now, refreshed live from its latest scan --

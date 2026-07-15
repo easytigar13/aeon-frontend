@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { Activity, Copy, Check, TrendingUp, AlertTriangle, Wallet, ArrowRight, Layers, CheckCircle, XCircle, Clock, Zap } from 'lucide-react'
 import { clsx } from 'clsx'
 import { GlowPanel, MetricCard, ProtocolBackdrop, type ProtocolAccent } from '@/components/ProtocolVisuals'
+import { BOTS, DEFAULT_BOT } from '@/config/bots'
 
 interface Opportunity {
   pair: string
@@ -68,6 +69,7 @@ type ProfitRange = 'today' | 'sevenDays' | 'month' | 'all'
 const STALE_AFTER_MS = 60_000
 
 export default function BotPage() {
+  const [selectedBot, setSelectedBot] = useState(DEFAULT_BOT)
   const [status, setStatus] = useState<BotStatus | null>(null)
   const [copied, setCopied] = useState(false)
   const [profitRange, setProfitRange] = useState<ProfitRange>('today')
@@ -75,9 +77,10 @@ export default function BotPage() {
 
   useEffect(() => {
     let cancelled = false
+    setStatus(null)   // clear stale data from the previous bot immediately on switch
     async function poll() {
       try {
-        const res = await fetch('/api/bot/status', { cache: 'no-store' })
+        const res = await fetch(`/api/bot/status?bot=${selectedBot.slug}`, { cache: 'no-store' })
         const data = await res.json()
         if (!cancelled) setStatus(data)
       } catch { /* keep showing last known status */ }
@@ -85,13 +88,14 @@ export default function BotPage() {
     poll()
     const id = setInterval(poll, 3000)
     return () => { cancelled = true; clearInterval(id) }
-  }, [])
+  }, [selectedBot])
 
   useEffect(() => {
     let cancelled = false
+    setProfitSummaries({})
     async function pollProfit() {
       try {
-        const res = await fetch('/api/bot/trades?summary=1', { cache: 'no-store' })
+        const res = await fetch(`/api/bot/trades?bot=${selectedBot.slug}&summary=1`, { cache: 'no-store' })
         const data = await res.json()
         if (!cancelled) setProfitSummaries(data.summaries ?? {})
       } catch { /* retain the last successful summary */ }
@@ -99,7 +103,7 @@ export default function BotPage() {
     pollProfit()
     const id = setInterval(pollProfit, 15_000)
     return () => { cancelled = true; clearInterval(id) }
-  }, [])
+  }, [selectedBot])
 
   const hasFile = status && status.updatedAt
   const isOnline = hasFile && (Date.now() - new Date(status.updatedAt!).getTime()) < STALE_AFTER_MS
@@ -123,7 +127,7 @@ export default function BotPage() {
       <ProtocolBackdrop />
       <div className="max-w-7xl mx-auto px-4 py-12">
         {/* Header */}
-        <div className="mb-8 flex items-center justify-between flex-wrap gap-4">
+        <div className="mb-6 flex items-center justify-between flex-wrap gap-4">
           <div>
             <div className="inline-flex items-center gap-2 text-2xs font-mono uppercase tracking-[0.2em] text-emerald-400 mb-3">
               <Zap size={12} /> Autonomous execution layer
@@ -141,6 +145,25 @@ export default function BotPage() {
             <span className={clsx('w-2 h-2 rounded-full', executionReady ? 'bg-emerald-400 animate-pulse-slow' : isOnline ? 'bg-yellow-400 animate-pulse-slow' : 'bg-red-400')} />
             {!isOnline ? 'Offline' : status?.dryRun ? 'Online · Dry Run' : !status?.gasReserve?.healthy ? 'Online · Refilling Gas' : status?.pausedUntil ? 'Online · Safety Pause' : 'Online · Live'}
           </div>
+        </div>
+
+        {/* Bot selector */}
+        <div className="flex gap-2 mb-8">
+          {BOTS.map(bot => (
+            <button
+              key={bot.slug}
+              onClick={() => setSelectedBot(bot)}
+              className={clsx(
+                'px-4 py-2.5 rounded-xl border text-left transition-all',
+                selectedBot.slug === bot.slug
+                  ? 'bg-aeon-400/10 border-aeon-400/40 shadow-[0_0_20px_-8px_rgba(255,184,0,0.5)]'
+                  : 'bg-bg-raised border-bg-border hover:border-bg-border/80 text-text-muted'
+              )}
+            >
+              <div className={clsx('font-display font-semibold text-sm', selectedBot.slug === bot.slug ? 'text-aeon-400' : 'text-text-primary')}>{bot.name}</div>
+              <div className="text-2xs font-mono text-text-muted">{bot.subtitle}</div>
+            </button>
+          ))}
         </div>
 
         {!hasFile && (
@@ -278,7 +301,7 @@ export default function BotPage() {
                 <div className="text-text-secondary text-sm font-mono uppercase tracking-wider flex items-center gap-2">
                   <Activity size={14} /> Current Opportunities
                 </div>
-                <Link href="/bot/opportunities" className="inline-flex items-center gap-1 text-aeon-400 hover:text-aeon-300 text-xs font-medium">
+                <Link href={`/bot/opportunities?bot=${selectedBot.slug}`} className="inline-flex items-center gap-1 text-aeon-400 hover:text-aeon-300 text-xs font-medium">
                   View all opportunities <ArrowRight size={12} />
                 </Link>
               </div>
@@ -304,7 +327,7 @@ export default function BotPage() {
             <GlowPanel accent="violet" className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <div className="text-text-secondary text-sm font-mono uppercase tracking-wider">Recent Activity</div>
-                <Link href="/bot/trades" className="inline-flex items-center gap-1 text-aeon-400 hover:text-aeon-300 text-xs font-medium">
+                <Link href={`/bot/trades?bot=${selectedBot.slug}`} className="inline-flex items-center gap-1 text-aeon-400 hover:text-aeon-300 text-xs font-medium">
                   View all trades <ArrowRight size={12} />
                 </Link>
               </div>

@@ -1,5 +1,19 @@
 /**
- * AEON Arb Keeper -- 24/7 live service
+ * AEON Arb Keeper #2 -- 24/7 live service, fast/internal-only variant
+ *
+ * Distinct mission from keeper/ (bot #1): stay strictly on AEON's own
+ * listed liquidity -- every vAMM/CL/DLMM pool in src/config/contracts.ts,
+ * plus the Uniswap V2 mirror of any pair already listed there (one cheap
+ * multicall, no external fetch) -- and never let the scan loop wait on a
+ * rate-limited external API (ENABLE_EXTERNAL_DISCOVERY and ENABLE_CROSS_VENUE
+ * both default false here). The point is speed: since this is our own
+ * infrastructure with known addresses/ABIs, this instance can tick far
+ * faster than a generic bot that has to discover pools and fetch external
+ * quotes -- so it finds and executes AEON's own arb opportunities before
+ * anything else searching the chain gets there, generating both profit and
+ * real trading volume for the protocol (which also feeds the fee-anchored
+ * emissions engine). Set ENABLE_EXTERNAL_DISCOVERY=true to opt back into
+ * keeper/'s broader external-pool scope on this instance if ever wanted.
  *
  * Continuously scans every AEON vAMM pool in src/config/contracts.ts (the
  * same list the website itself reads -- no separate pool list to drift out
@@ -89,6 +103,12 @@ dotenv.config({ path: envPath })
 // in-place paths for actual 24/7 operation.
 const statusPath    = process.env.STATUS_FILE ?? fileURLToPath(new URL('status.json', import.meta.url))
 const tradesLogPath = process.env.TRADES_LOG_FILE ?? fileURLToPath(new URL('trades.log', import.meta.url))
+
+// Distinguishes this instance in the shared Redis store (see src/lib/botStore.ts)
+// so it never collides with keeper/'s (bot #1's) unprefixed keys if both ever
+// have KV_REST_API_URL/TOKEN configured at the same time. Displayed on the
+// website as "AEON" (bot #1 is "Mirajane") -- see src/config/bots.ts.
+const BOT_ID = 'aeon'
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -180,8 +200,8 @@ if (BASE_TOKEN_OVERRIDE && !TOKENS[BASE_TOKEN_OVERRIDE]) {
   process.exit(1)
 }
 
-if (INTERVAL_MS < 1000) {
-  console.warn(`[warn] INTERVAL_MS=${INTERVAL_MS} is under 1s -- most public RPCs rate-limit at that rate. Raise it if you start seeing RPC errors.`)
+if (INTERVAL_MS < 100) {
+  console.warn(`[warn] INTERVAL_MS=${INTERVAL_MS} is under 100ms -- most public RPCs will start rate-limiting at that rate. Raise it if you start seeing RPC errors.`)
 }
 
 // ─── Pool set (from the frontend's own config -- single source of truth) ────
@@ -252,6 +272,16 @@ for (const p of UNISWAP_POOLS) {
   })
 }
 const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?? '1000000')
+// This keeper is tuned to stay strictly on AEON's own listed pools (vAMM +
+// CL + DLMM + the already-curated UNISWAP_POOLS mirrors, seeded above
+// unconditionally) so its search loop never waits on a per-pool external
+// fetch -- that's what makes it fast enough to consistently beat other bots
+// to AEON's own opportunities. Dynamic Uniswap V3/V4 discovery below does a
+// live DexScreener fetch per candidate pool and can surface pairs we don't
+// already list -- real, but real latency and off-mission for this keeper.
+// Off by default; set true only if you want this instance to also chase
+// those pools (keeper/'s original scope), at the cost of tick speed.
+const ENABLE_EXTERNAL_DISCOVERY = process.env.ENABLE_EXTERNAL_DISCOVERY === 'true'
 // Explicit user-requested external token pins. These remain in V3/V4
 // discovery even if the general exclusion policy is tightened later.
 const MANUAL_EXTERNAL_TOKENS = new Set<keyof typeof TOKENS>(['HOODIE'])
@@ -1446,7 +1476,7 @@ function publishPendingTransaction() {
     const next = { ...prior, updatedAt: new Date().toISOString(), pendingTransaction }
     fs.writeFileSync(statusPath, JSON.stringify(next, null, 2))
     if (isBotStoreConfigured()) {
-      writeBotStatus(next).catch(err => console.error(`[bot store error] failed to sync pending transaction: ${err?.message ?? err}`))
+      writeBotStatus(next, BOT_ID).catch(err => console.error(`[bot store error] failed to sync pending transaction: ${err?.message ?? err}`))
     }
   } catch { /* the first full tick will create status.json */ }
 }
@@ -1591,7 +1621,7 @@ function recordArb(arb: ExecutedArb) {
     console.error(`[trade log error] failed to append to trades.log: ${err?.message ?? err}`)
   }
   if (isBotStoreConfigured()) {
-    appendTrade(arb).catch(err => console.error(`[bot store error] failed to sync trade: ${err?.message ?? err}`))
+    appendTrade(arb, BOT_ID).catch(err => console.error(`[bot store error] failed to sync trade: ${err?.message ?? err}`))
   }
 }
 
@@ -1661,7 +1691,7 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
   // Upstash's free-tier command budget fast (86,400+/day at 1s intervals).
   if (isBotStoreConfigured() && Date.now() - lastRedisStatusSync >= REDIS_STATUS_SYNC_INTERVAL_MS) {
     lastRedisStatusSync = Date.now()
-    writeBotStatus(status).catch(err => console.error(`[bot store error] failed to sync status: ${err?.message ?? err}`))
+    writeBotStatus(status, BOT_ID).catch(err => console.error(`[bot store error] failed to sync status: ${err?.message ?? err}`))
   }
 }
 
@@ -3494,8 +3524,8 @@ interface DiscoveryCounts {
 
 async function refreshPoolDiscovery(): Promise<DiscoveryCounts> {
   const uniswapV2 = await discoverUniswapPools()
-  const uniswapV3 = await discoverHighVolumeUniswapV3Pools()
-  const uniswapV4 = await discoverHighVolumeUniswapV4Pools()
+  const uniswapV3 = ENABLE_EXTERNAL_DISCOVERY ? await discoverHighVolumeUniswapV3Pools() : 0
+  const uniswapV4 = ENABLE_EXTERNAL_DISCOVERY ? await discoverHighVolumeUniswapV4Pools() : 0
   const { cl, dlmm } = await discoverClAndDlmmPools()
   return { uniswapV2, uniswapV3, uniswapV4, cl, dlmm }
 }
@@ -3532,6 +3562,7 @@ async function main() {
   console.log(`  Uniswap V4 pools above $${MIN_EXTERNAL_VOLUME_USD.toLocaleString()} volume discovered: ${uniswapV4Pools}`)
   console.log(`  AEON CL pools discovered: ${clPools}  |  AEON DLMM pools discovered: ${dlmmPools}`)
   console.log(`  Pool discovery refresh interval: ${POOL_REFRESH_INTERVAL_MS}ms`)
+  console.log(`  External Uniswap V3/V4 discovery: ${ENABLE_EXTERNAL_DISCOVERY ? 'enabled' : 'disabled (AEON pools + listed Uniswap mirrors only)'}`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
