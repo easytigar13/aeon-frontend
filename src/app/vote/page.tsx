@@ -113,6 +113,29 @@ export default function VotePage() {
     if (ownedTokenIds.length === 1) setTokenIdInput(ownedTokenIds[0].toString())
   }, [ownedTokenIds, loadingOwned, tokenIdInput])
 
+  // KNOWN CONTRACT BUG (frontend-only stopgap, not a real fix): AeonVoterV2.
+  // vote()/poke() re-read furnace.votingPowerOf(owner) -- the wallet's FULL
+  // cumulative Furnace burn -- fresh on every call, with no per-wallet
+  // consumption tracking. A wallet owning multiple veNFTs can vote with each
+  // one separately in the same epoch and get the full furnace bonus counted
+  // once per veNFT instead of once per wallet. This can't be fixed on-chain
+  // without a full AeonVoterV2 (+ every gauge) redeploy -- gauges hold real
+  // staked LP, so that migration needs to happen carefully, not rushed. This
+  // blocks the easy path through OUR OWN UI only; it does not stop someone
+  // calling the contract directly.
+  const { data: ownedLastVotedReads } = useReadContracts({
+    contracts: ownedTokenIds.map(id => ({
+      address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'lastVoted' as const, args: [id] as const,
+    })),
+    query: { enabled: ownedTokenIds.length > 1 },
+  })
+  const CURRENT_EPOCH_START_SEC = BigInt(Math.floor(Date.now() / 1000 / 604800) * 604800)
+  const walletAlreadyVotedTokenId = ownedTokenIds.find((id, i) => {
+    if (tokenId !== undefined && id === tokenId) return false
+    const r = ownedLastVotedReads?.[i]
+    return r?.status === 'success' && (r.result as bigint) >= CURRENT_EPOCH_START_SEC
+  })
+
   const { data: nftOwner } = useReadContract({
     address: CONTRACTS.AeonVotingEscrow,
     abi: VOTING_ESCROW_ABI,
@@ -442,6 +465,7 @@ export default function VotePage() {
   function handleVote() {
     if (!isConnected) { openConnectModal?.(); return }
     if (!tokenId || !isOwner || totalWeight !== 100 || allocations.length === 0) return
+    if (walletAlreadyVotedTokenId !== undefined) return
     const poolAddresses = allocations.map(a => a.poolAddress)
     const weights       = allocations.map(a => BigInt(Math.round(a.weight * 100)))
     if (voteMode === 'vAMM') {
@@ -642,7 +666,7 @@ export default function VotePage() {
 
             <button
               onClick={handleVote}
-              disabled={isBusy || (isConnected && (totalWeight !== 100 || allocations.length === 0 || !tokenId || !isOwner || hasVotedForMode))}
+              disabled={isBusy || (isConnected && (totalWeight !== 100 || allocations.length === 0 || !tokenId || !isOwner || hasVotedForMode || walletAlreadyVotedTokenId !== undefined))}
               className="btn-primary w-full mt-4 flex items-center justify-center gap-2"
             >
               <Vote size={16} />
@@ -652,6 +676,11 @@ export default function VotePage() {
             {isConnected && tokenId && hasVotedForMode && (
               <p className="text-2xs text-yellow-400 text-center mt-2">
                 {voteMode === 'vAMM' ? 'Reset your vAMM vote first before re-voting' : 'CL/DLMM votes renew next epoch'}
+              </p>
+            )}
+            {isConnected && walletAlreadyVotedTokenId !== undefined && (
+              <p className="text-2xs text-red-400 text-center mt-2">
+                Your wallet already voted this epoch with veNFT #{walletAlreadyVotedTokenId.toString()}. Only one of your veNFTs can vote per epoch — your Furnace burn bonus only counts once, no matter how many veNFTs you switch between.
               </p>
             )}
           </div>
