@@ -1180,6 +1180,33 @@ async function ensureWethBalance(needed: bigint, availableEthForWrap: bigint): P
   return current
 }
 
+// WETH is a necessary routing token mid-trade (nearly every pool pairs
+// against it), but the wallet should never REST holding it -- resting
+// capital belongs in USDG, native ETH, or AEON, so any WETH balance left
+// over once a tick's trading is done gets unwrapped back to ETH 1:1 (no
+// market swap, no slippage, no fee, just the unwrap gas). Called
+// unconditionally at the end of every tick, not just after a trade fires,
+// so it also catches WETH that arrived some other way (a manual deposit,
+// for instance).
+async function unwrapIdleWeth(): Promise<void> {
+  if (DRY_RUN) return
+  const wethBal = await pub.readContract({
+    address: TOKENS.WETH.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+  }) as bigint
+  // Unwrap gas is a fixed cost regardless of amount -- skip true dust
+  // rather than spend real gas converting a negligible remainder.
+  if (wethBal < minRawUnits(TOKENS.WETH.decimals)) return
+
+  console.log(`\n[${new Date().toISOString()}] Unwrapping idle WETH balance: ${formatEther(wethBal)} WETH → ETH`)
+  try {
+    await writeContractTracked({
+      address: TOKENS.WETH.address, abi: WETH_ABI, functionName: 'withdraw', args: [wethBal],
+    }, 'unwrap idle WETH')
+  } catch (err: any) {
+    console.error(`   ⚠ Unwrap failed: ${err?.shortMessage ?? err?.message ?? err}`)
+  }
+}
+
 let lastGasRefillAttempt = 0
 
 // The configured reserve is an operating target, not a trading shutdown.
@@ -3453,6 +3480,7 @@ async function tick() {
     }
   }
 
+  await unwrapIdleWeth()
   await writeStatus(rankedCandidates.map(candidate => candidate.opp), tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
 }
 
