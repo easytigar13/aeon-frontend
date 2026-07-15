@@ -115,13 +115,13 @@ export default function DocsPage() {
             </div>
             <h1 className="font-display font-bold text-4xl text-text-primary mb-4">AEON Protocol</h1>
             <P>
-              AEON is a ve(3,3) decentralized exchange on <strong className="text-text-primary">Robinhood Chain</strong> built around a simple rule: <strong className="text-text-primary">the USD value of emissions can never exceed 1/10th of a rolling 3-epoch average of fees</strong>. This anchors token value to real protocol revenue — no phantom yields, no inflation without demand.
+              AEON is a ve(3,3) decentralized exchange on <strong className="text-text-primary">Robinhood Chain</strong> built around a simple rule: <strong className="text-text-primary">every epoch's emissions equal exactly {EPOCH_CONFIG.emissionPct}% of that epoch's finalized trading fees</strong>. This anchors token value to real protocol revenue — no phantom yields, no inflation without demand.
             </P>
             <P>
               The protocol combines automated market making with a governance layer where locked AEON holders vote on where emissions go — and earn the fees from the pools they back. AEON launched fresh on Robinhood Chain (chain ID 4663) with a one-time genesis mint and zero allocation to the team.
             </P>
             <Note>
-              <strong className="text-text-primary">Core rule:</strong> Each epoch's emission budget = (3-epoch rolling average of fees) ÷ {EPOCH_CONFIG.emissionRatio}, converted to AEON at the current oracle price and capped at 3× the previous epoch's mint. If the DEX averages $10,000 in fees per week, a maximum of $1,000 worth of AEON is emitted that epoch. Emissions are self-limiting.
+              <strong className="text-text-primary">Core rule:</strong> Each epoch's emission budget = that epoch's finalized fees × {EPOCH_CONFIG.emissionPct}%, converted to AEON at the current oracle price. No rolling average, no previous-mint growth cap — if the DEX did $10,000 in fees last epoch, exactly ${(10_000 * EPOCH_CONFIG.emissionPct / 100).toLocaleString()} worth of AEON is emitted this epoch, 100% to vote-directed LP gauges.
             </Note>
           </div>
 
@@ -137,7 +137,7 @@ export default function DocsPage() {
               {[
                 { icon: '💧', label: 'LPs add liquidity', sub: 'Earn trading fees' },
                 { icon: '🗳️', label: 'Voters direct emissions', sub: `Earn ${EPOCH_CONFIG.feeVoterSplit}% of fees from voted pools` },
-                { icon: '🔥', label: 'Furnace burns AEON', sub: 'Direct emission share + legacy buyback' },
+                { icon: '🔥', label: 'Furnace burns AEON', sub: 'Earns via buyback redistribution' },
               ].map(({ icon, label, sub }) => (
                 <div key={label} className="flex flex-col items-center gap-2">
                   <div className="text-2xl">{icon}</div>
@@ -184,9 +184,9 @@ export default function DocsPage() {
           </P>
           <ol className="space-y-2 mb-4 ml-4 list-decimal text-sm text-text-secondary">
             <li>Protocol tallies all fees collected across every pool</li>
-            <li>New AEON is minted so its USD value equals a rolling 3-epoch average of fees ÷ {EPOCH_CONFIG.emissionRatio}, converted through AEON's oracle price and capped at 3× the previous epoch's mint</li>
-            <li>{EPOCH_CONFIG.emissionVoterSplit}% of that mint forms the LP gauge budget. When CL/DLMM votes exist for the epoch, 20% of that LP budget is reserved for the Multi-Gauge Controller and 80% goes to legacy vAMM gauges; without CL/DLMM votes, vAMM gauges receive the full LP budget</li>
-            <li>The remaining {EPOCH_CONFIG.emissionFurnaceSplit}% is the Furnace emission-reward budget. The Protocol Burn Reward Distributor pays each user burner directly and routes the protocol-owned 50,000 AEON burn share to the LP treasury</li>
+            <li>New AEON is minted so its USD value equals exactly {EPOCH_CONFIG.emissionPct}% of that epoch's finalized fees, converted through AEON's oracle price — no rolling average, no previous-mint growth cap</li>
+            <li>{EPOCH_CONFIG.emissionVoterSplit}% of that mint forms the LP gauge budget (the Furnace receives none of it). When CL/DLMM votes exist for the epoch, up to 20% of that LP budget is reserved for the Multi-Gauge Controller and the rest goes to legacy vAMM gauges; without CL/DLMM votes, vAMM gauges receive the full LP budget</li>
+            <li>Furnace burners keep earning separately through the Buyback Engine's fee-funded redistribution share — unrelated to and unaffected by the emission mint</li>
             <li>LPs staked in vote-weighted vAMM, CL, and DLMM gauges earn AEON emissions throughout the next epoch</li>
           </ol>
 
@@ -207,16 +207,16 @@ export default function DocsPage() {
 
           <H3>Burn → Soulbound NFT → Passive Income</H3>
           <P>
-            When you burn AEON in The Furnace, you receive a soulbound NFT that cannot be transferred or sold. Voting power from burned tokens never decays. Future fee-anchored emission bonuses are calculated from the live burn ledger and paid directly to each user's wallet by the Protocol Burn Reward Distributor. Legacy Buyback Engine redistribution and rewards recorded before the redirect remain claimable through the original Furnace.
+            When you burn AEON in The Furnace, you receive a soulbound NFT that cannot be transferred or sold. Voting power from burned tokens never decays. Ongoing rewards come from the Buyback Engine's redistribution share (a fixed cut of raw trading fees, swapped to AEON and paid out to burners) — unrelated to and unaffected by the AEON emission mint, which since 2026-07-13 sends 100% of every mint straight to vote-directed LP gauges instead.
           </P>
           <Note>
-            The protocol's 50,000 AEON genesis burn remains permanently burned and continues to provide its legacy vAMM voting weight. Its future fee-anchored emission-reward share is sent directly to the LP treasury at <code>0x92aAc9aeD3b93e3F6252982A716Aa683A7F650bc</code>. Previously accrued rewards in the original Furnace remain untouched, and the immutable legacy buyback route has not changed.
+            The protocol's 50,000 AEON genesis burn remains permanently burned and continues to provide its legacy vAMM voting weight. Rewards already recorded before 2026-07-13 remain claimable through the original Furnace, and the Buyback Engine's redistribution route to burners is unchanged.
           </Note>
 
           <div className="my-6 grid grid-cols-2 gap-4">
             {[
               { title: 'Lock (veNFT)', items: ['Power decays over time', 'Transferable', 'Can withdraw after lock expires', `Earn ${EPOCH_CONFIG.feeVoterSplit}% of fees from voted pools`], color: 'violet' },
-              { title: 'Furnace (Burn)', items: ['Power never decays', 'Soulbound — non-transferable', 'Cannot withdraw — permanent', 'Direct emission bonus + legacy buyback share'], color: 'aeon', highlight: true },
+              { title: 'Furnace (Burn)', items: ['Power never decays', 'Soulbound — non-transferable', 'Cannot withdraw — permanent', 'Earns via Buyback Engine redistribution'], color: 'aeon', highlight: true },
             ].map(col => (
               <div key={col.title} className={clsx(
                 'card p-4 transition-shadow duration-300',
@@ -249,7 +249,7 @@ export default function DocsPage() {
               ['AEON/ETH liquidity', '20,000 AEON seeded, paired against ETH'],
               ['AEON/USDG liquidity','20,000 AEON seeded, paired against USDG'],
               ['Burned at genesis', '50,000 AEON — permanently burned via the Furnace, then voted 25,000/25,000 across both AEON pools'],
-              ['Protocol burn rewards', 'Future fee-anchored emission share routes to the LP treasury; the original burn never moves'],
+              ['Protocol burn rewards', 'Earns via Buyback Engine redistribution only, same as any other Furnace burner; the original burn never moves'],
               ['Team allocation',   '0 AEON'],
             ].map(([k, v]) => (
               <li key={k} className="flex items-start gap-2 text-sm">
@@ -262,7 +262,7 @@ export default function DocsPage() {
           <H3>Supply Mechanics</H3>
           <ul className="space-y-2 mb-6 ml-4">
             {[
-              ['New supply',     `Emissions only — capped at a rolling 3-epoch fee average ÷ ${EPOCH_CONFIG.emissionRatio} (USD terms, oracle-priced), forever after genesis`],
+              ['New supply',     `Emissions only — exactly ${EPOCH_CONFIG.emissionPct}% of that epoch's finalized fees (USD terms, oracle-priced), forever after genesis`],
               ['Deflationary',   'Burned AEON is gone forever — supply can only shrink via the Furnace and buyback burns'],
             ].map(([k, v]) => (
               <li key={k} className="flex items-start gap-2 text-sm">

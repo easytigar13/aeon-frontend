@@ -186,13 +186,8 @@ export default function DashboardPage() {
   const { data: totalBurned }   = useReadContract({ address: CONTRACTS.TheFurnace,       abi: FURNACE_ABI,        functionName: 'totalBurned', ...LIVE })
   const { data: veTokenCount }  = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId', ...LIVE })
   const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight', ...LIVE })
-  const { data: weeklyEmissions } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount', ...LIVE })
-  const { data: feeHistoryIndexRaw } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'feeHistoryIndex', ...LIVE })
+  const { data: lastFeesUSDRaw } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastFeesUSD', ...LIVE })
   const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.FeeDistributor,  abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD', ...LIVE })
-  const { data: emissionFeeHistoryRaw } = useReadContracts({
-    contracts: [0, 1, 2].map(i => ({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'feeHistory' as const, args: [BigInt(i)] as const })),
-    query: { refetchInterval: 60_000 },
-  })
 
   const WEEK_MS       = 7 * 24 * 60 * 60 * 1000
   const WEEK_S        = 7 * 24 * 60 * 60
@@ -235,22 +230,16 @@ export default function DashboardPage() {
         ? volume24h * elapsedDays * blendedFeePct
         : null
 
-  // Live next-epoch model. The next updatePeriod() first writes this
-  // epoch's fee snapshot into feeHistory[feeHistoryIndex % 3], then takes
-  // the non-zero rolling average and applies the 10:1 rule and 3x cap.
-  // Projecting that write is the key difference from the old display,
-  // which misleadingly used only already-finalized historical fees.
-  const emissionHistory = (emissionFeeHistoryRaw ?? []).map(result =>
-    result.status === 'success' ? Number(formatUnits(result.result as bigint, 18)) : null
-  )
-  const previousMint = weeklyEmissions ? Number(formatUnits(weeklyEmissions as bigint, 18)) : 0
-  const emissionProjectionReady = feeHistoryIndexRaw !== undefined && emissionHistory.length === 3 && aeonPrice !== null
-  const liveEmissionProjection = emissionProjectionReady
+  // Live next-epoch model. VoteDirectedLpEmissionsEngineRH (live since
+  // 2026-07-13, confirmed via MinterProxy.logic()) mints AEON worth exactly
+  // 25% of the epoch's finalized fees -- no rolling average, no growth cap.
+  // Projecting the live in-epoch fee estimate (feesThisEpoch) instead of
+  // only the last finalized snapshot is what keeps this forward-looking.
+  const lastFeesUSD = lastFeesUSDRaw !== undefined ? Number(formatUnits(lastFeesUSDRaw as bigint, 18)) : null
+  const liveEmissionProjection = aeonPrice !== null
     ? projectNextEmission({
-        feeHistoryUSD: emissionHistory,
-        feeHistoryIndex: Number(feeHistoryIndexRaw),
+        lastFeesUSD,
         liveEpochFeesUSD: feesThisEpoch,
-        previousMintAeon: previousMint,
         aeonPriceUSD: aeonPrice,
       })
     : null
@@ -357,7 +346,7 @@ export default function DashboardPage() {
                 { label: 'Epoch Ends',          value: `${days}d ${hours}h remaining` },
                 { label: 'Total Votes',         value: totalVotes !== undefined ? `${fmt18(totalVotes)} veAEON` : '—' },
                 { label: 'Estimated gross fees this epoch', value: feesThisEpoch !== null ? fmtUsd(feesThisEpoch, true) : '$—' },
-                { label: 'Live next-epoch emission estimate', value: projectedEmissionsAeon !== null ? `~${projectedEmissionsAeon.toLocaleString(undefined, { maximumFractionDigits: 3 })} AEON${liveEmissionProjection?.circuitBreakerActive ? ' · capped' : ''}` : '— AEON' },
+                { label: 'Live next-epoch emission estimate', value: projectedEmissionsAeon !== null ? `~${projectedEmissionsAeon.toLocaleString(undefined, { maximumFractionDigits: 3 })} AEON` : '— AEON' },
               ].map(item => (
                 <div key={item.label} className="flex justify-between items-center gap-3">
                   <span className="text-sm text-text-muted">{item.label}</span>

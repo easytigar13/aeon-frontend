@@ -25,7 +25,7 @@ const spaceMono = Space_Mono({
 
 export const metadata: Metadata = {
   title: 'AEON Protocol — ve(3,3) DEX on Robinhood Chain',
-  description: 'The first fee-anchored DEX. Emissions = Fees ÷ 10. Built on Robinhood Chain.',
+  description: 'The first fee-anchored DEX. Emissions = 25% of Fees. Built on Robinhood Chain.',
   icons: {
     icon: '/logo.jpg',
     apple: '/logo.jpg',

@@ -44,9 +44,9 @@ export default function HomePage() {
         <p className="text-text-secondary text-lg md:text-xl max-w-2xl mx-auto mb-10 leading-relaxed animate-fade-in" style={{ animationDelay: '160ms', animationFillMode: 'backwards' }}>
           AEON is a ve(3,3) DEX on Robinhood Chain where emissions are anchored to real trading fees.
           <br />
-          <span className="font-mono text-aeon-400 text-base md:text-lg">Weekly Emissions = (3-Epoch Avg Fees ÷ 10) ÷ AEON Price</span>
+          <span className="font-mono text-aeon-400 text-base md:text-lg">Weekly Emissions = (Last Epoch's Fees × 25%) ÷ AEON Price</span>
           <br />
-          <span className="text-text-muted text-sm">Capped at 3× the prior epoch's mint — no runaway inflation.</span>
+          <span className="text-text-muted text-sm">100% to vote-directed LP gauges — no rolling average, no growth cap.</span>
         </p>
 
         <div className="flex flex-wrap justify-center gap-3 mb-4 animate-fade-in" style={{ animationDelay: '240ms', animationFillMode: 'backwards' }}>
@@ -232,7 +232,7 @@ export default function HomePage() {
             {
               icon: <TrendingUp size={20} className="text-aeon-400" />,
               title: 'Fees fund emissions, not thin air',
-              body: 'New AEON each epoch is minted as last epoch\'s trading fees ÷ 10 — computed from fees that already happened. No trading, no new supply.',
+              body: 'New AEON each epoch is minted as 25% of last epoch\'s trading fees — computed from fees that already happened. No trading, no new supply.',
             },
             {
               icon: <Percent size={20} className="text-aeon-400" />,
@@ -350,13 +350,13 @@ export default function HomePage() {
             </h2>
             <p className="text-text-secondary text-lg max-w-xl mx-auto mb-8">
               Burn AEON permanently to receive a soulbound NFT with static voting power that never decays.
-              Future fee-anchored emission shares are delivered directly to user wallets. Legacy buyback rewards and rewards recorded before the redirect remain claimable through the Furnace.
+              Rewards come from the Buyback Engine's fee-funded redistribution share, delivered directly to your wallet — plus anything already recorded before the redirect, still claimable through the Furnace.
             </p>
             <div className="flex flex-wrap justify-center gap-4 mb-8">
               {[
                 { label: 'Voting Power', value: '1:1 with burned' },
                 { label: 'Power Decay', value: 'Never' },
-                { label: 'Rewards', value: 'Direct emission share + buyback' },
+                { label: 'Rewards', value: 'Buyback redistribution' },
                 { label: 'Transferable', value: 'No — Soulbound' },
               ].map(item => (
                 <div key={item.label} className="card px-4 py-3 text-center min-w-[140px] transition-all duration-300 hover:border-aeon-400/30 hover:-translate-y-0.5">
@@ -471,7 +471,7 @@ export default function HomePage() {
                 At genesis, the protocol minted 90,000 AEON exactly once. 20,000 went into AEON/ETH liquidity, 20,000 into AEON/USDG liquidity,
                 and 50,000 was burned via the Furnace and immediately voted 25,000/25,000 across both AEON pools — guaranteeing gauge weight
                 from day one. None of it went to a deployer wallet or a team allocation. After genesis, the protocol runs on pure fee-anchored
-                emissions, forever. The protocol burn remains voting weight; from 13 July 2026, its future fee-anchored emission-reward share funds the LP treasury rather than accumulating inside the Furnace.
+                emissions, forever. The protocol burn remains voting weight; since 13 July 2026, all AEON emissions go 100% to vote-directed LP gauges, with Furnace burners (including the protocol's own genesis burn) earning through the Buyback Engine's redistribution share instead.
               </p>
               <div className="flex gap-4 mt-4 flex-wrap">
                 <div className="flex items-center gap-2">

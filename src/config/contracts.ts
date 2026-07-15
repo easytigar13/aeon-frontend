@@ -17,7 +17,22 @@ export const CONTRACTS = {
   // Multi-gauge engine/controller activated 2026-07-13. Existing vAMM
   // gauges remain on AeonVoter; the controller directly funds the existing
   // CL/DLMM gauges without migrating pools, NFTs, bins, or staked positions.
-  EmissionsEngine:     '0xbF021C27F317b7e8B23d47B9063c5551D8527986' as `0x${string}`,
+  // Superseded 2026-07-13 by VoteDirectedLpEmissionsEngineRH (see below) --
+  // kept only as a comment for history, not read anywhere in the frontend.
+  // Old: '0xbF021C27F317b7e8B23d47B9063c5551D8527986'
+  //
+  // VoteDirectedLpEmissionsEngineRH -- confirmed live via MinterProxy.logic()
+  // (the actual mint-authorization source of truth, not just a deploy
+  // script). Each completed epoch mints AEON worth exactly 25% of that
+  // epoch's finalized USD fees (feeDistributor.lastEpochFeesUSD()) -- no
+  // rolling average, no previous-mint growth cap, and no Furnace mint at
+  // all (TO_FURNACE_BPS=0; updatePeriod() never calls the Furnace notifier
+  // anymore, unlike the engine before it). 100% of every mint now goes to
+  // vote-directed LP gauges. Furnace burners still earn ongoing rewards
+  // through BuybackEngineV3's redistribute share (10% of raw trading fees,
+  // unrelated to and unaffected by this emissions-engine swap) -- see
+  // EPOCH_CONFIG.buybackRedistributeSplit below.
+  EmissionsEngine:     '0xf999ac0Cc5D7FeA6aDB28f905A6b1e71066f2241' as `0x${string}`,
   ProtocolBurnRewardDistributor: '0xA258263aA1eE6870344336A17a1D94E18b7Af568' as `0x${string}`,
   MultiGaugeController:'0x63f61916cDAABa76556723A75EE3690deCA9bd9A' as `0x${string}`,
   AeonOracle:          '0x5A1E28EE00C4e83De000C7ffa5b59B22B45BD9BD' as `0x${string}`,
@@ -481,12 +496,12 @@ export const UNISWAP_POOLS = [
   { name: 'WETH/ROBINFUN', token0: 'WETH', token1: 'ROBINFUN', type: 'UniV2', fee: '0.3%', address: '0xE53377eB912D08e1B0160E5Ea0c626CF162870fF' as `0x${string}` },
 ]
 
-// Genesis + ongoing tokenomics — mirrors EmissionsEngineRH.sol / FeeDistributorV3.sol / BuybackEngineV3.sol
+// Genesis + ongoing tokenomics — mirrors VoteDirectedLpEmissionsEngineRH.sol / FeeDistributorV3.sol / BuybackEngineV3.sol
 export const EPOCH_CONFIG = {
   epochLength:            604800,
-  emissionRatio:           10,     // tokensToMint = feesUSD / emissionRatio / aeonPrice
-  emissionVoterSplit:      95,     // of each mint: 95% to voters
-  emissionFurnaceSplit:     5,     // of each mint: 5% burn-ledger reward budget, paid through ProtocolBurnRewardDistributor
+  emissionPct:             25,     // tokensToMint = (feesUSD * emissionPct / 100) / aeonPrice -- no rolling average, no growth cap
+  emissionVoterSplit:      100,    // of each mint: 100% to vote-directed LP gauges
+  emissionFurnaceSplit:     0,     // Furnace receives 0% of the mint now; burn rewards are funded separately by ProtocolBurnRewardDistributor
   feeVoterSplit:           80,     // of raw collected fees: 80% straight to voters
   feeBuybackSplit:         20,     // of raw collected fees: 20% to BuybackEngine
   buybackBurnSplit:        50,     // of that 20%: 50% swapped to AEON and burned

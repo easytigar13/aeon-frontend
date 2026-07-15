@@ -1,45 +1,31 @@
 export interface EmissionProjectionInput {
-  feeHistoryUSD: Array<number | null>
-  feeHistoryIndex: number
+  lastFeesUSD: number | null
   liveEpochFeesUSD: number | null
-  previousMintAeon: number
   aeonPriceUSD: number | null
 }
 
-// Mirrors MultiGaugeEmissionsEngineRH.updatePeriod(), but first inserts the
-// current live fee estimate into the exact rolling-history slot the next
-// epoch flip will overwrite. This makes the UI genuinely forward-looking
-// instead of calculating "next epoch" from last epoch's history alone.
+// Mirrors VoteDirectedLpEmissionsEngineRH.updatePeriod()/previewMint(): the
+// next mint is exactly 25% of that epoch's finalized USD fees, converted to
+// AEON at the current price -- no rolling average, no previous-mint growth
+// cap (both removed when this engine replaced the old smoothed one on
+// 2026-07-13). Prefers the live in-epoch fee estimate when available so the
+// UI stays forward-looking instead of only reflecting the last finalized
+// epoch's number.
 export function projectNextEmission({
-  feeHistoryUSD,
-  feeHistoryIndex,
+  lastFeesUSD,
   liveEpochFeesUSD,
-  previousMintAeon,
   aeonPriceUSD,
 }: EmissionProjectionInput) {
-  const projectedHistory = [...feeHistoryUSD]
-  while (projectedHistory.length < 3) projectedHistory.push(null)
+  const feesUSD = liveEpochFeesUSD !== null && Number.isFinite(liveEpochFeesUSD)
+    ? Math.max(0, liveEpochFeesUSD)
+    : (lastFeesUSD ?? 0)
 
-  if (liveEpochFeesUSD !== null && Number.isFinite(liveEpochFeesUSD)) {
-    projectedHistory[feeHistoryIndex % 3] = Math.max(0, liveEpochFeesUSD)
-  }
-
-  const nonZeroFees = projectedHistory.filter((value): value is number => value !== null && value > 0)
-  const smoothedFeesUSD = nonZeroFees.length > 0
-    ? nonZeroFees.reduce((sum, value) => sum + value, 0) / nonZeroFees.length
-    : 0
-  const emissionBudgetUSD = smoothedFeesUSD / 10
-  const rawMintAeon = aeonPriceUSD && aeonPriceUSD > 0 ? emissionBudgetUSD / aeonPriceUSD : 0
-  const capAeon = previousMintAeon > 0 ? previousMintAeon * 3 : Number.POSITIVE_INFINITY
-  const projectedMintAeon = Math.min(rawMintAeon, capAeon)
+  const emissionBudgetUSD = feesUSD * 0.25
+  const projectedMintAeon = aeonPriceUSD && aeonPriceUSD > 0 ? emissionBudgetUSD / aeonPriceUSD : 0
 
   return {
-    projectedHistory,
-    smoothedFeesUSD,
+    feesUSD,
     emissionBudgetUSD,
-    rawMintAeon,
-    capAeon,
     projectedMintAeon,
-    circuitBreakerActive: rawMintAeon > capAeon,
   }
 }

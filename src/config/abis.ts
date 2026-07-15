@@ -454,7 +454,14 @@ export const VOTING_ESCROW_ABI = [
   },
 ] as const
 
-// EmissionsEngineRH.sol
+// VoteDirectedLpEmissionsEngineRH.sol -- activated 2026-07-13, replaces the
+// old rolling-average/circuit-breaker EmissionsEngineRH. Each completed
+// epoch mints AEON worth exactly EMISSION_BPS (25%) of that epoch's
+// finalized USD fees (feeDistributor.lastEpochFeesUSD()) -- no rolling
+// average, no previous-mint growth cap, no Furnace mint (TO_FURNACE_BPS=0).
+// 100% of the mint goes to vote-directed LP gauges, split between the
+// legacy vAMM voter and the MultiGaugeController by multiGaugeBps (only
+// when both have live vote weight this epoch).
 export const EMISSIONS_ENGINE_ABI = [
   {
     name: 'lastMintAmount',
@@ -464,14 +471,7 @@ export const EMISSIONS_ENGINE_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
-    name: 'feeHistory',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{ name: '', type: 'uint256' }],
-    outputs: [{ name: '', type: 'uint256' }],
-  },
-  {
-    name: 'feeHistoryIndex',
+    name: 'lastFeesUSD',
     type: 'function',
     stateMutability: 'view',
     inputs: [],
@@ -492,11 +492,35 @@ export const EMISSIONS_ENGINE_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
-    name: 'genesisDone',
+    name: 'EMISSION_BPS',
     type: 'function',
     stateMutability: 'view',
     inputs: [],
-    outputs: [{ name: '', type: 'bool' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'TO_VOTER_BPS',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'TO_FURNACE_BPS',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'previewMint',
+    type: 'function',
+    stateMutability: 'pure',
+    inputs: [
+      { name: 'feesUSD', type: 'uint256' },
+      { name: 'aeonPriceUSD', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
   },
   {
     name: 'updatePeriod',

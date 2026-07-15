@@ -276,38 +276,21 @@ export default function VotePage() {
   // emissions voting currently directs to it, relative to its own TVL --
   // distinct from "APR" above (trading-fee yield).
   //
-  // Previously projected this epoch's fee budget from live trailing-week
-  // volume instead of reading EmissionsEngineRH's own 3-epoch rolling
-  // average -- justified at the time by feeHistory being "all zeros
-  // pre-genesis-flip". Checked live on-chain (2026-07-12): that's no longer
-  // true. updatePeriod() has run once (feeHistoryIndex=1, lastMintAmount≈2.94
-  // AEON), so feeHistory[0]≈$0.57 is real, and the live-volume projection
-  // was overstating vAPR by ignoring two things the real contract enforces:
-  //   1. smoothedFeesUSD is an average of actual SNAPSHOTTED epoch fees
-  //      (only updated once per week, at the epoch flip), not continuous
-  //      trailing volume -- these can differ hugely mid-epoch.
-  //   2. tokensToMint is hard-capped at lastMintAmount * CIRCUIT_BREAKER (3x)
-  //      once a mint has happened -- no matter how high live volume runs,
-  //      the next real mint provably cannot exceed 3x the last one.
-  // This now replicates EmissionsEngineRH.updatePeriod()'s exact math
-  // (_rollingAverage -> emissionBudgetUSD -> rawMint -> circuit-breaker cap
-  // -> toVoter) using the real on-chain feeHistory/lastMintAmount, so vAPR
-  // reflects what the next mint can actually be, not a live-volume guess.
+  // 2026-07-13: EmissionsEngineRH (rolling 3-epoch average, 3x growth cap,
+  // 95/5 voter/Furnace split) was replaced by VoteDirectedLpEmissionsEngineRH
+  // -- confirmed live via MinterProxy.logic(), not just a deploy script.
+  // The new engine has no rolling average and no growth cap: each epoch
+  // mints AEON worth exactly 25% of that epoch's finalized USD fees
+  // (feeDistributor.lastEpochFeesUSD()), and 100% of every mint goes to
+  // vote-directed LP gauges (0% to Furnace now). This mirrors that exact
+  // math -- see src/lib/emissionsProjection.ts.
   const { data: onChainTotalWeight } = useReadContract({
     address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'totalWeight',
   })
   const aeonPrice = prices['AEON'] ?? null
 
-  const { data: feeHistoryRaw } = useReadContracts({
-    contracts: [0, 1, 2].map(i => ({
-      address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'feeHistory', args: [BigInt(i)],
-    } as const)),
-  })
-  const { data: lastMintAmountRaw } = useReadContract({
-    address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastMintAmount',
-  })
-  const { data: feeHistoryIndexRaw } = useReadContract({
-    address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'feeHistoryIndex',
+  const { data: lastFeesUSDRaw } = useReadContract({
+    address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastFeesUSD',
   })
   const { data: multiGaugeBpsRaw } = useReadContract({
     address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'multiGaugeBps',
@@ -320,17 +303,11 @@ export default function VotePage() {
     query: { enabled: multiEpoch !== undefined },
   })
 
-  const feeHistory = (feeHistoryRaw ?? []).map(r =>
-    r.status === 'success' ? Number(formatUnits(r.result as bigint, 18)) : null
-  )
-  const lastMintAmount = lastMintAmountRaw !== undefined ? Number(formatUnits(lastMintAmountRaw as bigint, 18)) : 0
+  const lastFeesUSD = lastFeesUSDRaw !== undefined ? Number(formatUnits(lastFeesUSDRaw as bigint, 18)) : null
 
-  const TO_VOTER_SHARE = 0.95
-
-  // Use the same live fee estimate shown on the dashboard, and project it
-  // into the exact rolling-history slot the next epoch flip will write.
-  // This keeps VAPR connected to fees as they rise/fall instead of leaving
-  // it frozen on the previous finalized $0.57 snapshot for the whole week.
+  // Use the same live fee estimate shown on the dashboard so vAPR stays
+  // connected to fees as they rise/fall through the epoch, instead of only
+  // reflecting the last finalized epoch's number.
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000
   const now = Date.now()
   const elapsedDays = (now - Math.floor(now / WEEK_MS) * WEEK_MS) / (24 * 60 * 60 * 1000)
@@ -348,20 +325,22 @@ export default function VotePage() {
         return volumeWeek === undefined ? sum : sum + (volumeWeek / 7) * elapsedDays * parseFeeRate(pool.fee)
       }, 0)
     : null
-  const emissionProjection = feeHistoryIndexRaw !== undefined && feeHistory.length === 3
-    ? projectNextEmission({
-        feeHistoryUSD: feeHistory,
-        feeHistoryIndex: Number(feeHistoryIndexRaw),
-        liveEpochFeesUSD,
-        previousMintAeon: lastMintAmount,
-        aeonPriceUSD: aeonPrice,
-      })
-    : null
-  const tokensToMintAeon = emissionProjection?.projectedMintAeon ?? 0
-  const multiGaugeShare = currentMultiWeight && currentMultiWeight > 0n
-    ? Number(multiGaugeBpsRaw ?? 0n) / 10_000
+  const emissionProjection = projectNextEmission({
+    lastFeesUSD,
+    liveEpochFeesUSD,
+    aeonPriceUSD: aeonPrice,
+  })
+  const tokensToMintAeon = emissionProjection.projectedMintAeon
+
+  // Matches updatePeriod()'s exact branching: multi-gauge only gets a share
+  // if it has live vote weight this epoch, and gets the FULL mint (not just
+  // its bps share) if the legacy vAMM voter has zero weight.
+  const legacyHasWeight = !!onChainTotalWeight && onChainTotalWeight > 0n
+  const multiHasWeight = !!currentMultiWeight && currentMultiWeight > 0n
+  const toMultiGaugeAeon = multiHasWeight
+    ? (legacyHasWeight ? tokensToMintAeon * (Number(multiGaugeBpsRaw ?? 0n) / 10_000) : tokensToMintAeon)
     : 0
-  const toVoterAeon = tokensToMintAeon * TO_VOTER_SHARE * (1 - multiGaugeShare)
+  const toVoterAeon = tokensToMintAeon - toMultiGaugeAeon
   const projectedWeeklyToVoterUSD = aeonPrice ? toVoterAeon * aeonPrice : 0
 
   const vaprByAddr: Record<string, number | null> = {}
