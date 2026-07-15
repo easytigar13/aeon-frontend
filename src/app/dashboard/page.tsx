@@ -1,10 +1,10 @@
 ﻿'use client'
 import { useState } from 'react'
-import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins } from 'lucide-react'
+import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins, Sparkles } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
 import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI, FEE_DISTRIBUTOR_ABI } from '@/config/abis'
 import { clsx } from 'clsx'
 import { usePrices } from '@/hooks/usePrices'
@@ -355,6 +355,42 @@ export default function DashboardPage() {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* Next Epoch — live projection from current fees/votes/price, refreshed
+            every 60s (same LIVE cadence as the reads feeding it). Separate from
+            Epoch Status on purpose: this epoch's real state stays untouched,
+            this card is purely forward-looking, replicating
+            VoteDirectedLpEmissionsEngineRH's exact formula (fees × 25% ÷ AEON
+            price, no rolling average, no growth cap) against LIVE numbers that
+            keep moving until the epoch actually flips. */}
+        <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.violet.glow}` }}>
+          <div className="flex items-center gap-2 mb-4">
+            <Sparkles size={16} className="text-violet-400" />
+            <span className="font-display font-semibold text-text-primary">Next Epoch</span>
+            <span className="ml-auto text-2xs font-mono text-text-muted uppercase tracking-wider">Live · updates every 60s</span>
+          </div>
+          <div className="flex items-center gap-6">
+            <IconOrb accent="violet" size={88} icon={<Sparkles size={32} className="text-violet-400" />} />
+            <div className="flex-1 space-y-3 min-w-0">
+              {[
+                { label: 'Fees so far this epoch',   value: feesThisEpoch !== null ? fmtUsd(feesThisEpoch, true) : '$—' },
+                { label: 'Emission rate',             value: `${EPOCH_CONFIG.emissionPct}% of fees` },
+                { label: 'Projected emission budget', value: liveEmissionProjection ? fmtUsd(liveEmissionProjection.emissionBudgetUSD, true) : '$—' },
+                { label: 'AEON price used',           value: aeonPrice !== null ? fmtUsd(aeonPrice) : '$—' },
+                { label: 'Total votes (current)',     value: totalVotes !== undefined ? `${fmt18(totalVotes)} veAEON` : '—' },
+                { label: 'Projected AEON minted',      value: projectedEmissionsAeon !== null ? `~${projectedEmissionsAeon.toLocaleString(undefined, { maximumFractionDigits: 3 })} AEON` : '— AEON' },
+              ].map(item => (
+                <div key={item.label} className="flex justify-between items-center gap-3">
+                  <span className="text-sm text-text-muted">{item.label}</span>
+                  <span className="text-sm font-mono text-text-primary text-right">{item.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="text-2xs text-text-muted mt-4 pt-4 border-t border-bg-border">
+            Projection only — the real mint locks in when the epoch actually flips, using that moment's finalized fees, live vote weight, and live AEON price. 100% goes to vote-directed LP gauges.
+          </p>
         </div>
 
         <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.aeon.glow}` }}>
