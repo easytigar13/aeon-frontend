@@ -264,6 +264,18 @@ export default function DashboardPage() {
   const voterShareThisEpoch = feesThisEpoch !== null ? feesThisEpoch * (EPOCH_CONFIG.feeVoterSplit / 100) : null
   const voterShareNextEpoch = totalFeesWeekUsd > 0 ? totalFeesWeekUsd * (EPOCH_CONFIG.feeVoterSplit / 100) : null
 
+  // The other 20% of raw fees (feeBuybackSplit) routes to BuybackEngineV3,
+  // which splits it 50/50: half swapped to AEON and permanently burned,
+  // half swapped to AEON and redistributed directly to Furnace burners --
+  // together with the 80% voter share above, these three numbers always
+  // sum to exactly 100% of raw fees collected.
+  const buybackTotalThisEpoch = feesThisEpoch !== null ? feesThisEpoch * (EPOCH_CONFIG.feeBuybackSplit / 100) : null
+  const buybackTotalNextEpoch = totalFeesWeekUsd > 0 ? totalFeesWeekUsd * (EPOCH_CONFIG.feeBuybackSplit / 100) : null
+  const buybackBurnThisEpoch = buybackTotalThisEpoch !== null ? buybackTotalThisEpoch * (EPOCH_CONFIG.buybackBurnSplit / 100) : null
+  const buybackBurnNextEpoch = buybackTotalNextEpoch !== null ? buybackTotalNextEpoch * (EPOCH_CONFIG.buybackBurnSplit / 100) : null
+  const furnaceRewardThisEpoch = buybackTotalThisEpoch !== null ? buybackTotalThisEpoch * (EPOCH_CONFIG.buybackRedistributeSplit / 100) : null
+  const furnaceRewardNextEpoch = buybackTotalNextEpoch !== null ? buybackTotalNextEpoch * (EPOCH_CONFIG.buybackRedistributeSplit / 100) : null
+
   const burnedPct = aeonSupply && totalBurned && aeonSupply > 0n
     ? ((Number(totalBurned) / Number(aeonSupply)) * 100).toFixed(2)
     : '—'
@@ -412,28 +424,36 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* Voter Fee Share — a SEPARATE stream from AEON emissions above:
-            FeeDistributorV3 pays feeVoterSplit% (80%) of each pool's raw
-            trading fees directly to voters who backed it, in that pool's
-            own fee token, not in AEON. Per-pool split by epoch-scoped vote
+        {/* Fee Distribution — where 100% of raw trading fees go, split three
+            ways by FeeDistributorV3 + BuybackEngineV3. A SEPARATE stream
+            from AEON emissions above (which pay LP gauge stakers, not
+            voters/burners). Per-pool voter split is by epoch-scoped vote
             weight -- see the Vote page for a personalized "if you vote
             here" estimate. */}
         <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.emerald.glow}` }}>
           <div className="flex items-center gap-2 mb-4">
             <Vote size={16} className="text-emerald-400" />
-            <span className="font-display font-semibold text-text-primary">Voter Fee Share</span>
-            <span className="ml-auto text-2xs font-mono text-text-muted uppercase tracking-wider">{EPOCH_CONFIG.feeVoterSplit}% of raw fees</span>
+            <span className="font-display font-semibold text-text-primary">Fee Distribution</span>
+            <span className="ml-auto text-2xs font-mono text-text-muted uppercase tracking-wider">100% of raw fees</span>
           </div>
-          <div className="grid grid-cols-2 gap-3 mb-4">
+          <div className="grid grid-cols-3 gap-3 mb-4">
             <div className="rounded-xl border border-bg-border bg-bg-raised/60 p-3">
-              <div className="text-2xs text-text-muted uppercase font-mono">This epoch</div>
+              <div className="text-2xs text-text-muted uppercase font-mono">Voters ({EPOCH_CONFIG.feeVoterSplit}%)</div>
               <div className="text-lg text-emerald-400 font-mono mt-1">{voterShareThisEpoch !== null ? fmtUsd(voterShareThisEpoch, true) : '$—'}</div>
+              <div className="text-2xs text-text-muted font-mono mt-0.5">next: {voterShareNextEpoch !== null ? fmtUsd(voterShareNextEpoch, true) : '$—'}</div>
             </div>
             <div className="rounded-xl border border-bg-border bg-bg-raised/60 p-3">
-              <div className="text-2xs text-text-muted uppercase font-mono">Next epoch (projected)</div>
-              <div className="text-lg text-emerald-400 font-mono mt-1">{voterShareNextEpoch !== null ? fmtUsd(voterShareNextEpoch, true) : '$—'}</div>
+              <div className="text-2xs text-text-muted uppercase font-mono">Buyback burn ({EPOCH_CONFIG.feeBuybackSplit * EPOCH_CONFIG.buybackBurnSplit / 100}%)</div>
+              <div className="text-lg text-red-400 font-mono mt-1">{buybackBurnThisEpoch !== null ? fmtUsd(buybackBurnThisEpoch, true) : '$—'}</div>
+              <div className="text-2xs text-text-muted font-mono mt-0.5">next: {buybackBurnNextEpoch !== null ? fmtUsd(buybackBurnNextEpoch, true) : '$—'}</div>
+            </div>
+            <div className="rounded-xl border border-bg-border bg-bg-raised/60 p-3">
+              <div className="text-2xs text-text-muted uppercase font-mono">Furnace reward ({EPOCH_CONFIG.feeBuybackSplit * EPOCH_CONFIG.buybackRedistributeSplit / 100}%)</div>
+              <div className="text-lg text-aeon-400 font-mono mt-1">{furnaceRewardThisEpoch !== null ? fmtUsd(furnaceRewardThisEpoch, true) : '$—'}</div>
+              <div className="text-2xs text-text-muted font-mono mt-0.5">next: {furnaceRewardNextEpoch !== null ? fmtUsd(furnaceRewardNextEpoch, true) : '$—'}</div>
             </div>
           </div>
+          <div className="text-2xs text-text-muted font-mono uppercase tracking-wider mb-2">Voter share by pool</div>
           {feesByPool.length > 0 ? (
             <div className="space-y-1.5">
               {feesByPool.slice(0, 5).map(({ pool, feesWeek }) => (
