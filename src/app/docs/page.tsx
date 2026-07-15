@@ -380,7 +380,6 @@ export default function DocsPage() {
             <Addr label="Gauge Factory"       address={CONTRACTS.AeonGaugeFactory} />
             <Addr label="Liquidity Helper"    address={CONTRACTS.LiquidityHelperV2} />
             <Addr label="Pool-Creation Whitelist" address={CONTRACTS.Whitelist} />
-            <Addr label="Tower Defense Arena" address={CONTRACTS.TowerDefenseArena} />
           </div>
           <Note>
             The legacy factory's earliest pools have an older <code>AeonPoolRH</code> bytecode without working fee-claim accounting. Every pool created through the current factory (including all pools created from 2026-07-09 onward) has correct fee accounting from day one — check a pool's own listing on <Link href="/liquidity" className="text-aeon-400 hover:underline">Liquidity</Link> rather than assuming from the factory alone.

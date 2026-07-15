@@ -6,13 +6,11 @@ import { clsx } from 'clsx'
 
 const NAV_LINKS = [
   { href: '/swap',       label: 'Swap'      },
-  { href: '/launch',     label: 'Launch'    },
   { href: '/tokens',     label: 'Tokens'    },
   { href: '/liquidity',  label: 'Liquidity' },
   { href: '/earn',       label: 'Portfolio' },
   { href: '/vote',       label: 'Vote'      },
   { href: '/lock',       label: 'Lock'      },
-  { href: '/games',      label: 'Games'     },
   { href: '/dashboard',  label: 'Dashboard' },
   { href: '/bot',        label: 'Bot'       },
   { href: '/docs',       label: 'Docs'      },
