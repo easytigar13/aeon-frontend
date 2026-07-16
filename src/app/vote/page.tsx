@@ -568,7 +568,6 @@ export default function VotePage() {
                       </span>
                     </div>
                     {hasVotedForMode && <CurrentVotes tokenId={tokenId} mode={voteMode} epoch={multiEpoch} />}
-                    {voteMode === 'vAMM' && address && <LegacyClaim wallet={address} />}
                     {voteMode === 'vAMM' && hasVoted && (
                       <div className="space-y-1 mt-1">
                         <button onClick={handleReset} disabled={isResetting || !canReset} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -581,6 +580,10 @@ export default function VotePage() {
                     )}
                   </div>
                 )}
+
+                {/* Wallet-level, independent of which veNFT is selected above --
+                    reads the wallet's pre-cutover vote directly. */}
+                {address && <LegacyClaim wallet={address} />}
 
                 {!loadingOwned && ownedTokenIds.length === 0 && furnaceWeight > 0n && (
                   <div className="p-3 rounded-xl bg-orange-400/5 border border-orange-400/20 space-y-2">
