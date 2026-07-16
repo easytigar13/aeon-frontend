@@ -822,28 +822,51 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
 // so it doesn't just sit unclaimed once the new Claim Fees button (which
 // only knows about the new, empty-so-far FeeDistributor) can't see it.
 function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
-  const { data: legacyTokenId } = useReadContract({
+  const WEEK_S = 604800n
+  const nowSec = BigInt(Math.floor(Date.now() / 1000))
+  const currentEpoch = (nowSec / WEEK_S) * WEEK_S
+  const isClosed = nowSec >= currentEpoch + WEEK_S
+  const closesAt = new Date(Number(currentEpoch + WEEK_S) * 1000)
+
+  // The claiming contract (LEGACY_FEE_DISTRIBUTOR, immutable, pre-cutover)
+  // hardcodes msg.sender -> voter.lastVotedTokenId(msg.sender) -- it can
+  // only ever pay out through THIS ONE tokenId, no matter which of the
+  // wallet's other veNFTs also has real weight. poke() never updates that
+  // mapping (only vote() does), so a wallet that poked one NFT and voted
+  // fresh with another can have its "active" tokenId pointing at the wrong
+  // one -- surfaced below so it's visible instead of just silently showing
+  // nothing.
+  const { data: activeTokenIdRaw } = useReadContract({
     address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'lastVotedTokenId', args: [wallet],
   })
-  const tokenId = legacyTokenId as bigint | undefined
+  const activeTokenId = activeTokenIdRaw as bigint | undefined
 
-  // The epoch to claim is derived from WHEN the pre-cutover vote actually
-  // happened, not "one week before now" -- cutover hit mid-epoch, so at the
-  // time this ships, the vote's epoch is often still the CURRENT wall-clock
-  // epoch (not yet closed). Blindly using currentEpoch-WEEK would silently
-  // point at the wrong, already-processed prior epoch.
-  const { data: lastVotedRaw } = useReadContract({
-    address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'lastVoted',
-    args: tokenId !== undefined ? [tokenId] : undefined,
-    query: { enabled: tokenId !== undefined && tokenId > 0n },
+  const { owned: ownedTokenIds } = useOwnedVeNFTs(wallet)
+
+  // Epoch-specific vote-weight snapshot -- NOT getVotes() (reflects the
+  // ongoing/current allocation, not what was actually locked in for this
+  // epoch) and NOT derived from lastVoted() (poke() never updates that
+  // timestamp -- caused a real bug here: pointed at an old, already-fully-
+  // processed epoch instead of the one actually holding the pre-cutover fees).
+  const { data: activeWeightData } = useReadContracts({
+    contracts: UNIQUE_VOTE_POOLS.map(p => ({
+      address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'poolVoteWeight' as const,
+      args: activeTokenId !== undefined ? [activeTokenId, p.address, currentEpoch] as const : undefined,
+    })),
+    query: { enabled: activeTokenId !== undefined && activeTokenId > 0n, refetchInterval: 15000 },
   })
 
-  const { data: votesData } = useReadContracts({
-    contracts: UNIQUE_VOTE_POOLS.map(p => ({
-      address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'getVotes' as const,
-      args: tokenId !== undefined ? [tokenId, p.address] as const : undefined,
-    })),
-    query: { enabled: tokenId !== undefined && tokenId > 0n, refetchInterval: 15000 },
+  // Sum of every OTHER owned tokenId's weight, per tokenId, so we can flag
+  // "you own #X with real weight but it isn't your active claiming NFT."
+  const otherTokenIds = ownedTokenIds.filter(id => id !== activeTokenId)
+  const { data: otherWeightData } = useReadContracts({
+    contracts: otherTokenIds.flatMap(id =>
+      UNIQUE_VOTE_POOLS.map(p => ({
+        address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'poolVoteWeight' as const,
+        args: [id, p.address, currentEpoch] as const,
+      }))
+    ),
+    query: { enabled: otherTokenIds.length > 0, refetchInterval: 15000 },
   })
 
   const publicClient = usePublicClient()
@@ -852,18 +875,17 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
   const [claimingIndex, setClaimingIndex] = useState<number | null>(null)
   const [claimError, setClaimError] = useState('')
 
-  if (!tokenId || tokenId === 0n || lastVotedRaw === undefined) return null
+  if (!activeTokenId || activeTokenId === 0n) return null
   const rows = UNIQUE_VOTE_POOLS
-    .map((pool, i) => ({ pool, weight: votesData?.[i]?.status === 'success' ? votesData[i].result as bigint : 0n }))
+    .map((pool, i) => ({ pool, weight: activeWeightData?.[i]?.status === 'success' ? activeWeightData[i].result as bigint : 0n }))
     .filter(r => r.weight > 0n)
-  if (rows.length === 0) return null
 
-  const WEEK_S = 604800n
-  const nowSec = BigInt(Math.floor(Date.now() / 1000))
-  const currentEpoch = (nowSec / WEEK_S) * WEEK_S
-  const votedEpoch = ((lastVotedRaw as bigint) / WEEK_S) * WEEK_S
-  const isClosed = currentEpoch > votedEpoch
-  const closesAt = new Date(Number(votedEpoch + WEEK_S) * 1000)
+  const otherIdsWithWeight = otherTokenIds.filter((id, idx) => {
+    const start = idx * UNIQUE_VOTE_POOLS.length
+    return UNIQUE_VOTE_POOLS.some((_, j) => otherWeightData?.[start + j]?.status === 'success' && (otherWeightData[start + j].result as bigint) > 0n)
+  })
+
+  if (rows.length === 0 && otherIdsWithWeight.length === 0) return null
 
   const pending = rows.filter(r => !claimedPools.has(r.pool.address))
   const isClaiming = claimingIndex !== null
@@ -875,7 +897,7 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
       try {
         const hash = await writeContractAsync({
           address: LEGACY_FEE_DISTRIBUTOR, abi: LEGACY_FEE_DISTRIBUTOR_ABI, functionName: 'claimAllFees',
-          args: [pending[i].pool.address, votedEpoch],
+          args: [pending[i].pool.address, currentEpoch],
         })
         await publicClient?.waitForTransactionReceipt({ hash })
         setClaimedPools(prev => new Set(prev).add(pending[i].pool.address))
@@ -889,7 +911,7 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
 
   return (
     <div className="space-y-1 pt-1 border-t border-amber-500/20 mt-1">
-      <div className="text-2xs text-amber-400 uppercase tracking-wider pt-1">Pre-migration rewards</div>
+      <div className="text-2xs text-amber-400 uppercase tracking-wider pt-1">Pre-migration rewards (veNFT #{activeTokenId.toString()})</div>
       {rows.map(({ pool }) => (
         <div key={pool.address} className="flex justify-between items-center text-xs">
           <span className="text-text-secondary">{pool.name}</span>
@@ -898,6 +920,9 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
           </span>
         </div>
       ))}
+      {rows.length === 0 && (
+        <p className="text-2xs text-text-muted">veNFT #{activeTokenId.toString()} has no weight this epoch.</p>
+      )}
       {isClosed ? (
         pending.length > 0 && (
           <button
@@ -913,6 +938,14 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
         <p className="text-2xs text-text-muted pt-1">Claimable once this epoch closes (~{closesAt.toLocaleDateString()}).</p>
       )}
       {claimError && <p className="text-2xs text-red-400 pt-1 break-all">{claimError}</p>}
+      {otherIdsWithWeight.length > 0 && (
+        <p className="text-2xs text-orange-400 pt-1 leading-relaxed">
+          You also own veNFT {otherIdsWithWeight.map(id => `#${id}`).join(', ')} with real weight this epoch, but only
+          #{activeTokenId.toString()} can claim right now -- the old contract only pays out through whichever veNFT you
+          last called Vote with (poking doesn't count). Call Vote here with {otherIdsWithWeight.map(id => `#${id}`).join('/')} to
+          make it active, then come back to claim its share too.
+        </p>
+      )}
     </div>
   )
 }
