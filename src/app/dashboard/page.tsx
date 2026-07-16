@@ -4,7 +4,7 @@ import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins, Sparkles } from
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG, LEGACY_FEE_DISTRIBUTOR } from '@/config/contracts'
 import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI, FEE_DISTRIBUTOR_ABI } from '@/config/abis'
 import { clsx } from 'clsx'
 import { usePrices } from '@/hooks/usePrices'
@@ -188,6 +188,12 @@ export default function DashboardPage() {
   const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight', ...LIVE })
   const { data: lastFeesUSDRaw } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastFeesUSD', ...LIVE })
   const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.FeeDistributor,  abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD', ...LIVE })
+  // Real AEON sitting in the pre-cutover FeeDistributor -- collected but not
+  // yet claimable (that epoch closes independently of the voter/engine
+  // cutover, pure wall-clock math). Shown here so the dashboard reflects
+  // this real, pending money instead of only the new (post-cutover, still
+  // near-zero) system's numbers.
+  const { data: legacyPendingRaw } = useReadContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'balanceOf', args: [LEGACY_FEE_DISTRIBUTOR], ...LIVE })
 
   const WEEK_MS       = 7 * 24 * 60 * 60 * 1000
   const WEEK_S        = 7 * 24 * 60 * 60
@@ -467,6 +473,31 @@ export default function DashboardPage() {
             <div className="text-text-muted text-sm">No trailing-week fee data yet</div>
           )}
         </div>
+
+        {/* Pre-Migration Rewards — real AEON sitting in the pre-cutover
+            FeeDistributor, collected but locked until that epoch closes
+            (independent of the voter/engine cutover). Not projected, not
+            estimated -- a direct on-chain balanceOf read. */}
+        {legacyPendingRaw !== undefined && legacyPendingRaw > 0n && (
+          <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.aeon.glow}` }}>
+            <div className="flex items-center gap-2 mb-4">
+              <Lock size={16} className="text-aeon-400" />
+              <span className="font-display font-semibold text-text-primary">Pre-Migration Rewards</span>
+              <span className="ml-auto text-2xs font-mono text-text-muted uppercase tracking-wider">Real, on-chain balance</span>
+            </div>
+            <div className="flex items-center gap-6">
+              <IconOrb accent="aeon" size={88} icon={<Lock size={32} className="text-aeon-400" />} />
+              <div className="flex-1 space-y-1">
+                <div className="text-2xl font-mono font-bold text-aeon-400">{fmt18(legacyPendingRaw as bigint)} AEON</div>
+                <p className="text-2xs text-text-muted leading-relaxed">
+                  Collected before the AeonVoterV3 cutover, sitting in the old FeeDistributor. Locked until that
+                  epoch closes (~7 days from cutover), then claimable on the Vote page for whoever voted before
+                  the switch.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.aeon.glow}` }}>
           <div className="flex items-center gap-2 mb-4">
