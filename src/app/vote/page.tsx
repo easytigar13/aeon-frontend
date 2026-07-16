@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { Vote, Plus, X, Flame, Loader2 } from 'lucide-react'
 import { clsx } from 'clsx'
-import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, usePublicClient } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG, LEGACY_AEON_VOTER, LEGACY_FEE_DISTRIBUTOR } from '@/config/contracts'
@@ -846,6 +846,12 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
     query: { enabled: tokenId !== undefined && tokenId > 0n, refetchInterval: 15000 },
   })
 
+  const publicClient = usePublicClient()
+  const { writeContractAsync } = useWriteContract()
+  const [claimedPools, setClaimedPools] = useState<Set<string>>(new Set())
+  const [claimingIndex, setClaimingIndex] = useState<number | null>(null)
+  const [claimError, setClaimError] = useState('')
+
   if (!tokenId || tokenId === 0n || lastVotedRaw === undefined) return null
   const rows = UNIQUE_VOTE_POOLS
     .map((pool, i) => ({ pool, weight: votesData?.[i]?.status === 'success' ? votesData[i].result as bigint : 0n }))
@@ -859,42 +865,55 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
   const isClosed = currentEpoch > votedEpoch
   const closesAt = new Date(Number(votedEpoch + WEEK_S) * 1000)
 
+  const pending = rows.filter(r => !claimedPools.has(r.pool.address))
+  const isClaiming = claimingIndex !== null
+
+  async function handleClaimAll() {
+    setClaimError('')
+    for (let i = 0; i < pending.length; i++) {
+      setClaimingIndex(i)
+      try {
+        const hash = await writeContractAsync({
+          address: LEGACY_FEE_DISTRIBUTOR, abi: LEGACY_FEE_DISTRIBUTOR_ABI, functionName: 'claimAllFees',
+          args: [pending[i].pool.address, votedEpoch],
+        })
+        await publicClient?.waitForTransactionReceipt({ hash })
+        setClaimedPools(prev => new Set(prev).add(pending[i].pool.address))
+      } catch (e: any) {
+        setClaimError((e.shortMessage ?? e.message ?? 'Claim failed').slice(0, 150))
+        break
+      }
+    }
+    setClaimingIndex(null)
+  }
+
   return (
     <div className="space-y-1 pt-1 border-t border-amber-500/20 mt-1">
       <div className="text-2xs text-amber-400 uppercase tracking-wider pt-1">Pre-migration rewards</div>
       {rows.map(({ pool }) => (
         <div key={pool.address} className="flex justify-between items-center text-xs">
           <span className="text-text-secondary">{pool.name}</span>
-          <LegacyClaimButton pool={pool} legacyEpoch={votedEpoch} disabled={!isClosed} />
+          <span className={clsx('font-mono text-2xs', claimedPools.has(pool.address) ? 'text-emerald-400' : 'text-text-muted')}>
+            {claimedPools.has(pool.address) ? 'Claimed ✓' : 'Pending'}
+          </span>
         </div>
       ))}
-      {!isClosed && (
+      {isClosed ? (
+        pending.length > 0 && (
+          <button
+            onClick={handleClaimAll}
+            disabled={isClaiming}
+            className="btn-primary w-full mt-2 flex items-center justify-center gap-2 text-sm py-2 disabled:opacity-60"
+          >
+            {isClaiming && <Loader2 size={14} className="animate-spin" />}
+            {isClaiming ? `Claiming ${claimingIndex! + 1}/${pending.length}…` : `Claim All (${pending.length})`}
+          </button>
+        )
+      ) : (
         <p className="text-2xs text-text-muted pt-1">Claimable once this epoch closes (~{closesAt.toLocaleDateString()}).</p>
       )}
+      {claimError && <p className="text-2xs text-red-400 pt-1 break-all">{claimError}</p>}
     </div>
-  )
-}
-
-function LegacyClaimButton({ pool, legacyEpoch, disabled }: { pool: { address: `0x${string}`; name: string }; legacyEpoch: bigint; disabled: boolean }) {
-  const { writeContract, data: hash, isPending, error } = useWriteContract()
-  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash, query: { enabled: !!hash } })
-
-  function handleClaim() {
-    writeContract({
-      address: LEGACY_FEE_DISTRIBUTOR, abi: LEGACY_FEE_DISTRIBUTOR_ABI, functionName: 'claimAllFees',
-      args: [pool.address, legacyEpoch],
-    })
-  }
-
-  return (
-    <button
-      onClick={handleClaim}
-      disabled={disabled || isPending || isConfirming}
-      title={error ? error.message.slice(0, 150) : 'Claim your pre-migration voter fee share'}
-      className="text-2xs font-mono text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-40 border border-amber-800/50 rounded px-1.5 py-0.5"
-    >
-      {isPending || isConfirming ? '…' : isSuccess ? 'Claimed ✓' : 'Claim'}
-    </button>
   )
 }
 
