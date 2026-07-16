@@ -5,6 +5,16 @@
 
 export const CHAIN_ID = 4663
 
+// Staged 2026-07-16 as part of the AeonVoterV3 furnace-double-count-vote fix
+// (see aeon-protocol-v5/MIGRATION_V3_CHECKLIST.md). NOT yet the live voter --
+// AeonVotingEscrow.voter still points at CONTRACTS.AeonVoter below, and
+// MinterProxy still mints via the old engine. These new vAMM gauges are real,
+// deployed, and stakeable right now, but earn ZERO emissions until governor
+// runs the cutover step. Exposed here only so the Earn page can offer an
+// early "New" staking option alongside the still-fully-functional "Old" one,
+// so LPs can move over at their own pace instead of a single forced moment.
+export const MIGRATION_NEW_VOTER = '0xd1784062EA606900972Ad6Ae2Ed37429630ED918' as `0x${string}`
+
 export const CONTRACTS = {
   AeonToken:           '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`,
   MinterProxy:         '0x05b04A4344520Bb08201Bd9460ec9d37aD5f7918' as `0x${string}`,

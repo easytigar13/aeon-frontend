@@ -6,7 +6,7 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CL_GAUGES, DLMM_GAUGES, ALGEBRA_CONTRACTS, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, CL_GAUGES, DLMM_GAUGES, ALGEBRA_CONTRACTS, CONTRACTS, TOKENS, NATIVE_SENTINEL, MIGRATION_NEW_VOTER } from '@/config/contracts'
 import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, CL_GAUGE_ABI, DLMM_GAUGE_ABI, ERC721_APPROVE_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
@@ -254,6 +254,14 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
 
   const poolPrice = usePoolPrice(pool)
 
+  // Migration: AeonVoterV3 is staged (new gauges deployed, real, stakeable)
+  // but not yet cut over -- old gauge keeps working exactly as before,
+  // new gauge earns zero emissions until governor flips MinterProxy/
+  // AeonVotingEscrow over. Default to 'old' so unstaking stays the obvious
+  // first action; users opt into 'new' once they're ready to move.
+  const [gaugeVersion, setGaugeVersion] = useState<'old' | 'new'>('old')
+  const voterAddress = gaugeVersion === 'old' ? CONTRACTS.AeonVoter : MIGRATION_NEW_VOTER
+
   // No refetchInterval before meant a pool with no gauge yet at first expand
   // stayed "Gauge not yet deployed" forever for that session, even after a
   // gauge was created moments later elsewhere -- happened for real with
@@ -261,10 +269,24 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   // loaded. Refetching periodically means a newly created gauge shows up
   // without the user needing a hard refresh.
   const { data: gaugeAddr } = useReadContract({
-    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'gauges',
+    address: voterAddress, abi: VOTER_ABI, functionName: 'gauges',
     args: [pool.address], query: { enabled: expanded, refetchInterval: 20000 },
   })
   const gauge = gaugeAddr && gaugeAddr !== '0x0000000000000000000000000000000000000000' ? gaugeAddr : undefined
+
+  // Old-gauge staked balance is checked regardless of which tab is active,
+  // so the "you still have X staked in the old gauge" nudge can show even
+  // while viewing the New tab.
+  const { data: oldGaugeAddr } = useReadContract({
+    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'gauges',
+    args: [pool.address], query: { enabled: expanded, refetchInterval: 20000 },
+  })
+  const oldGauge = oldGaugeAddr && oldGaugeAddr !== '0x0000000000000000000000000000000000000000' ? oldGaugeAddr : undefined
+  const { data: oldStakedRaw } = useReadContract({
+    address: oldGauge, abi: GAUGE_ABI, functionName: 'balanceOf',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!oldGauge && !!wallet && gaugeVersion === 'new' },
+  })
+  const oldStaked = (oldStakedRaw as bigint | undefined) ?? 0n
 
   const { data: lpBalRaw, refetch: refetchLP } = useReadContract({
     address: pool.address, abi: ERC20_ABI, functionName: 'balanceOf',
@@ -447,9 +469,32 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
                 : <LiquidityPanel pool={pool} wallet={wallet} prices={prices} tvlUsd={tvlUsd} onDone={refetchLP} />
             ) : !wallet
               ? <div className="p-4 text-center text-sm text-text-muted">Connect wallet to stake and earn</div>
-              : !gauge
-                ? <div className="p-4 text-center text-xs text-yellow-400">Gauge not yet deployed for this pool</div>
-                : (
+              : (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-1.5 p-1 rounded-lg bg-bg-raised border border-bg-border w-fit">
+                    <button
+                      onClick={() => setGaugeVersion('old')}
+                      className={clsx('text-2xs font-mono px-2.5 py-1 rounded-md transition-colors', gaugeVersion === 'old' ? 'bg-bg-base text-text-primary' : 'text-text-muted hover:text-text-secondary')}
+                    >
+                      Old — unstake here
+                    </button>
+                    <button
+                      onClick={() => setGaugeVersion('new')}
+                      className={clsx('text-2xs font-mono px-2.5 py-1 rounded-md transition-colors', gaugeVersion === 'new' ? 'bg-bg-base text-violet-400' : 'text-text-muted hover:text-text-secondary')}
+                    >
+                      New — stake here
+                    </button>
+                  </div>
+                  {gaugeVersion === 'new' && (
+                    <div className="p-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-2xs text-violet-300 font-mono">
+                      {oldStaked > 0n
+                        ? `You still have ${parseFloat(formatUnits(oldStaked, 18)).toFixed(4)} LP staked in the Old gauge — unstake there first, then stake here.`
+                        : 'New gauge (migration in progress) — real, stakeable now, but earns 0 emissions until migration completes.'}
+                    </div>
+                  )}
+                  {!gauge
+                    ? <div className="p-4 text-center text-xs text-yellow-400">Gauge not yet deployed for this pool</div>
+                    : (
                     <div className="space-y-3">
                       <div className="flex items-center gap-2">
                         <input type="number" value={stakeAmt} onChange={e => setStakeAmt(e.target.value)} placeholder="0.0" className="input-base flex-1 text-sm py-2" />
@@ -497,7 +542,10 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
                       </div>
                       {errMsg && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{errMsg}</div>}
                     </div>
-                  )
+                    )
+                  }
+                </div>
+              )
             }
 
             <div className="mt-4 pt-3 border-t border-bg-border flex items-center justify-between">
