@@ -16,6 +16,7 @@ import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { TokenIcon } from '@/components/TokenIcon'
 import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
 import { binIdToPrice } from '@/lib/dlmmMath'
+import { MigrationBanner } from '@/components/MigrationBanner'
 
 type PriceMap = Record<string, number | null>
 
@@ -1373,6 +1374,8 @@ export default function EarnPage() {
           </button>
         )}
       </div>
+
+      <MigrationBanner />
 
       <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-8 w-fit">
         {(['earn', 'portfolio'] as const).map(t => (

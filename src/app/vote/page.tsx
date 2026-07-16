@@ -11,6 +11,7 @@ import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { projectNextEmission } from '@/lib/emissionsProjection'
+import { MigrationBanner } from '@/components/MigrationBanner'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const
 
@@ -492,6 +493,8 @@ export default function VotePage() {
         <h1 className="font-display font-bold text-3xl text-text-primary mb-2">Vote</h1>
         <p className="text-text-secondary">Direct emissions by voting with your veNFT. Earn fees from pools you vote for.</p>
       </div>
+
+      <MigrationBanner />
 
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">

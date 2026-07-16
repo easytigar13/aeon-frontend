@@ -11,6 +11,7 @@ import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { projectNextEmission } from '@/lib/emissionsProjection'
+import { MigrationBanner } from '@/components/MigrationBanner'
 
 function fmtUsd(n: number | null, compact = false): string {
   if (n === null) return '$—'
@@ -317,6 +318,8 @@ export default function DashboardPage() {
           <h1 className="font-display font-bold text-3xl text-text-primary mb-2">Dashboard</h1>
           <p className="text-text-secondary">Protocol stats, pool performance, and epoch data</p>
         </div>
+
+        <MigrationBanner />
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
           <KpiCard label="Total Value Locked" value={fmtUsd(totalTVL || null, true)} accent="emerald" icon={<TrendingUp size={16} className="text-emerald-400" />} delta={`${POOLS.length + CL_POOLS.length + DLMM_POOLS.length} pools`} />
