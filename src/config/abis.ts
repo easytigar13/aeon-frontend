@@ -540,6 +540,53 @@ export const FEE_DISTRIBUTOR_ABI = [
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
   },
+  // Claims the caller's voter-share of every fee token collected for `pool`
+  // during `epoch` (epoch must already be closed -- epoch < currentEpoch()).
+  // Resolves the claiming tokenId internally via voter.lastVotedTokenId(msg.sender),
+  // so no tokenId argument is needed here.
+  {
+    name: 'claimAllFees',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'pool', type: 'address' },
+      { name: 'epoch', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    name: 'poolEpochTokens',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'pool', type: 'address' },
+      { name: 'epoch', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'poolTokenEpochFees',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'pool', type: 'address' },
+      { name: 'token', type: 'address' },
+      { name: 'epoch', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'claimed',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'tokenId', type: 'uint256' },
+      { name: 'pool', type: 'address' },
+      { name: 'epoch', type: 'uint256' },
+      { name: 'token', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
 ] as const
 
 // WhitelistRH.sol — pay 100 AEON to the protocol treasury to permanently

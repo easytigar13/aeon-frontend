@@ -6,7 +6,7 @@ import { useAccount, useReadContract, useReadContracts, useWriteContract, useWai
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
-import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI } from '@/config/abis'
+import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI, FEE_DISTRIBUTOR_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -795,14 +795,49 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
     <div className="space-y-1 pt-1 border-t border-bg-border mt-1">
       <div className="text-2xs text-text-muted uppercase tracking-wider pt-1">Your Current Votes</div>
       {rows.map(({ pool, weight }) => (
-        <div key={pool.address} className="flex justify-between text-xs">
+        <div key={pool.address} className="flex justify-between items-center text-xs">
           <span className="text-text-secondary">{pool.name}</span>
-          <span className="font-mono text-aeon-400">
-            {total > 0n ? `${(Number(weight * 10000n / total) / 100).toFixed(1)}%` : '—'}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-aeon-400">
+              {total > 0n ? `${(Number(weight * 10000n / total) / 100).toFixed(1)}%` : '—'}
+            </span>
+            {mode === 'vAMM' && <ClaimFees pool={pool} />}
+          </div>
         </div>
       ))}
     </div>
+  )
+}
+
+// Claims the caller's voter-share of every fee token FeeDistributorV3
+// collected for `pool` during the most recently CLOSED epoch (claimAllFees
+// reverts/no-ops on the still-open current epoch -- epoch must be < currentEpoch()).
+// Permissionless and resolves the claiming tokenId internally via
+// voter.lastVotedTokenId(msg.sender), so no tokenId prop is needed here.
+function ClaimFees({ pool }: { pool: { address: `0x${string}`; name: string } }) {
+  const WEEK_S = 604800n
+  const nowSec = BigInt(Math.floor(Date.now() / 1000))
+  const lastClosedEpoch = (nowSec / WEEK_S) * WEEK_S - WEEK_S
+
+  const { writeContract, data: hash, isPending, error } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash, query: { enabled: !!hash } })
+
+  function handleClaim() {
+    writeContract({
+      address: CONTRACTS.FeeDistributor, abi: FEE_DISTRIBUTOR_ABI, functionName: 'claimAllFees',
+      args: [pool.address, lastClosedEpoch],
+    })
+  }
+
+  return (
+    <button
+      onClick={handleClaim}
+      disabled={isPending || isConfirming}
+      title={error ? error.message.slice(0, 150) : 'Claim your voter fee share for the last closed epoch'}
+      className="text-2xs font-mono text-aeon-400 hover:text-aeon-300 transition-colors disabled:opacity-50 border border-aeon-800/50 rounded px-1.5 py-0.5"
+    >
+      {isPending || isConfirming ? '…' : isSuccess ? 'Claimed ✓' : 'Claim Fees'}
+    </button>
   )
 }
 
