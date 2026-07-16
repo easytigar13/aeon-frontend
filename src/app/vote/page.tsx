@@ -804,7 +804,7 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
             <span className="font-mono text-aeon-400">
               {total > 0n ? `${(Number(weight * 10000n / total) / 100).toFixed(1)}%` : '—'}
             </span>
-            {mode === 'vAMM' && <ClaimFees pool={pool} />}
+            {mode === 'vAMM' && tokenId !== undefined && <ClaimFees pool={pool} tokenId={tokenId} />}
           </div>
         </div>
       ))}
@@ -812,12 +812,13 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
   )
 }
 
-// Claims the caller's voter-share of every fee token FeeDistributorV3
+// Claims `tokenId`'s voter-share of every fee token FeeDistributorV4
 // collected for `pool` during the most recently CLOSED epoch (claimAllFees
 // reverts/no-ops on the still-open current epoch -- epoch must be < currentEpoch()).
-// Permissionless and resolves the claiming tokenId internally via
-// voter.lastVotedTokenId(msg.sender), so no tokenId prop is needed here.
-function ClaimFees({ pool }: { pool: { address: `0x${string}`; name: string } }) {
+// tokenId is required and checked against real ownership/approval on-chain --
+// V3's old resolve-by-wallet behavior made every other owned veNFT's share
+// permanently unclaimable for multi-NFT wallets, fixed in V4.
+function ClaimFees({ pool, tokenId }: { pool: { address: `0x${string}`; name: string }; tokenId: bigint }) {
   const WEEK_S = 604800n
   const nowSec = BigInt(Math.floor(Date.now() / 1000))
   const lastClosedEpoch = (nowSec / WEEK_S) * WEEK_S - WEEK_S
@@ -828,7 +829,7 @@ function ClaimFees({ pool }: { pool: { address: `0x${string}`; name: string } })
   function handleClaim() {
     writeContract({
       address: CONTRACTS.FeeDistributor, abi: FEE_DISTRIBUTOR_ABI, functionName: 'claimAllFees',
-      args: [pool.address, lastClosedEpoch],
+      args: [pool.address, tokenId, lastClosedEpoch],
     })
   }
 

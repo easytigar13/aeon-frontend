@@ -5,45 +5,56 @@
 
 export const CHAIN_ID = 4663
 
-// Staged 2026-07-16 as part of the AeonVoterV3 furnace-double-count-vote fix
-// (see aeon-protocol-v5/MIGRATION_V3_CHECKLIST.md). NOT yet the live voter --
-// AeonVotingEscrow.voter still points at CONTRACTS.AeonVoter below, and
-// MinterProxy still mints via the old engine. These new vAMM gauges are real,
-// deployed, and stakeable right now, but earn ZERO emissions until governor
-// runs the cutover step. Exposed here only so the Earn page can offer an
-// early "New" staking option alongside the still-fully-functional "Old" one,
-// so LPs can move over at their own pace instead of a single forced moment.
-export const MIGRATION_NEW_VOTER = '0xd1784062EA606900972Ad6Ae2Ed37429630ED918' as `0x${string}`
+// Cut over 2026-07-16: the AeonVoterV3 furnace-double-count-vote fix (see
+// aeon-protocol-v5/MIGRATION_V3_CHECKLIST.md) is now the LIVE voter --
+// AeonVotingEscrow.voter and MinterProxy both point at the new stack
+// (CONTRACTS.AeonVoter/EmissionsEngine/FeeDistributor/BuybackEngine below).
+// LEGACY_AEON_VOTER is the pre-cutover voter, kept only so the Earn page's
+// Old/New gauge toggle can still show LPs who haven't moved yet where their
+// stake is -- unstake from LEGACY_AEON_VOTER's gauges, restake into the
+// (now live, now emitting) new ones under CONTRACTS.AeonVoter.
+export const LEGACY_AEON_VOTER = '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`
 
 export const CONTRACTS = {
   AeonToken:           '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`,
   MinterProxy:         '0x05b04A4344520Bb08201Bd9460ec9d37aD5f7918' as `0x${string}`,
   AeonVotingEscrow:    '0x0b18B0f483f1caAaBB7505bCD8D1C3C43197Add9' as `0x${string}`,
   TheFurnace:          '0xdeC58B16B24536bc5009Ad4AfDd0C48fF69F919A' as `0x${string}`,
-  AeonVoter:           '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`,
-  AeonGaugeFactory:    '0x044f2A04Ca5D521293E6687D9a2953cf2B27a3C1' as `0x${string}`,
-  BuybackEngine:       '0xe159282352fbD7aF64C22d581cf6338C382b7c5A' as `0x${string}`,
-  FeeDistributor:      '0x772C2Ba92278D47B3A76b3f97b26A5c74d7F7975' as `0x${string}`,
+  // AeonVoterV3 -- fixes the furnace multi-veNFT double-count exploit
+  // (furnacePowerUsed[epoch][owner] tracking). Live since 2026-07-16 cutover.
+  AeonVoter:           '0xbC75c2e29d145816aE65164Ab531839e7EbA12Cb' as `0x${string}`,
+  AeonGaugeFactory:    '0x985c715e810C17a68C4E9C8f4a097772E394E2BF' as `0x${string}`,
+  // BuybackEngineV3 (redeployed) -- routes the Furnace-holder redistribute
+  // share through ProtocolBurnRewardDistributorV2, which redirects the
+  // genesis-burn account's (permanently unclaimable) share to the dev
+  // wallet instead of letting it accumulate forever with no claimant.
+  BuybackEngine:       '0x51Aa877E1a5337Ba5804E025c16080Ea459363c4' as `0x${string}`,
+  ProtocolBurnRewardDistributor: '0xE14119e92c991e242AFfB80f0c0cf12F4a67AA29' as `0x${string}`,
+  // FeeDistributorV4 -- claimFees()/claimAllFees() now take an explicit
+  // tokenId (checked against real ownership) instead of silently resolving
+  // to whichever veNFT a wallet most recently voted with, which made every
+  // other owned veNFT's fee share permanently unclaimable for multi-NFT
+  // wallets.
+  FeeDistributor:      '0x40524d597e9e241b5B7C76D1b2e570A77933D412' as `0x${string}`,
   // Multi-gauge engine/controller activated 2026-07-13. Existing vAMM
   // gauges remain on AeonVoter; the controller directly funds the existing
   // CL/DLMM gauges without migrating pools, NFTs, bins, or staked positions.
   // Superseded 2026-07-13 by VoteDirectedLpEmissionsEngineRH (see below) --
   // kept only as a comment for history, not read anywhere in the frontend.
   // Old: '0xbF021C27F317b7e8B23d47B9063c5551D8527986'
+  // Then: '0xf999ac0Cc5D7FeA6aDB28f905A6b1e71066f2241' (confirmed live via
+  // MinterProxy.logic() before the 2026-07-16 cutover).
   //
-  // VoteDirectedLpEmissionsEngineRH -- confirmed live via MinterProxy.logic()
-  // (the actual mint-authorization source of truth, not just a deploy
-  // script). Each completed epoch mints AEON worth exactly 25% of that
-  // epoch's finalized USD fees (feeDistributor.lastEpochFeesUSD()) -- no
-  // rolling average, no previous-mint growth cap, and no Furnace mint at
-  // all (TO_FURNACE_BPS=0; updatePeriod() never calls the Furnace notifier
-  // anymore, unlike the engine before it). 100% of every mint now goes to
-  // vote-directed LP gauges. Furnace burners still earn ongoing rewards
-  // through BuybackEngineV3's redistribute share (10% of raw trading fees,
-  // unrelated to and unaffected by this emissions-engine swap) -- see
+  // VoteDirectedLpEmissionsEngineRH (current instance) -- each completed
+  // epoch mints AEON worth exactly 25% of that epoch's finalized USD fees
+  // (feeDistributor.lastEpochFeesUSD()) -- no rolling average, no previous-
+  // mint growth cap, and no Furnace mint at all (TO_FURNACE_BPS=0;
+  // updatePeriod() never calls the Furnace notifier). 100% of every mint
+  // goes to vote-directed LP gauges. Furnace burners still earn ongoing
+  // rewards through BuybackEngineV3's redistribute share (10% of raw
+  // trading fees, unrelated to this emissions-engine swap) -- see
   // EPOCH_CONFIG.buybackRedistributeSplit below.
-  EmissionsEngine:     '0xf999ac0Cc5D7FeA6aDB28f905A6b1e71066f2241' as `0x${string}`,
-  ProtocolBurnRewardDistributor: '0xA258263aA1eE6870344336A17a1D94E18b7Af568' as `0x${string}`,
+  EmissionsEngine:     '0xd3163F5390F1A5326671DeD6EC38D8b8E2eA96e6' as `0x${string}`,
   MultiGaugeController:'0x63f61916cDAABa76556723A75EE3690deCA9bd9A' as `0x${string}`,
   AeonOracle:          '0x5A1E28EE00C4e83De000C7ffa5b59B22B45BD9BD' as `0x${string}`,
   ConstantUsdFeed:     '0x182e8039659F8110D47a87BEad1FAAaEf981781d' as `0x${string}`,

@@ -26,6 +26,12 @@ keeper2/status.json
 keeper2/trades.log
 keeper2/pm2-*.log
 
+# Epoch-close keeper — same rules
+epoch-keeper/.env
+epoch-keeper/node_modules/
+epoch-keeper/status.json
+epoch-keeper/pm2-*.log
+
 # OS / editor
 .DS_Store
 Thumbs.db
@@ -41,3 +47,4 @@ tsconfig.tsbuildinfo
 .env*
 !keeper/.env.example
 !keeper2/.env.example
+!epoch-keeper/.env.example

@@ -531,7 +531,7 @@ export const EMISSIONS_ENGINE_ABI = [
   },
 ] as const
 
-// FeeDistributorV3.sol
+// FeeDistributorV4.sol -- live since the 2026-07-16 cutover.
 export const FEE_DISTRIBUTOR_ABI = [
   {
     name: 'lastEpochFeesUSD',
@@ -540,16 +540,19 @@ export const FEE_DISTRIBUTOR_ABI = [
     inputs: [],
     outputs: [{ name: '', type: 'uint256' }],
   },
-  // Claims the caller's voter-share of every fee token collected for `pool`
-  // during `epoch` (epoch must already be closed -- epoch < currentEpoch()).
-  // Resolves the claiming tokenId internally via voter.lastVotedTokenId(msg.sender),
-  // so no tokenId argument is needed here.
+  // Claims the given tokenId's voter-share of every fee token collected for
+  // `pool` during `epoch` (epoch must already be closed -- epoch <
+  // currentEpoch()). tokenId is checked against real ownership/approval on
+  // the voting escrow -- V3 instead silently resolved to whichever veNFT
+  // the wallet most recently voted with, making every other owned veNFT's
+  // share permanently unclaimable for multi-NFT wallets.
   {
     name: 'claimAllFees',
     type: 'function',
     stateMutability: 'nonpayable',
     inputs: [
       { name: 'pool', type: 'address' },
+      { name: 'tokenId', type: 'uint256' },
       { name: 'epoch', type: 'uint256' },
     ],
     outputs: [],
