@@ -531,6 +531,46 @@ export const EMISSIONS_ENGINE_ABI = [
   },
 ] as const
 
+// FeeDistributorV3.sol -- pre-cutover, still holds real unsnapshotted fees
+// for the transitional epoch (see LEGACY_FEE_DISTRIBUTOR in contracts.ts).
+// V3's claimAllFees has no tokenId arg -- resolves via
+// voter.lastVotedTokenId(msg.sender) against LEGACY_AEON_VOTER, which is
+// fine for this one legacy epoch since it's a single already-cast vote per
+// wallet from before cutover, not an ongoing multi-vote pattern.
+export const LEGACY_FEE_DISTRIBUTOR_ABI = [
+  {
+    name: 'lastEpochFeesUSD',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'lastSnapshotPeriod',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
+    name: 'snapshotEpoch',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [],
+    outputs: [],
+  },
+  {
+    name: 'claimAllFees',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'pool', type: 'address' },
+      { name: 'epoch', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+] as const
+
 // FeeDistributorV4.sol -- live since the 2026-07-16 cutover.
 export const FEE_DISTRIBUTOR_ABI = [
   {

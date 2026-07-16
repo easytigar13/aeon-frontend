@@ -15,6 +15,17 @@ export const CHAIN_ID = 4663
 // (now live, now emitting) new ones under CONTRACTS.AeonVoter.
 export const LEGACY_AEON_VOTER = '0x2f4cad5f25AcC8E8d18a77ACEc5E2832B6cFF104' as `0x${string}`
 
+// Cutover happened MID-epoch (2026-07-16, epoch boundary 2026-07-16 00:00
+// UTC, closes ~2026-07-23) -- the real fees collected during that epoch
+// (~700 AEON as of cutover) are sitting in the OLD FeeDistributor, tagged to
+// an epoch whose vote weights live entirely on LEGACY_AEON_VOTER. That
+// contract doesn't depend on the voter/engine cutover at all (pure
+// wall-clock epoch math, immutable reference to the old voter's still-intact
+// storage) -- the money becomes claimable normally once the epoch closes,
+// just through the OLD FeeDistributor, not the new one. Needed so the vote
+// page can still show/claim it instead of it going unclaimed forever.
+export const LEGACY_FEE_DISTRIBUTOR = '0x772C2Ba92278D47B3A76b3f97b26A5c74d7F7975' as `0x${string}`
+
 export const CONTRACTS = {
   AeonToken:           '0xd4c93eD1843606f92CccA078941f3d52A585982f' as `0x${string}`,
   MinterProxy:         '0x05b04A4344520Bb08201Bd9460ec9d37aD5f7918' as `0x${string}`,

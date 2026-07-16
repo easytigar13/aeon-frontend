@@ -38,11 +38,22 @@ const INTERVAL_MS = parseInt(process.env.INTERVAL_MS ?? '1800000') // 30 min def
 const GAS_LIMIT_PER_COLLECT = 600_000n
 const STATUS_FILE = fileURLToPath(new URL('status.json', import.meta.url))
 
-// Overridable post-cutover via .env -- default to the currently-live (old)
+// Overridable post-cutover via .env -- default to the currently-live
 // contracts.
 const VOTER_ADDRESS          = (process.env.VOTER_ADDRESS ?? CONTRACTS.AeonVoter) as `0x${string}`
 const FEE_DISTRIBUTOR_ADDRESS = (process.env.FEE_DISTRIBUTOR_ADDRESS ?? CONTRACTS.FeeDistributor) as `0x${string}`
 const EMISSIONS_ENGINE_ADDRESS = (process.env.EMISSIONS_ENGINE_ADDRESS ?? CONTRACTS.EmissionsEngine) as `0x${string}`
+
+// One-off: cutover (2026-07-16) happened mid-epoch, so the real fees
+// collected up to that point (~700 AEON) are stranded on the OLD
+// FeeDistributor, tagged to an epoch that closes independently of the
+// cutover (pure wall-clock epoch math). Nothing else will ever call
+// snapshotEpoch() on it once that epoch passes -- this keeper now owns the
+// main FEE_DISTRIBUTOR_ADDRESS (the new one), so this old one needs its own
+// explicit (harmless, idempotent) snapshot call each tick until it fires.
+// Safe to delete this block once confirmed snapshotted (its own
+// lastSnapshotPeriod will read >= the epoch that held the money).
+const LEGACY_FEE_DISTRIBUTOR = '0x772C2Ba92278D47B3A76b3f97b26A5c74d7F7975' as `0x${string}`
 
 if (!PK) throw new Error('DEPLOYER_PK not set in epoch-keeper/.env')
 
@@ -179,10 +190,25 @@ async function closeEpochIfNeeded() {
   log(`Epoch close complete. ${rewardedGauges.length} gauges rewarded, ${toppedUp} needed manual top-up.`)
 }
 
+async function snapshotLegacyFeeDistributorIfNeeded() {
+  const lastSnapshotPeriod = await publicClient.readContract({ address: LEGACY_FEE_DISTRIBUTOR, abi: FEE_DIST_ABI, functionName: 'lastSnapshotPeriod' })
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  const currentEpoch = (now / WEEK) * WEEK
+  if (currentEpoch <= lastSnapshotPeriod) return // already snapshotted, or not yet time
+  try {
+    const hash = await walletClient.writeContract({ address: LEGACY_FEE_DISTRIBUTOR, abi: FEE_DIST_ABI, functionName: 'snapshotEpoch', gas: 300_000n })
+    await publicClient.waitForTransactionReceipt({ hash })
+    log(`Legacy FeeDistributor snapshotted (period ${lastSnapshotPeriod} -> ${currentEpoch}) -- pre-cutover epoch's fees are now claimable.`)
+  } catch (e: any) {
+    log(`Legacy snapshotEpoch() failed: ${e.shortMessage ?? e.message}`)
+  }
+}
+
 async function tick() {
   try {
     await sweepFees()
     await closeEpochIfNeeded()
+    await snapshotLegacyFeeDistributorIfNeeded()
     writeStatus({ ok: true, lastRun: new Date().toISOString() })
   } catch (e: any) {
     log(`tick() error: ${e.shortMessage ?? e.message ?? e}`)

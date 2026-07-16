@@ -5,13 +5,12 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
-import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI, FEE_DISTRIBUTOR_ABI } from '@/config/abis'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG, LEGACY_AEON_VOTER, LEGACY_FEE_DISTRIBUTOR } from '@/config/contracts'
+import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI, FEE_DISTRIBUTOR_ABI, LEGACY_FEE_DISTRIBUTOR_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { projectNextEmission } from '@/lib/emissionsProjection'
-import { MigrationBanner } from '@/components/MigrationBanner'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const
 
@@ -494,8 +493,6 @@ export default function VotePage() {
         <p className="text-text-secondary">Direct emissions by voting with your veNFT. Earn fees from pools you vote for.</p>
       </div>
 
-      <MigrationBanner />
-
       <div className="grid lg:grid-cols-3 gap-6">
         <div className="lg:col-span-1 space-y-4">
           {/* veNFT selector */}
@@ -571,6 +568,7 @@ export default function VotePage() {
                       </span>
                     </div>
                     {hasVotedForMode && <CurrentVotes tokenId={tokenId} mode={voteMode} epoch={multiEpoch} />}
+                    {voteMode === 'vAMM' && address && <LegacyClaim wallet={address} />}
                     {voteMode === 'vAMM' && hasVoted && (
                       <div className="space-y-1 mt-1">
                         <button onClick={handleReset} disabled={isResetting || !canReset} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -809,6 +807,91 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
         </div>
       ))}
     </div>
+  )
+}
+
+// Cutover (2026-07-16) happened mid-epoch. The real fees collected during
+// that epoch (~700 AEON as of cutover) live in the OLD FeeDistributor,
+// tagged to vote weights that live entirely on LEGACY_AEON_VOTER -- that
+// pairing is self-contained and unaffected by the voter/engine cutover
+// (pure wall-clock epoch math, immutable reference to the old voter's
+// still-intact storage). This shows + claims that one legacy epoch's money
+// so it doesn't just sit unclaimed once the new Claim Fees button (which
+// only knows about the new, empty-so-far FeeDistributor) can't see it.
+function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
+  const { data: legacyTokenId } = useReadContract({
+    address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'lastVotedTokenId', args: [wallet],
+  })
+  const tokenId = legacyTokenId as bigint | undefined
+
+  // The epoch to claim is derived from WHEN the pre-cutover vote actually
+  // happened, not "one week before now" -- cutover hit mid-epoch, so at the
+  // time this ships, the vote's epoch is often still the CURRENT wall-clock
+  // epoch (not yet closed). Blindly using currentEpoch-WEEK would silently
+  // point at the wrong, already-processed prior epoch.
+  const { data: lastVotedRaw } = useReadContract({
+    address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'lastVoted',
+    args: tokenId !== undefined ? [tokenId] : undefined,
+    query: { enabled: tokenId !== undefined && tokenId > 0n },
+  })
+
+  const { data: votesData } = useReadContracts({
+    contracts: UNIQUE_VOTE_POOLS.map(p => ({
+      address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'getVotes' as const,
+      args: tokenId !== undefined ? [tokenId, p.address] as const : undefined,
+    })),
+    query: { enabled: tokenId !== undefined && tokenId > 0n, refetchInterval: 15000 },
+  })
+
+  if (!tokenId || tokenId === 0n || lastVotedRaw === undefined) return null
+  const rows = UNIQUE_VOTE_POOLS
+    .map((pool, i) => ({ pool, weight: votesData?.[i]?.status === 'success' ? votesData[i].result as bigint : 0n }))
+    .filter(r => r.weight > 0n)
+  if (rows.length === 0) return null
+
+  const WEEK_S = 604800n
+  const nowSec = BigInt(Math.floor(Date.now() / 1000))
+  const currentEpoch = (nowSec / WEEK_S) * WEEK_S
+  const votedEpoch = ((lastVotedRaw as bigint) / WEEK_S) * WEEK_S
+  const isClosed = currentEpoch > votedEpoch
+  const closesAt = new Date(Number(votedEpoch + WEEK_S) * 1000)
+
+  return (
+    <div className="space-y-1 pt-1 border-t border-amber-500/20 mt-1">
+      <div className="text-2xs text-amber-400 uppercase tracking-wider pt-1">Pre-migration rewards</div>
+      {rows.map(({ pool }) => (
+        <div key={pool.address} className="flex justify-between items-center text-xs">
+          <span className="text-text-secondary">{pool.name}</span>
+          <LegacyClaimButton pool={pool} legacyEpoch={votedEpoch} disabled={!isClosed} />
+        </div>
+      ))}
+      {!isClosed && (
+        <p className="text-2xs text-text-muted pt-1">Claimable once this epoch closes (~{closesAt.toLocaleDateString()}).</p>
+      )}
+    </div>
+  )
+}
+
+function LegacyClaimButton({ pool, legacyEpoch, disabled }: { pool: { address: `0x${string}`; name: string }; legacyEpoch: bigint; disabled: boolean }) {
+  const { writeContract, data: hash, isPending, error } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash, query: { enabled: !!hash } })
+
+  function handleClaim() {
+    writeContract({
+      address: LEGACY_FEE_DISTRIBUTOR, abi: LEGACY_FEE_DISTRIBUTOR_ABI, functionName: 'claimAllFees',
+      args: [pool.address, legacyEpoch],
+    })
+  }
+
+  return (
+    <button
+      onClick={handleClaim}
+      disabled={disabled || isPending || isConfirming}
+      title={error ? error.message.slice(0, 150) : 'Claim your pre-migration voter fee share'}
+      className="text-2xs font-mono text-amber-400 hover:text-amber-300 transition-colors disabled:opacity-40 border border-amber-800/50 rounded px-1.5 py-0.5"
+    >
+      {isPending || isConfirming ? '…' : isSuccess ? 'Claimed ✓' : 'Claim'}
+    </button>
   )
 }
 
