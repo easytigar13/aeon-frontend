@@ -4,7 +4,7 @@ import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins, Sparkles } from
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG, LEGACY_FEE_DISTRIBUTOR } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG, LEGACY_FEE_DISTRIBUTOR, TOKENS } from '@/config/contracts'
 import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI, FEE_DISTRIBUTOR_ABI } from '@/config/abis'
 import { clsx } from 'clsx'
 import { usePrices } from '@/hooks/usePrices'
@@ -188,12 +188,24 @@ export default function DashboardPage() {
   const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight', ...LIVE })
   const { data: lastFeesUSDRaw } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastFeesUSD', ...LIVE })
   const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.FeeDistributor,  abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD', ...LIVE })
-  // Real AEON sitting in the pre-cutover FeeDistributor -- collected but not
-  // yet claimable (that epoch closes independently of the voter/engine
-  // cutover, pure wall-clock math). Shown here so the dashboard reflects
-  // this real, pending money instead of only the new (post-cutover, still
-  // near-zero) system's numbers.
-  const { data: legacyPendingRaw } = useReadContract({ address: CONTRACTS.AeonToken, abi: ERC20_ABI, functionName: 'balanceOf', args: [LEGACY_FEE_DISTRIBUTOR], ...LIVE })
+  // Real tokens sitting in the pre-cutover FeeDistributor -- collected but
+  // not yet claimable (that epoch closes independently of the voter/engine
+  // cutover, pure wall-clock math). Every fee token that actually flowed
+  // in, not just AEON -- pools pay fees in both of their underlying tokens,
+  // so CASHCAT/ROBINFUN/VIRTUAL/WETH/USDG are all real balances here too.
+  const LEGACY_TOKENS = [
+    { symbol: 'AEON',     address: CONTRACTS.AeonToken, decimals: 18 },
+    { symbol: 'WETH',     address: TOKENS.WETH.address, decimals: 18 },
+    { symbol: 'USDG',     address: TOKENS.USDG.address, decimals: 6 },
+    { symbol: 'VIRTUAL',  address: TOKENS.VIRTUAL.address, decimals: 18 },
+    { symbol: 'ROBINFUN', address: TOKENS.ROBINFUN.address, decimals: 18 },
+    { symbol: 'CASHCAT',  address: TOKENS.CASHCAT.address, decimals: 18 },
+  ] as const
+  const { data: legacyBalances } = useReadContracts({
+    contracts: LEGACY_TOKENS.map(t => ({ address: t.address, abi: ERC20_ABI, functionName: 'balanceOf' as const, args: [LEGACY_FEE_DISTRIBUTOR] as const })),
+    query: { refetchInterval: 60_000 },
+  })
+  const legacyPendingRaw = legacyBalances?.[0]?.status === 'success' ? legacyBalances[0].result as bigint : undefined
 
   const WEEK_MS       = 7 * 24 * 60 * 60 * 1000
   const WEEK_S        = 7 * 24 * 60 * 60
@@ -474,30 +486,50 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Pre-Migration Rewards — real AEON sitting in the pre-cutover
-            FeeDistributor, collected but locked until that epoch closes
-            (independent of the voter/engine cutover). Not projected, not
-            estimated -- a direct on-chain balanceOf read. */}
-        {legacyPendingRaw !== undefined && legacyPendingRaw > 0n && (
-          <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.aeon.glow}` }}>
-            <div className="flex items-center gap-2 mb-4">
-              <Lock size={16} className="text-aeon-400" />
-              <span className="font-display font-semibold text-text-primary">Pre-Migration Rewards</span>
-              <span className="ml-auto text-2xs font-mono text-text-muted uppercase tracking-wider">Real, on-chain balance</span>
-            </div>
-            <div className="flex items-center gap-6">
-              <IconOrb accent="aeon" size={88} icon={<Lock size={32} className="text-aeon-400" />} />
-              <div className="flex-1 space-y-1">
-                <div className="text-2xl font-mono font-bold text-aeon-400">{fmt18(legacyPendingRaw as bigint)} AEON</div>
-                <p className="text-2xs text-text-muted leading-relaxed">
-                  Collected before the AeonVoterV3 cutover, sitting in the old FeeDistributor. Locked until that
-                  epoch closes (~7 days from cutover), then claimable on the Vote page for whoever voted before
-                  the switch.
-                </p>
+        {/* Pre-Migration Rewards — every real fee token sitting in the
+            pre-cutover FeeDistributor, collected but locked until that
+            epoch closes (independent of the voter/engine cutover). Pools
+            pay fees in BOTH underlying tokens, so this isn't AEON-only --
+            direct on-chain balanceOf reads, not projected or estimated. */}
+        {legacyPendingRaw !== undefined && legacyPendingRaw > 0n && (() => {
+          const rows = LEGACY_TOKENS.map((t, i) => {
+            const bal = legacyBalances?.[i]?.status === 'success' ? legacyBalances[i].result as bigint : 0n
+            const amount = parseFloat(formatUnits(bal, t.decimals))
+            const usd = prices[t.symbol as keyof typeof prices] ?? null
+            return { symbol: t.symbol, amount, usdValue: usd !== null ? amount * usd : null }
+          }).filter(r => r.amount > 0)
+          const totalUsd = rows.every(r => r.usdValue !== null) ? rows.reduce((s, r) => s + (r.usdValue ?? 0), 0) : null
+
+          return (
+            <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.aeon.glow}` }}>
+              <div className="flex items-center gap-2 mb-4">
+                <Lock size={16} className="text-aeon-400" />
+                <span className="font-display font-semibold text-text-primary">Pre-Migration Rewards</span>
+                <span className="ml-auto text-2xs font-mono text-text-muted uppercase tracking-wider">Real, on-chain balances</span>
+              </div>
+              <div className="flex items-center gap-6 mb-4">
+                <IconOrb accent="aeon" size={88} icon={<Lock size={32} className="text-aeon-400" />} />
+                <div className="flex-1 space-y-1">
+                  <div className="text-2xl font-mono font-bold text-aeon-400">{totalUsd !== null ? fmtUsd(totalUsd, true) : `${rows.length} tokens`}</div>
+                  <p className="text-2xs text-text-muted leading-relaxed">
+                    Collected before the AeonVoterV3 cutover, sitting in the old FeeDistributor — every fee token
+                    that actually came in, not just AEON. Locked until that epoch closes, then claimable on the
+                    Vote page for whoever voted before the switch.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {rows.map(r => (
+                  <div key={r.symbol} className="rounded-xl border border-bg-border bg-bg-raised/60 p-2.5">
+                    <div className="text-2xs text-text-muted uppercase font-mono">{r.symbol}</div>
+                    <div className="text-sm font-mono text-text-primary mt-0.5">{r.amount.toLocaleString(undefined, { maximumFractionDigits: r.amount < 1 ? 6 : 2 })}</div>
+                    {r.usdValue !== null && <div className="text-2xs text-text-muted font-mono">{fmtUsd(r.usdValue)}</div>}
+                  </div>
+                ))}
               </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.aeon.glow}` }}>
           <div className="flex items-center gap-2 mb-4">
