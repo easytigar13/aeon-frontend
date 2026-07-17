@@ -251,12 +251,59 @@ for (const p of UNISWAP_POOLS) {
     kind: 'uniV2',
   })
 }
+// Hard pool allowlist. When POOL_ALLOWLIST is set (comma-separated pool
+// addresses), Mirajane trades ONLY these pools: all remote Uniswap
+// V2/V3/V4 discovery is skipped, and ARB_POOLS is filtered down to exactly
+// this set after every refresh. This is what makes it "stupidly fast" -- a
+// tiny, fixed pool graph with zero external-discovery latency. Cycles still
+// only ever settle in AEON/ETH/USDG (SETTLEMENT_TOKENS), unchanged.
+const POOL_ALLOWLIST = new Set(
+  (process.env.POOL_ALLOWLIST ?? '')
+    .split(',').map(a => a.trim().toLowerCase()).filter(Boolean),
+)
+const POOL_ALLOWLIST_ACTIVE = POOL_ALLOWLIST.size > 0
+
+function applyPoolAllowlist() {
+  if (!POOL_ALLOWLIST_ACTIVE) return
+  for (let i = ARB_POOLS.length - 1; i >= 0; i--) {
+    if (!POOL_ALLOWLIST.has(ARB_POOLS[i].address.toLowerCase())) ARB_POOLS.splice(i, 1)
+  }
+}
+
 const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?? '1000000')
 // Explicit user-requested external token pins. These remain in V3/V4
 // discovery even if the general exclusion policy is tightened later.
 const MANUAL_EXTERNAL_TOKENS = new Set<keyof typeof TOKENS>(['HOODIE'])
 const uniswapV3Refs = new Map<string, UniswapV3PoolRef>()
 const uniswapV4Refs = new Map<string, UniswapV4PoolRef>()
+
+// MIRAJANE MODE: a fixed, explicitly-curated cross-venue AEON pool set (our
+// vAMM/CL + external Uniswap V3/V4), generated on-chain by
+// gen-mirajane-pools.mjs into mirajane-pools.json. When on, ARB_POOLS is
+// EXACTLY this set -- no discovery of any kind, no address filtering -- which
+// is what makes it stupidly fast (tiny fixed graph, zero remote latency) while
+// still arbing AEON/CASHCAT/etc across every venue. Cycles still only ever
+// settle in AEON/ETH/USDG (SETTLEMENT_TOKENS), unchanged.
+const MIRAJANE_MODE = process.env.MIRAJANE_MODE === 'true'
+function loadMirajanePools() {
+  const path = fileURLToPath(new URL('mirajane-pools.json', import.meta.url))
+  const { poolConfigs, v4Refs } = JSON.parse(fs.readFileSync(path, 'utf-8'))
+  ARB_POOLS.splice(0, ARB_POOLS.length) // drop the default POOLS-derived set
+  for (const p of poolConfigs) {
+    ARB_POOLS.push({
+      name: p.name, address: p.address as `0x${string}`,
+      token0: p.token0 as keyof typeof TOKENS, token1: p.token1 as keyof typeof TOKENS,
+      feeBps: BigInt(p.feeBps), isUniV2: !!p.isUniV2, kind: p.kind as PoolKind,
+      ...(p.v3Fee !== undefined ? { v3Fee: p.v3Fee } : {}),
+      ...(p.v4PoolId ? {
+        v4PoolId: p.v4PoolId as `0x${string}`, v4Fee: p.v4Fee, v4TickSpacing: p.v4TickSpacing,
+        v4Hooks: p.v4Hooks as `0x${string}`, v4Native: p.v4Native,
+      } : {}),
+    })
+  }
+  for (const r of v4Refs) uniswapV4Refs.set((r.id as string).toLowerCase(), r as UniswapV4PoolRef)
+}
+if (MIRAJANE_MODE) loadMirajanePools()
 
 async function discoverHighVolumeUniswapV3Pools(): Promise<number> {
   const symbols = (Object.keys(TOKENS) as (keyof typeof TOKENS)[]).filter(sym =>
@@ -3509,6 +3556,20 @@ interface DiscoveryCounts {
 }
 
 async function refreshPoolDiscovery(): Promise<DiscoveryCounts> {
+  if (MIRAJANE_MODE) {
+    // Fixed explicit pool set loaded once at startup -- nothing to discover
+    // or refresh, ever. This is the whole point of the mode.
+    return { uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl: 0, dlmm: 0 }
+  }
+  if (POOL_ALLOWLIST_ACTIVE) {
+    // Allowlist mode: skip every remote external discovery (the slow part).
+    // Still run the local CL/DLMM registration so any allowlisted CL/DLMM
+    // pool gets its proper (Algebra / LB) quoting path, then hard-filter
+    // ARB_POOLS down to exactly the allowlist.
+    const { cl, dlmm } = await discoverClAndDlmmPools()
+    applyPoolAllowlist()
+    return { uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl, dlmm }
+  }
   const uniswapV2 = await discoverUniswapPools()
   const uniswapV3 = await discoverHighVolumeUniswapV3Pools()
   const uniswapV4 = await discoverHighVolumeUniswapV4Pools()
@@ -3543,6 +3604,14 @@ async function main() {
   console.log(`  Atomic execution only: ${ATOMIC_ONLY}`)
   console.log(`  Max hops per cycle: ${MAX_HOPS}`)
   console.log(`  Pools monitored: ${ARB_POOLS.length}`)
+  if (MIRAJANE_MODE) {
+    const byKind = ARB_POOLS.reduce((m, p) => (m[p.kind] = (m[p.kind] || 0) + 1, m), {} as Record<string, number>)
+    console.log(`  MIRAJANE MODE -- fixed curated cross-venue set, all discovery disabled: ${JSON.stringify(byKind)}`)
+    for (const p of ARB_POOLS) console.log(`    - ${p.name} [${p.kind}]${p.v3Fee ? ' fee ' + p.v3Fee : ''}${p.v4Native ? ' [native]' : ''}`)
+  } else if (POOL_ALLOWLIST_ACTIVE) {
+    console.log(`  Pool allowlist ACTIVE (${POOL_ALLOWLIST.size} pools) -- external discovery disabled:`)
+    for (const p of ARB_POOLS) console.log(`    - ${p.name} [${p.kind}] ${p.address}`)
+  }
   console.log(`  Uniswap V2 pools discovered: ${uniswapPools}`)
   console.log(`  Uniswap V3 pools above $${MIN_EXTERNAL_VOLUME_USD.toLocaleString()} volume discovered: ${uniswapV3Pools}`)
   console.log(`  Uniswap V4 pools above $${MIN_EXTERNAL_VOLUME_USD.toLocaleString()} volume discovered: ${uniswapV4Pools}`)
