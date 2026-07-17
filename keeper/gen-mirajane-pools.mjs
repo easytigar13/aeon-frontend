@@ -15,6 +15,7 @@ import { CL_GAUGES, POOLS } from '../src/config/contracts.ts'
 const RPC = 'https://rpc.mainnet.chain.robinhood.com'
 const client = createPublicClient({ transport: http(RPC) })
 const POOL_MANAGER = '0x8366a39cc670b4001a1121b8f6a443a643e40951'
+const UNISWAP_V3_FACTORY = '0x1f7d7550b1b028f7571e69a784071f0205fd2efa'
 const ZERO = '0x0000000000000000000000000000000000000000'
 
 // address(lowercased) -> { symbol, decimals }
@@ -27,6 +28,7 @@ const TOK = {
   '0x020bfc650a365f8bb26819deaabf3e21291018b4': 'CASHCAT',
   '0xb3b78ca800c5327a21f03f0636d9a08a103787fd': 'SHERWOOD',
   '0x2e897abb6bf1d77c61eb3fa6c093ae71de0efd2d': 'NASDAQ',
+  '0x56910d4409f3a0c78c64dd8d0545ff0705389870': 'INDEX',
 }
 const sym = a => TOK[(a || '').toLowerCase()]
 
@@ -45,6 +47,8 @@ const ADDRESSES = [
   '0x0579fA41416101b66e202F66bF3B0de5101F5b9F','0x4B0c312fFbB068F6a0bEa128759E35d94B94D0E1',
   '0x13F501cbFd47a07cceE7E9ef4134bb0E770D138F','0x5dA1Aa1ad4a357C9D1Ed4f78F8b0503C5b9d02E8',
   '0x1e4238E85B8C76c3a81d8E65544367ebb9A61b78','0x9b950a37FeC9D64E9Ed95a169E64cd7B98677690',
+  // canonical Uniswap V3 INDEX/WETH, fee 1%
+  '0xD29893fFac8b29eC4Db2cfE0CDB3FE1377c028Ff',
 ]
 const V4_POOL_IDS = [
   '0x68d8ea65260d4dd8266536f8e2d039ef84b0e2acc72241d0290c527a21ee02fb','0x524ac58d769cf6cca091ec78adac38f1b3fe5677879ace1754b6ed5310547f3a',
@@ -56,11 +60,18 @@ const V4_POOL_IDS = [
   '0x414582fb651d8629238ca87b85e93509d27a1e3610ff65c050ada959f4459fe9','0x5501f1e70a9a3c56f57880c18d095a63f4e1b50e9def646e7f3c6633d49db550',
   '0x76d4df1e097e3ed9e73a6a14ea5c574a96297b63e375dc8bb6877b6ff447bf43','0xc37120cc36a2c63af25448d5503fe4b8ff8bd5d7a91a99912aafa1c6a90fa6f9',
   '0x23a983bb3d0711aae0a5614dd37e9dc9086a44e838c9a331fb9e787bca18dace','0x2e76dfba67e8e04c2d9deae3bbd59ecd1059509d954da523df13c923d9c62ea9',
+  // liquid, unhooked INDEX/USDG pools (0.95% and 3%)
+  '0x51d1a40389e7fe42bd4f3d4c3c901ec8846d8d6e051d7375b65782f340898d58',
+  '0x0d0bcef5e77bc4dddca11964f58481f6d810b7ab4be1035b31de30eb41c4abc8',
 ]
 
 const t0Abi = [{ name: 'token0', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }]
 const t1Abi = [{ name: 'token1', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] }]
 const feeAbi = [{ name: 'fee', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint24' }] }]
+const v3FactoryAbi = [{
+  name: 'getPool', type: 'function', stateMutability: 'view',
+  inputs: [{ type: 'address' }, { type: 'address' }, { type: 'uint24' }], outputs: [{ type: 'address' }],
+}]
 const resAbi = [{ name: 'getReserves', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint112' }, { type: 'uint112' }, { type: 'uint32' }] }]
 const svAbi = [{ name: 'getLiquidity', type: 'function', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'uint128' }] }]
 const STATE_VIEW = '0xf3334192d15450cdd385c8b70e03f9a6bd9e673b'
@@ -104,6 +115,13 @@ for (const addr of ADDRESSES) {
   let v3Fee
   try { v3Fee = Number(await client.readContract({ address: addr, abi: feeAbi, functionName: 'fee' })) } catch {}
   if (v3Fee !== undefined) {
+    const canonical = await client.readContract({
+      address: UNISWAP_V3_FACTORY, abi: v3FactoryAbi, functionName: 'getPool', args: [t0, t1, v3Fee],
+    })
+    if (canonical.toLowerCase() !== addr.toLowerCase()) {
+      skipped.push(`${addr} (${s0}/${s1} -- not canonical Uniswap V3; excluded)`)
+      continue
+    }
     poolConfigs.push({ name: `UniV3 ${s0}/${s1}`, address: getAddress(addr), token0: s0, token1: s1, feeBps: 0, isUniV2: false, kind: 'uniV3', v3Fee })
     continue
   }

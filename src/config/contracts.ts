@@ -287,6 +287,10 @@ export const TOKENS = {
   // ~$0.106 price at the time these pools were created 2026-07-06) — added
   // at the user's request, with AEON/WETH/USDG vAMM pools
   CASHCAT: { address: '0x020bfC650A365f8BB26819deAAbF3E21291018b4' as `0x${string}`, symbol: 'CASHCAT', decimals: 18, name: 'Cash Cat' },
+  // Active Robinhood Chain token, verified on-chain: name "The Index",
+  // symbol "Index", 18 decimals. Routed through canonical Uniswap V3 and
+  // unhooked Uniswap V4 pools; it is never used as a settlement asset.
+  INDEX: { address: '0x56910D4409F3a0C78C64DD8D0545FF0705389870' as `0x${string}`, symbol: 'INDEX', decimals: 18, name: 'The Index' },
   // real, independently-deployed token (verified via Blockscout: 93 holders,
   // no price/volume data yet elsewhere on this chain) — added 2026-07-08 at
   // the user's request, with an AEON vAMM pool

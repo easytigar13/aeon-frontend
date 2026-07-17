@@ -132,6 +132,16 @@
       "v3Fee": 10000
     },
     {
+      "name": "UniV3 WETH/INDEX",
+      "address": "0xD29893fFac8b29eC4Db2cfE0CDB3FE1377c028Ff",
+      "token0": "WETH",
+      "token1": "INDEX",
+      "feeBps": 0,
+      "isUniV2": false,
+      "kind": "uniV3",
+      "v3Fee": 10000
+    },
+    {
       "name": "UniV4 WETH/AEON",
       "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
       "token0": "WETH",
@@ -312,6 +322,34 @@
       "v4TickSpacing": 240,
       "v4Hooks": "0x0000000000000000000000000000000000000000",
       "v4Native": true
+    },
+    {
+      "name": "UniV4 INDEX/USDG",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "token0": "INDEX",
+      "token1": "USDG",
+      "feeBps": 0,
+      "isUniV2": false,
+      "kind": "uniV4",
+      "v4PoolId": "0x51d1a40389e7fe42bd4f3d4c3c901ec8846d8d6e051d7375b65782f340898d58",
+      "v4Fee": 9500,
+      "v4TickSpacing": 190,
+      "v4Hooks": "0x0000000000000000000000000000000000000000",
+      "v4Native": false
+    },
+    {
+      "name": "UniV4 INDEX/USDG",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "token0": "INDEX",
+      "token1": "USDG",
+      "feeBps": 0,
+      "isUniV2": false,
+      "kind": "uniV4",
+      "v4PoolId": "0x0d0bcef5e77bc4dddca11964f58481f6d810b7ab4be1035b31de30eb41c4abc8",
+      "v4Fee": 30000,
+      "v4TickSpacing": 600,
+      "v4Hooks": "0x0000000000000000000000000000000000000000",
+      "v4Native": false
     }
   ],
   "v4Refs": [
@@ -469,6 +507,30 @@
       "tickSpacing": 240,
       "hooks": "0x0000000000000000000000000000000000000000",
       "native": true,
+      "volume24": 0
+    },
+    {
+      "id": "0x51d1a40389e7fe42bd4f3d4c3c901ec8846d8d6e051d7375b65782f340898d58",
+      "token0": "0x56910D4409F3a0C78C64DD8D0545FF0705389870",
+      "token1": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "currency0": "0x56910D4409F3a0C78C64DD8D0545FF0705389870",
+      "currency1": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "fee": 9500,
+      "tickSpacing": 190,
+      "hooks": "0x0000000000000000000000000000000000000000",
+      "native": false,
+      "volume24": 0
+    },
+    {
+      "id": "0x0d0bcef5e77bc4dddca11964f58481f6d810b7ab4be1035b31de30eb41c4abc8",
+      "token0": "0x56910D4409F3a0C78C64DD8D0545FF0705389870",
+      "token1": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "currency0": "0x56910D4409F3a0C78C64DD8D0545FF0705389870",
+      "currency1": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+      "fee": 30000,
+      "tickSpacing": 600,
+      "hooks": "0x0000000000000000000000000000000000000000",
+      "native": false,
       "volume24": 0
     }
   ]
