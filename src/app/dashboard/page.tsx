@@ -11,6 +11,8 @@ import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { projectNextEmission } from '@/lib/emissionsProjection'
+import { useOraclePricedTokens } from '@/hooks/useOraclePricedTokens'
+import { pricedFeeFraction } from '@/lib/pricedFees'
 
 function fmtUsd(n: number | null, compact = false): string {
   if (n === null) return '$—'
@@ -233,10 +235,21 @@ export default function DashboardPage() {
   // 7-day window) at each pool's real fee tier, scaled to how far into the
   // current epoch we are, tracks live activity instead -- same fix pattern
   // as the APR calc above (real trailing average, not a stale/blended guess).
+  const pricedTokens = useOraclePricedTokens()
   const realFeesThisEpoch = uniquePools.reduce((sum, p) => {
     const volWeek = volByAddrWeek[p.address.toLowerCase()]
     if (volWeek === undefined || volWeek === null) return sum
     return sum + (volWeek / 7) * elapsedDays * parseFeeRate(p.fee)
+  }, 0)
+  // The emission mint is sized off ONLY oracle-priced-token fees — the protocol
+  // counts unpriced (memecoin) fees as $0 toward lastEpochFeesUSD. Weight each
+  // pool's fees by its priced fraction so the projected mint matches reality
+  // instead of overstating it with fees the protocol values at zero.
+  const pricedRealFeesThisEpoch = uniquePools.reduce((sum, p) => {
+    const volWeek = volByAddrWeek[p.address.toLowerCase()]
+    if (volWeek === undefined || volWeek === null) return sum
+    const raw = (volWeek / 7) * elapsedDays * parseFeeRate(p.fee)
+    return sum + raw * pricedFeeFraction(p.token0, p.token1, pricedTokens)
   }, 0)
   const hasLiveVolumeData = Object.keys(volByAddrWeek).length > 0
 
@@ -257,7 +270,10 @@ export default function DashboardPage() {
   const liveEmissionProjection = aeonPrice !== null
     ? projectNextEmission({
         lastFeesUSD,
-        liveEpochFeesUSD: feesThisEpoch,
+        // priced-only: matches what the engine actually mints on (unpriced fees
+        // -> $0). Falls back to the on-chain finalized lastFeesUSD when there's
+        // no live volume data (that number is already priced-only by design).
+        liveEpochFeesUSD: hasLiveVolumeData ? pricedRealFeesThisEpoch : null,
         aeonPriceUSD: aeonPrice,
       })
     : null

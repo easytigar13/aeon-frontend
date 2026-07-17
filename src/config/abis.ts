@@ -566,6 +566,22 @@ export const EMISSIONS_ENGINE_ABI = [
   },
 ] as const
 
+// AeonOracle.sol -- getTokenPrice(token) returns the token's USD price (1e18)
+// or 0 if the oracle can't price it. This is the SAME valuation the protocol
+// uses in FeeDistributorV4.notifyFees: a fee token only contributes to
+// lastEpochFeesUSD (which sizes the emission mint) if getTokenPrice > 0.
+// Unpriced tokens (most memecoins) count as $0 toward emissions even though
+// their fees ARE still collected and paid to voters/LPs in-kind.
+export const ORACLE_ABI = [
+  {
+    name: 'getTokenPrice',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'token', type: 'address' }],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+] as const
+
 // FeeDistributorV3.sol -- pre-cutover, still holds real unsnapshotted fees
 // for the transitional epoch (see LEGACY_FEE_DISTRIBUTOR in contracts.ts).
 // V3's claimAllFees has no tokenId arg -- resolves via

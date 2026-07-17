@@ -11,6 +11,8 @@ import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { projectNextEmission } from '@/lib/emissionsProjection'
+import { useOraclePricedTokens } from '@/hooks/useOraclePricedTokens'
+import { pricedFeeFraction } from '@/lib/pricedFees'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const
 
@@ -387,6 +389,7 @@ export default function VotePage() {
     query: { enabled: multiEpoch !== undefined },
   })
 
+  const pricedTokens = useOraclePricedTokens()
   const lastFeesUSD = lastFeesUSDRaw !== undefined ? Number(formatUnits(lastFeesUSDRaw as bigint, 18)) : null
 
   // Use the same live fee estimate shown on the dashboard so vAPR stays
@@ -403,10 +406,18 @@ export default function VotePage() {
     return true
   })
   const hasLiveFeeData = Object.keys(volResult.byPoolWeek).length > 0
+  // Emissions are minted off ONLY oracle-priced-token fees (the protocol counts
+  // unpriced memecoin fees as $0 toward lastEpochFeesUSD), so the live estimate
+  // that feeds the projection weights each pool by its priced fraction. NOTE:
+  // the separate voter-fee-share math below (estimateVoteFeeShare) intentionally
+  // uses RAW all-token fees, because voters really do receive every fee token
+  // in-kind regardless of whether the oracle can price it.
   const liveEpochFeesUSD = hasLiveFeeData
     ? emissionPools.reduce((sum, pool) => {
         const volumeWeek = volResult.byPoolWeek[pool.address.toLowerCase()]
-        return volumeWeek === undefined ? sum : sum + (volumeWeek / 7) * elapsedDays * parseFeeRate(pool.fee)
+        if (volumeWeek === undefined) return sum
+        const raw = (volumeWeek / 7) * elapsedDays * parseFeeRate(pool.fee)
+        return sum + raw * pricedFeeFraction(pool.token0, pool.token1, pricedTokens)
       }, 0)
     : null
   const emissionProjection = projectNextEmission({
