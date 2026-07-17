@@ -139,6 +139,13 @@ const ATOMIC_ONLY = process.env.ATOMIC_ONLY !== 'false'
 // cross the external-volume threshold become routeable without a restart.
 const POOL_REFRESH_INTERVAL_MS = parseInt(process.env.POOL_REFRESH_INTERVAL_MS ?? '600000')
 const MULTI_GAUGE_DISTRIBUTION_INTERVAL_MS = parseInt(process.env.MULTI_GAUGE_DISTRIBUTION_INTERVAL_MS ?? '900000')
+const EVENT_DRIVEN_SCANNING = process.env.EVENT_DRIVEN_SCANNING !== 'false'
+// Logs are the fast path; this periodic full refresh is the safety net for
+// unusual pool implementations, missed RPC log ranges, and shallow reorgs.
+const FULL_STATE_REFRESH_MS = Math.max(5_000, parseInt(process.env.FULL_STATE_REFRESH_MS ?? '30000'))
+// Even with unchanged pools, a lower base fee can turn an existing gross edge
+// into a net-profitable trade. Re-rank cached state periodically for gas only.
+const GAS_ONLY_RECHECK_MS = Math.max(1_000, parseInt(process.env.GAS_ONLY_RECHECK_MS ?? '5000'))
 
 // Native ETH isn't one of the pool tokens (everything trades WETH), but
 // it's economically fungible with WETH via wrap/unwrap -- whatever's spare
@@ -636,6 +643,15 @@ interface PoolState {
   effFeeBps: bigint   // this tick's actual fee -- static for vAMM/UniV2/DLMM, live-read for CL (Algebra's fee is dynamic)
 }
 
+// V4 pools all share PoolManager as their contract address, so their pool id
+// is the only stable cache/event identity. Every other venue has one contract
+// address per pool.
+function poolStateKey(pool: PoolConfig): string {
+  return pool.kind === 'uniV4' && pool.v4PoolId
+    ? `v4:${pool.v4PoolId.toLowerCase()}`
+    : `pool:${pool.address.toLowerCase()}`
+}
+
 // Chunk to stay well under any single RPC's multicall gas/size ceiling.
 const MULTICALL_CHUNK = 120
 async function chunkedMulticall(contracts: any[]): Promise<any[]> {
@@ -647,12 +663,12 @@ async function chunkedMulticall(contracts: any[]): Promise<any[]> {
   return results
 }
 
-async function fetchAllStates(): Promise<PoolState[]> {
-  const vammPools = ARB_POOLS.filter(p => p.kind === 'vAMM' || p.kind === 'uniV2')
-  const v3Pools   = ARB_POOLS.filter(p => p.kind === 'uniV3')
-  const v4Pools   = ARB_POOLS.filter(p => p.kind === 'uniV4')
-  const clPools   = ARB_POOLS.filter(p => p.kind === 'CL')
-  const dlmmPools = ARB_POOLS.filter(p => p.kind === 'DLMM')
+async function fetchPoolStates(pools: PoolConfig[]): Promise<PoolState[]> {
+  const vammPools = pools.filter(p => p.kind === 'vAMM' || p.kind === 'uniV2')
+  const v3Pools   = pools.filter(p => p.kind === 'uniV3')
+  const v4Pools   = pools.filter(p => p.kind === 'uniV4')
+  const clPools   = pools.filter(p => p.kind === 'CL')
+  const dlmmPools = pools.filter(p => p.kind === 'DLMM')
 
   const vammContracts = vammPools.flatMap(p => [
     { address: p.address, abi: PAIR_ABI, functionName: 'getReserves' as const },
@@ -793,6 +809,34 @@ async function fetchAllStates(): Promise<PoolState[]> {
   return [...vammStates, ...clStates, ...dlmmStates, ...v3States, ...v4States].filter(s => s.r0 > 0n && s.r1 > 0n && hasRealLiquidity(s))
 }
 
+// State is immutable within a block and only pools that emitted logs since
+// the previous scan can have changed. Keep the last good snapshot and replace
+// just those entries. A missing refreshed state removes the old entry, so a
+// pool that loses usable liquidity cannot remain tradeable from stale cache.
+const poolStateCache = new Map<string, PoolState>()
+const knownPoolStateKeys = new Set<string>()
+let poolStateCacheReady = false
+
+async function fetchAllStates(changedPoolKeys?: Set<string>): Promise<PoolState[]> {
+  const poolsToFetch = !poolStateCacheReady || !changedPoolKeys
+    ? ARB_POOLS
+    : ARB_POOLS.filter(pool => changedPoolKeys.has(poolStateKey(pool)) || !knownPoolStateKeys.has(poolStateKey(pool)))
+
+  if (poolsToFetch.length > 0) {
+    const refreshed = await fetchPoolStates(poolsToFetch)
+    for (const pool of poolsToFetch) {
+      const key = poolStateKey(pool)
+      poolStateCache.delete(key)
+      knownPoolStateKeys.add(key)
+    }
+    for (const state of refreshed) poolStateCache.set(poolStateKey(state.pool), state)
+  }
+  poolStateCacheReady = true
+
+  // Preserve manifest order so route tie-breaking remains deterministic.
+  return ARB_POOLS.map(pool => poolStateCache.get(poolStateKey(pool))).filter((state): state is PoolState => !!state)
+}
+
 // Several pools in POOLS are genuinely empty -- deployed with a real gauge
 // but never seeded, sitting at (or near) the 1000-wei locked-minimum floor
 // every new pool starts at (see contracts.ts's own "not enough to seed it"
@@ -904,6 +948,24 @@ function cycleOut(amountIn: bigint, hops: HopCandidate[]): bigint {
   return amt
 }
 
+// Constant-product output is concave: if the fee-adjusted infinitesimal
+// exchange rate of a closed route is not above 1, no larger input can make
+// that route profitable. Reject it before the comparatively expensive
+// ternary sizer. This is exact integer ratio math, not a floating-point or
+// heuristic filter, so it cannot discard a profitable route under the same
+// reserve model used by cycleOut().
+function hasPositiveMarginalEdge(hops: HopCandidate[]): boolean {
+  let numerator = 1n
+  let denominator = 1n
+  for (const hop of hops) {
+    const feeFactor = 10_000n - hop.pool.effFeeBps
+    if (feeFactor <= 0n || hop.reserveIn <= 0n || hop.reserveOut <= 0n) return false
+    numerator *= hop.reserveOut * feeFactor
+    denominator *= hop.reserveIn * 10_000n
+  }
+  return numerator > denominator
+}
+
 // Generic ternary-search sizer -- works for any hop count, unlike a
 // closed-form 2-hop formula, so the same function sizes both 2-hop and
 // 3-hop cycles.
@@ -944,9 +1006,15 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
   let capped = false
 
   function tryOpp(hops: HopCandidate[]) {
-    const key = hops.map(h => h.pool.pool.address).join('>')
+    const key = hops.map(h => poolStateKey(h.pool.pool)).join('>')
     if (seen.has(key)) return
     seen.add(key)
+
+    if (!hasPositiveMarginalEdge(hops)) {
+      scanTelemetry.marginalPruned++
+      return
+    }
+    scanTelemetry.sizedRoutes++
 
     const poolCap = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
     const walletCap = (walletBalance * MAX_BALANCE_USAGE_BPS) / 10_000n
@@ -978,7 +1046,7 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
     for (const edge of graph.get(currentSym) ?? []) {
       // Never immediately reverse through the exact same pool -- that's a
       // guaranteed loss to fees, not a candidate worth sizing.
-      if (path.length > 0 && edge.pool.pool.address === path[path.length - 1].pool.pool.address) continue
+      if (path.length > 0 && poolStateKey(edge.pool.pool) === poolStateKey(path[path.length - 1].pool.pool)) continue
 
       if (edge.tokenOutSym === baseSym) {
         if (path.length > 0) tryOpp([...path, edge])
@@ -996,6 +1064,7 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
   }
 
   dfs(baseSym)
+  scanTelemetry.routeVisits += visits
   if (capped) console.warn(`[warn] cycle search from ${baseSym} hit its ${MAX_DFS_VISITS}-visit safety cap -- results may be incomplete this tick`)
 
   return opps
@@ -1027,7 +1096,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
   const startPath = usdgPath(baseSym)
 
   function tryOpp(hops: HopCandidate[], endSym: string) {
-    const key = hops.map(h => h.pool.pool.address).join('>') + '=>' + endSym
+    const key = hops.map(h => poolStateKey(h.pool.pool)).join('>') + '=>' + endSym
     if (seen.has(key)) return
     seen.add(key)
     if (startPath === null) return
@@ -1077,7 +1146,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
     if (++visits > MAX_DFS_VISITS) { capped = true; return }
 
     for (const edge of graph.get(currentSym) ?? []) {
-      if (path.length > 0 && edge.pool.pool.address === path[path.length - 1].pool.pool.address) continue
+      if (path.length > 0 && poolStateKey(edge.pool.pool) === poolStateKey(path[path.length - 1].pool.pool)) continue
       if (edge.tokenOutSym === baseSym) continue   // the cyclic case -- findArbs already covers it
 
       if ((SETTLEMENT_TOKENS as readonly string[]).includes(edge.tokenOutSym)) {
@@ -1250,20 +1319,22 @@ function computeMinGasReserveWei(gasPrice: bigint): bigint {
 async function fetchBalances(gasPrice: bigint): Promise<BalancesResult> {
   const distinctSymbols = Array.from(new Set(ARB_POOLS.flatMap(p => [p.token0, p.token1])))
   const balances: Record<string, bigint> = {}
-  await Promise.all(distinctSymbols.map(async sym => {
-    const t = TOKENS[sym as keyof typeof TOKENS]
-    try {
-      balances[sym] = await pub.readContract({ address: t.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address] }) as bigint
-    } catch { balances[sym] = 0n }
-  }))
-
-  let nativeEth = 0n
-  let availableEthForWrap = 0n
   const gasReserveWei = computeMinGasReserveWei(gasPrice)
-  try {
-    nativeEth = await pub.getBalance({ address: account.address })
-    availableEthForWrap = nativeEth > gasReserveWei ? nativeEth - gasReserveWei : 0n
-  } catch { /* leave at 0 if this read fails -- WETH search balance just won't include it this tick */ }
+  const balanceCalls = distinctSymbols.map(sym => ({
+    address: TOKENS[sym as keyof typeof TOKENS].address,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf' as const,
+    args: [account.address] as const,
+  }))
+  const [balanceResults, nativeEth] = await Promise.all([
+    chunkedMulticall(balanceCalls),
+    pub.getBalance({ address: account.address }).catch(() => 0n),
+  ])
+  for (let i = 0; i < distinctSymbols.length; i++) {
+    const result = balanceResults[i]
+    balances[distinctSymbols[i]] = result?.status === 'success' ? BigInt(result.result as bigint) : 0n
+  }
+  const availableEthForWrap = nativeEth > gasReserveWei ? nativeEth - gasReserveWei : 0n
 
   const searchBalances = { ...balances, WETH: (balances.WETH ?? 0n) + availableEthForWrap }
 
@@ -1321,28 +1392,29 @@ async function ensureWethBalance(needed: bigint, availableEthForWrap: bigint): P
 // against it), but the wallet should never REST holding it -- resting
 // capital belongs in USDG, native ETH, or AEON, so any WETH balance left
 // over once a tick's trading is done gets unwrapped back to ETH 1:1 (no
-// market swap, no slippage, no fee, just the unwrap gas). Called
-// unconditionally at the end of every tick, not just after a trade fires,
-// so it also catches WETH that arrived some other way (a manual deposit,
-// for instance).
-async function unwrapIdleWeth(): Promise<void> {
-  if (DRY_RUN) return
-  const wethBal = await pub.readContract({
+// market swap, no slippage, no fee, just the unwrap gas). Checked from the
+// opening batched balance snapshot every trading tick, so it also catches
+// WETH that arrived some other way (a manual deposit, for instance).
+async function unwrapIdleWeth(knownBalance?: bigint): Promise<boolean> {
+  if (DRY_RUN) return false
+  const wethBal = knownBalance ?? await pub.readContract({
     address: TOKENS.WETH.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
   // Pool-liquidity dust (0.01 token) is far too large for a wallet balance:
   // it left several dollars of WETH resting and prevented native-cycle
   // sizing. Only ignore genuine transfer dust here (default 0.000001 WETH).
   const unwrapDust = parseEther(process.env.WETH_UNWRAP_DUST_ETH ?? '0.000001')
-  if (wethBal < unwrapDust) return
+  if (wethBal < unwrapDust) return false
 
   console.log(`\n[${new Date().toISOString()}] Unwrapping idle WETH balance: ${formatEther(wethBal)} WETH → ETH`)
   try {
     await writeContractTracked({
       address: TOKENS.WETH.address, abi: WETH_ABI, functionName: 'withdraw', args: [wethBal],
     }, 'unwrap idle WETH')
+    return true
   } catch (err: any) {
     console.error(`   ⚠ Unwrap failed: ${err?.shortMessage ?? err?.message ?? err}`)
+    return false
   }
 }
 
@@ -1608,7 +1680,7 @@ interface RouteHealth {
 const routeHealth = new Map<string, RouteHealth>()
 
 function routeKey(hops: HopCandidate[]): string {
-  return hops.map(h => `${h.tokenInSym}>${h.pool.pool.address.toLowerCase()}>${h.tokenOutSym}`).join('|')
+  return hops.map(h => `${h.tokenInSym}>${poolStateKey(h.pool.pool)}>${h.tokenOutSym}`).join('|')
 }
 
 function decodeFailure(err: any): DecodedFailure {
@@ -1734,6 +1806,29 @@ function recordArb(arb: ExecutedArb) {
   }
 }
 
+const scanTelemetry = {
+  lastBlock: '',
+  mode: 'full' as 'full' | 'incremental' | 'gas-only' | 'heartbeat',
+  changedPools: 0,
+  stateReadMs: 0,
+  balanceReadMs: 0,
+  localSearchMs: 0,
+  exactQuoteMs: 0,
+  exactSelected: 0,
+  exactChecked: 0,
+  exactValid: 0,
+  approximateCandidates: 0,
+  routeVisits: 0,
+  marginalPruned: 0,
+  sizedRoutes: 0,
+  eventSkippedBlocks: 0,
+  fullScans: 0,
+  incrementalScans: 0,
+  gasOnlyScans: 0,
+  inactivePools: [] as string[],
+}
+let lastStatusSnapshot: any = null
+
 async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number, rawBalances: Record<string, bigint>, nativeEth: bigint, gasReserveWei: bigint, gasReserveHealthy: boolean, graph: Map<string, HopCandidate[]>) {
   const balances: Record<string, string> = { ETH: formatEther(nativeEth) }
   for (const [sym, bal] of Object.entries(rawBalances)) {
@@ -1746,6 +1841,7 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
     dryRun: DRY_RUN,
     intervalMs: INTERVAL_MS,
     tickMs,
+    scanTelemetry: { ...scanTelemetry },
     poolsMonitored: ARB_POOLS.length,
     rpcEndpointCount: RPC_URLS.length,
     gasReserve: {
@@ -1792,6 +1888,7 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
     recentErrors: recentErrors.slice(0, 5),
   }
 
+  lastStatusSnapshot = status
   fs.writeFileSync(statusPath, JSON.stringify(status, null, 2))
 
   // Throttled, fire-and-forget push to the shared store -- status changes
@@ -1806,6 +1903,26 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
 
 let lastRedisStatusSync = 0
 const REDIS_STATUS_SYNC_INTERVAL_MS = parseInt(process.env.REDIS_STATUS_SYNC_INTERVAL_MS ?? '15000')
+
+async function writeStatusHeartbeat(blockNumber: bigint): Promise<void> {
+  if (!lastStatusSnapshot) return
+  scanTelemetry.lastBlock = blockNumber.toString()
+  scanTelemetry.mode = 'heartbeat'
+  scanTelemetry.changedPools = 0
+  scanTelemetry.eventSkippedBlocks++
+  const status = {
+    ...lastStatusSnapshot,
+    updatedAt: new Date().toISOString(),
+    pendingTransaction,
+    scanTelemetry: { ...scanTelemetry },
+  }
+  lastStatusSnapshot = status
+  fs.writeFileSync(statusPath, JSON.stringify(status, null, 2))
+  if (isBotStoreConfigured() && Date.now() - lastRedisStatusSync >= REDIS_STATUS_SYNC_INTERVAL_MS) {
+    lastRedisStatusSync = Date.now()
+    writeBotStatus(status).catch(err => console.error(`[bot store error] failed to sync heartbeat: ${err?.message ?? err}`))
+  }
+}
 
 // ─── Execution ────────────────────────────────────────────────────────────────
 
@@ -3605,9 +3722,12 @@ function sortRankedCandidates(candidates: RankedInternalCandidate[]) {
 // executor. This removes false-positive WETH rows and prevents the fallback
 // loop from appearing to prefer AEON merely because those failures were the
 // only attempts recorded in Recent Activity.
-const EXACT_QUOTE_CANDIDATES_PER_TICK = 16
-const EXACT_QUOTE_CONCURRENCY = 4
-const MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION = 8
+const EXACT_QUOTE_CANDIDATES_PER_TICK = Math.max(4, Math.min(32, parseInt(process.env.EXACT_QUOTE_CANDIDATES ?? '12')))
+// Quote the normal twelve-candidate shortlist in one concurrent wave. Each
+// route still walks its own dependent hops in order, but independent routes
+// no longer wait behind three earlier four-route waves.
+const EXACT_QUOTE_CONCURRENCY = Math.max(2, Math.min(32, parseInt(process.env.EXACT_QUOTE_CONCURRENCY ?? '12')))
+const MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION = Math.min(6, EXACT_QUOTE_CANDIDATES_PER_TICK)
 
 async function revalidateCandidateExact(
   candidate: RankedInternalCandidate,
@@ -3659,6 +3779,7 @@ async function exactRankedShortlist(
   graph: Map<string, HopCandidate[]>,
   rankingGasPrice: bigint,
 ): Promise<RankedInternalCandidate[]> {
+  const quoteStartedAt = Date.now()
   const selected: RankedInternalCandidate[] = []
   const selectedSet = new Set<RankedInternalCandidate>()
   const add = (candidate: RankedInternalCandidate | undefined) => {
@@ -3679,26 +3800,51 @@ async function exactRankedShortlist(
   add(approximate.find(candidate => candidate.kind === 'settlement'))
   for (const candidate of approximate) add(candidate)
 
+  scanTelemetry.exactSelected = selected.length
+  scanTelemetry.exactChecked = 0
+  scanTelemetry.exactValid = 0
   const valid: RankedInternalCandidate[] = []
   for (let i = 0; i < selected.length; i += EXACT_QUOTE_CONCURRENCY) {
     const batch = selected.slice(i, i + EXACT_QUOTE_CONCURRENCY)
     const results = await Promise.all(batch.map(candidate => revalidateCandidateExact(candidate, graph, rankingGasPrice)))
     for (let j = 0; j < batch.length; j++) if (results[j]) valid.push(batch[j])
     const checked = i + batch.length
+    scanTelemetry.exactChecked = checked
+    scanTelemetry.exactValid = valid.length
     if (
       checked >= MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION
         && valid.some(candidate => (candidate.opp.expectedNetUsd ?? -Infinity) > 0)
     ) break
   }
   sortRankedCandidates(valid)
+  scanTelemetry.exactQuoteMs = Date.now() - quoteStartedAt
   return valid
 }
 
 // Bounds how many already-exact candidates are attempted per tick.
 const EXECUTION_CANDIDATES_PER_TICK = 10
 
-async function tick() {
+async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
   const t0 = Date.now()
+  scanTelemetry.lastBlock = observedBlock?.toString() ?? scanTelemetry.lastBlock
+  scanTelemetry.mode = changedPoolKeys
+    ? (changedPoolKeys.size > 0 ? 'incremental' : 'gas-only')
+    : 'full'
+  scanTelemetry.changedPools = changedPoolKeys?.size ?? ARB_POOLS.length
+  scanTelemetry.stateReadMs = 0
+  scanTelemetry.balanceReadMs = 0
+  scanTelemetry.localSearchMs = 0
+  scanTelemetry.exactQuoteMs = 0
+  scanTelemetry.exactSelected = 0
+  scanTelemetry.exactChecked = 0
+  scanTelemetry.exactValid = 0
+  scanTelemetry.approximateCandidates = 0
+  scanTelemetry.routeVisits = 0
+  scanTelemetry.marginalPruned = 0
+  scanTelemetry.sizedRoutes = 0
+  if (!changedPoolKeys) scanTelemetry.fullScans++
+  else if (changedPoolKeys.size > 0) scanTelemetry.incrementalScans++
+  else scanTelemetry.gasOnlyScans++
 
   try {
     cachedGasPrice = await pub.getGasPrice()
@@ -3720,6 +3866,7 @@ async function tick() {
       const counts = await refreshPoolDiscovery()
       const added = ARB_POOLS.length - before
       if (added > 0) {
+        poolStateCacheReady = false
         console.log(`\n[${new Date().toISOString()}] Pool discovery refresh: +${added} new pools (now ${ARB_POOLS.length} monitored) -- uniV2:${counts.uniswapV2} uniV3:${counts.uniswapV3} uniV4:${counts.uniswapV4} CL:${counts.cl} DLMM:${counts.dlmm}`)
       }
     } catch (err: any) {
@@ -3730,8 +3877,13 @@ async function tick() {
     }
   }
   let states: PoolState[]
+  const stateReadStartedAt = Date.now()
   try {
-    states = await fetchAllStates()
+    states = await fetchAllStates(changedPoolKeys)
+    scanTelemetry.stateReadMs = Date.now() - stateReadStartedAt
+    scanTelemetry.inactivePools = ARB_POOLS
+      .filter(pool => !poolStateCache.has(poolStateKey(pool)))
+      .map(pool => pool.name)
   } catch (err: any) {
     const message = err?.message ?? String(err)
     console.error(`[RPC error] ${message}`)
@@ -3740,29 +3892,54 @@ async function tick() {
     return
   }
 
-  const rankingGasPrice = await pub.getGasPrice()
+  // Reuse the opening-tick gas price. Fetching it again here added another
+  // RPC round trip without improving freshness inside the same block.
+  const rankingGasPrice = cachedGasPrice ?? await pub.getGasPrice()
   const graph = buildGraph(states)
-  // Migrate any old resting WETH back to native ETH before sizing. Native
-  // WETH cycles now wrap and unwrap inside one transaction, so this should
-  // normally be a one-time cleanup rather than a transaction every tick.
-  await unwrapIdleWeth()
+  const balanceReadStartedAt = Date.now()
   let balanceSnapshot = await fetchBalances(rankingGasPrice)
+  // Reuse the batched balance snapshot rather than issuing a separate WETH
+  // balance RPC every block. Refresh balances only if an unwrap actually ran.
+  if (await unwrapIdleWeth(balanceSnapshot.balances.WETH ?? 0n)) {
+    balanceSnapshot = await fetchBalances(rankingGasPrice)
+  }
   if (!balanceSnapshot.gasReserveHealthy) {
     const refilled = await ensureNativeGasReserve(balanceSnapshot.nativeEth, balanceSnapshot.gasReserveWei, rankingGasPrice, graph)
     if (refilled) balanceSnapshot = await fetchBalances(rankingGasPrice)
   }
+  scanTelemetry.balanceReadMs = Date.now() - balanceReadStartedAt
   const { balances, searchBalances, nativeEth, availableEthForWrap, gasReserveWei, gasReserveHealthy } = balanceSnapshot
   const bases = candidateBaseTokens(searchBalances)
+  const localSearchStartedAt = Date.now()
   // Signed, NOT floored at zero -- this feeds the dashboard's "net est."
   // figure too, and a trade that doesn't clear gas needs to show as
   // negative there, not as a misleading "$0.0000" sitting next to a
   // positive-looking gross profit number.
+  // There are normally hundreds of approximate routes but only three
+  // settlement currencies and a handful of hop counts. Cache the identical
+  // spot-conversion work instead of running a BFS twice for every route.
+  const usdgConversionPaths = new Map<string, HopCandidate[] | null>()
+  const usdgPathFor = (tokenSym: string): HopCandidate[] | null => {
+    if (!usdgConversionPaths.has(tokenSym)) {
+      usdgConversionPaths.set(tokenSym, tokenSym === 'USDG' ? [] : findConversionPath(graph, tokenSym, 'USDG'))
+    }
+    return usdgConversionPaths.get(tokenSym)!
+  }
+  const valueInUsdgCached = (tokenSym: string, amount: bigint): bigint => {
+    const path = usdgPathFor(tokenSym)
+    return path ? convertSpot(amount, path) : 0n
+  }
+  const gasUsdgByHopCount = new Map<number, bigint>()
   const gasUsdgFor = (opp: ArbOpp) => {
+    const cached = gasUsdgByHopCount.get(opp.hops.length)
+    if (cached !== undefined) return cached
     const gasUnits = EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * BigInt(opp.hops.length)
     const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
-    return valueInUsdg('WETH', gasWei, graph)
+    const gasUsdg = valueInUsdgCached('WETH', gasWei)
+    gasUsdgByHopCount.set(opp.hops.length, gasUsdg)
+    return gasUsdg
   }
-  const expectedNetUsdg = (opp: ArbOpp) => valueInUsdg(opp.tokenIn.symbol, opp.profitRaw, graph) - gasUsdgFor(opp)
+  const expectedNetUsdg = (opp: ArbOpp) => valueInUsdgCached(opp.tokenIn.symbol, opp.profitRaw) - gasUsdgFor(opp)
   const opps = bases.flatMap(baseSym => findArbs(graph, baseSym, searchBalances[baseSym] ?? 0n))
   for (const opp of opps) {
     const netUsd = Number(formatUnits(expectedNetUsdg(opp), TOKENS.USDG.decimals))
@@ -3790,7 +3967,9 @@ async function tick() {
     ...opps.map(opp => ({ kind: 'cycle' as const, opp })),
     ...settlementOpps.map(opp => ({ kind: 'settlement' as const, opp })),
   ]
+  scanTelemetry.approximateCandidates = approximateCandidates.length
   sortRankedCandidates(approximateCandidates)
+  scanTelemetry.localSearchMs = Date.now() - localSearchStartedAt
   const rankedCandidates = await exactRankedShortlist(approximateCandidates, graph, rankingGasPrice)
   outcomeCounters.detected += rankedCandidates.length
   const tickMs = Date.now() - t0
@@ -3831,7 +4010,7 @@ async function tick() {
       if ((opp.expectedNetUsd ?? -Infinity) <= 0 || opp.profitPct < MIN_PROFIT_PCT) continue
       if (routeCooldownRemaining(opp.hops) > 0) continue
       const inSym = opp.tokenIn.symbol
-      const poolsUsed = opp.hops.map(h => h.pool.pool.address.toLowerCase())
+      const poolsUsed = opp.hops.map(h => poolStateKey(h.pool.pool))
       if (committedInputs.has(inSym) || poolsUsed.some(p => touchedPools.has(p))) continue
       const result = await executeArb(candidate.opp, graph, availableEthForWrap)
       if (result === 'attempted') {
@@ -3939,6 +4118,66 @@ async function refreshPoolDiscovery(): Promise<DiscoveryCounts> {
 
 let lastPoolRefresh = 0
 
+let eventWatchPoolCount = -1
+let directEventPoolKeys = new Map<string, string[]>()
+let v4EventPoolKeys = new Map<string, string>()
+let eventWatchAddresses: `0x${string}`[] = []
+let lastEventScanWarning = 0
+
+function rebuildEventWatchIndex() {
+  if (eventWatchPoolCount === ARB_POOLS.length) return
+  directEventPoolKeys = new Map()
+  v4EventPoolKeys = new Map()
+  for (const pool of ARB_POOLS) {
+    const key = poolStateKey(pool)
+    if (pool.kind === 'uniV4' && pool.v4PoolId) {
+      v4EventPoolKeys.set(pool.v4PoolId.toLowerCase(), key)
+      continue
+    }
+    const address = pool.address.toLowerCase()
+    const keys = directEventPoolKeys.get(address) ?? []
+    keys.push(key)
+    directEventPoolKeys.set(address, keys)
+  }
+  eventWatchAddresses = [
+    ...Array.from(directEventPoolKeys.keys()).map(address => getAddress(address)),
+    UNISWAP_V4.poolManager,
+  ]
+  eventWatchPoolCount = ARB_POOLS.length
+}
+
+// Returns null when the log query itself is unavailable; callers respond by
+// doing a conservative full refresh rather than trusting incomplete state.
+async function detectChangedPoolKeys(fromBlock: bigint, toBlock: bigint): Promise<Set<string> | null> {
+  rebuildEventWatchIndex()
+  try {
+    const logs = await pub.getLogs({
+      address: eventWatchAddresses as any,
+      fromBlock,
+      toBlock,
+    } as any)
+    const changed = new Set<string>()
+    const poolManager = UNISWAP_V4.poolManager.toLowerCase()
+    for (const log of logs as any[]) {
+      const address = String(log.address ?? '').toLowerCase()
+      if (address === poolManager) {
+        const id = String(log.topics?.[1] ?? '').toLowerCase()
+        const key = v4EventPoolKeys.get(id)
+        if (key) changed.add(key)
+        continue
+      }
+      for (const key of directEventPoolKeys.get(address) ?? []) changed.add(key)
+    }
+    return changed
+  } catch (err: any) {
+    if (Date.now() - lastEventScanWarning > 30_000) {
+      lastEventScanWarning = Date.now()
+      console.warn(`[event scan fallback] ${err?.shortMessage ?? err?.message ?? err} -- performing full state refresh`)
+    }
+    return null
+  }
+}
+
 async function main() {
   let discoveryCounts: DiscoveryCounts | null = null
   let retryDelayMs = 1000
@@ -3980,6 +4219,8 @@ async function main() {
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Block-aware scanning: enabled (at most one full scan per observed block)`)
+  console.log(`  Event-driven pool refresh: ${EVENT_DRIVEN_SCANNING ? `enabled (${FULL_STATE_REFRESH_MS}ms safety refresh, ${GAS_ONLY_RECHECK_MS}ms gas recheck)` : 'disabled'}`)
+  console.log(`  Exact quote wave: up to ${EXACT_QUOTE_CANDIDATES_PER_TICK} candidates / ${EXACT_QUOTE_CONCURRENCY} concurrent`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
   console.log(`  Cross-venue scan: ${ENABLE_CROSS_VENUE ? 'enabled' : 'disabled'}`)
   console.log(`  Non-atomic cross-venue execution: ${ENABLE_CROSS_VENUE && !ATOMIC_ONLY ? 'enabled' : 'disabled'}`)
@@ -3989,6 +4230,8 @@ async function main() {
   console.log()
 
   let lastScannedBlock: bigint | null = null
+  let lastFullStateRefresh = 0
+  let lastGasOnlyRecheck = 0
   while (true) {
     try {
       const blockNumber = await pub.getBlockNumber()
@@ -3996,8 +4239,38 @@ async function main() {
         await new Promise(r => setTimeout(r, INTERVAL_MS))
         continue
       }
+      const previousBlock = lastScannedBlock
       lastScannedBlock = blockNumber
-      await tick().catch(e => console.error('[tick error]', e))
+      const now = Date.now()
+      const forceFull = !EVENT_DRIVEN_SCANNING
+        || !poolStateCacheReady
+        || now - lastFullStateRefresh >= FULL_STATE_REFRESH_MS
+
+      if (forceFull) {
+        lastFullStateRefresh = now
+        lastGasOnlyRecheck = now
+        await tick(undefined, blockNumber).catch(e => console.error('[tick error]', e))
+      } else {
+        // A shallow reorg can lower the observed head. Query the replacement
+        // block directly instead of constructing an invalid inverted range.
+        const fromBlock = previousBlock === null || blockNumber <= previousBlock
+          ? blockNumber
+          : previousBlock + 1n
+        const changed = await detectChangedPoolKeys(fromBlock, blockNumber)
+        if (changed === null) {
+          lastFullStateRefresh = now
+          lastGasOnlyRecheck = now
+          await tick(undefined, blockNumber).catch(e => console.error('[tick error]', e))
+        } else if (changed.size > 0) {
+          lastGasOnlyRecheck = now
+          await tick(changed, blockNumber).catch(e => console.error('[tick error]', e))
+        } else if (now - lastGasOnlyRecheck >= GAS_ONLY_RECHECK_MS) {
+          lastGasOnlyRecheck = now
+          await tick(changed, blockNumber).catch(e => console.error('[tick error]', e))
+        } else {
+          await writeStatusHeartbeat(blockNumber)
+        }
+      }
       // Do not add a fixed delay after a slow scan or transaction. If a new
       // block arrived while it was running, rescan immediately; otherwise
       // the same-block branch above applies the configured poll interval.
