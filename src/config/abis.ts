@@ -1008,6 +1008,20 @@ export const VOTER_ABI = [
     ],
     outputs: [],
   },
+  // AeonVoterV3 only -- true once `owner` has already been credited the
+  // Furnace bonus for `epoch` (via any of their veNFTs). Prevents the old
+  // multi-veNFT double-count exploit; the frontend uses this to show
+  // whether the Furnace Bonus preview is still real or already spent.
+  {
+    name: 'furnacePowerUsed',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: '', type: 'uint256' },
+      { name: '', type: 'address' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
   {
     name: 'reset',
     type: 'function',

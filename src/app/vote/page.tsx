@@ -101,7 +101,22 @@ export default function VotePage() {
     args: address ? [address] : undefined,
     query: { enabled: !!address, refetchInterval: 15000 },
   })
-  const furnaceWeight = (furnaceWeightRaw as bigint | undefined) ?? 0n
+  const rawFurnaceWeight = (furnaceWeightRaw as bigint | undefined) ?? 0n
+
+  // AeonVoterV3 fix: the Furnace bonus only ever applies ONCE per wallet per
+  // epoch, no matter which (or how many) owned veNFTs you vote with. The
+  // read above is just the wallet's raw cumulative burn -- shown as-is it
+  // looks identical for every NFT in the picker, which reads exactly like
+  // "they all have full furnace power" even though the contract itself
+  // would only actually grant it once. This checks whether it's already
+  // been spent this epoch so the preview reflects reality.
+  const CURRENT_EPOCH_SEC = BigInt(Math.floor(Date.now() / 1000 / 604800) * 604800)
+  const { data: furnacePowerAlreadyUsed } = useReadContract({
+    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'furnacePowerUsed',
+    args: address ? [CURRENT_EPOCH_SEC, address] : undefined,
+    query: { enabled: !!address, refetchInterval: 15000 },
+  })
+  const furnaceWeight = furnacePowerAlreadyUsed ? 0n : rawFurnaceWeight
 
   const { owned: ownedTokenIds, loading: loadingOwned } = useOwnedVeNFTs(address)
 
@@ -547,11 +562,13 @@ export default function VotePage() {
                         {votingPower !== undefined ? parseFloat(formatUnits(votingPower, 18)).toFixed(4) : '—'} veAEON
                       </span>
                     </div>
-                    {furnaceWeight > 0n && (
+                    {rawFurnaceWeight > 0n && (
                       <div className="flex justify-between text-xs">
                         <span className="text-text-muted flex items-center gap-1"><Flame size={11} className="text-orange-400" /> Furnace Bonus</span>
-                        <span className="font-mono text-orange-400">
-                          +{parseFloat(formatUnits(furnaceWeight, 18)).toFixed(4)} veAEON
+                        <span className={clsx('font-mono', furnacePowerAlreadyUsed ? 'text-text-muted' : 'text-orange-400')}>
+                          {furnacePowerAlreadyUsed
+                            ? 'Used this epoch (0.0000)'
+                            : `+${parseFloat(formatUnits(furnaceWeight, 18)).toFixed(4)} veAEON`}
                         </span>
                       </div>
                     )}
