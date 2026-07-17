@@ -1226,10 +1226,12 @@ async function ensureWethBalance(needed: bigint, availableEthForWrap: bigint): P
 
   console.log(`   → wrapping ${formatEther(shortfall)} ETH into WETH to cover this trade...`)
   try {
-    const hWrap = await wal.writeContract({
+    // Route through writeContractTracked so the wrap uses the SAME monotonic
+    // nonce discipline as every other tx -- the raw path here was the source
+    // of the "nonce lower than current" failures that stopped WETH cycles.
+    await writeContractTracked({
       address: TOKENS.WETH.address, abi: WETH_ABI, functionName: 'deposit', value: shortfall,
-    })
-    await pub.waitForTransactionReceipt({ hash: hWrap })
+    }, 'wrap ETH->WETH')
     current = await pub.readContract({
       address: TOKENS.WETH.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
     }) as bigint
@@ -1731,11 +1733,36 @@ const REDIS_STATUS_SYNC_INTERVAL_MS = parseInt(process.env.REDIS_STATUS_SYNC_INT
 
 type ExecResult = 'skipped' | 'attempted'
 
+// Monotonic nonce guard. With multiple RPC endpoints behind failover, a raw
+// getTransactionCount can land on an endpoint lagging behind our own
+// just-sent txs and hand back a nonce we already used -> "nonce lower than
+// the current nonce", which was silently killing every ETH->WETH wrap and
+// so starving all WETH-funded cycles. This keeps a high-water mark so we
+// never reissue a nonce, while still jumping forward if the chain's pending
+// count ever exceeds ours. Reset to -1 on a nonce error to force a clean
+// re-sync from the RPC on the next attempt.
+let nonceHighWater = -1
+async function acquireNonce(): Promise<number> {
+  const rpcPending = await pub.getTransactionCount({ address: account.address, blockTag: 'pending' })
+  const n = rpcPending > nonceHighWater ? rpcPending : nonceHighWater + 1
+  nonceHighWater = n
+  return n
+}
+function isNonceError(err: any): boolean {
+  return String(err?.shortMessage ?? err?.message ?? err).toLowerCase().includes('nonce')
+}
+
 async function writeContractTracked(args: any, label: string): Promise<{ hash: `0x${string}`; receipt: any }> {
-  const nonce = await pub.getTransactionCount({ address: account.address, blockTag: 'pending' })
+  const nonce = await acquireNonce()
   const currentGasPrice = await pub.getGasPrice()
   const initialMaxFeePerGas = (currentGasPrice * TX_FEE_HEADROOM_BPS) / 10_000n
-  let hash = await wal.writeContract({ ...args, nonce, maxFeePerGas: initialMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
+  let hash: `0x${string}`
+  try {
+    hash = await wal.writeContract({ ...args, nonce, maxFeePerGas: initialMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
+  } catch (sendErr: any) {
+    if (isNonceError(sendErr)) nonceHighWater = -1 // desynced -- re-read fresh next time
+    throw sendErr
+  }
   const originalHash = hash
   pendingTransaction = { hash, label, nonce, submittedAt: new Date().toISOString(), replacements: 0 }
   publishPendingTransaction()
@@ -3468,16 +3495,29 @@ async function tick() {
     for (const { opp: o } of rankedCandidates.slice(0, 5)) {
       console.log(`  ${o.label}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenIn.decimals)} ${o.tokenIn.symbol})`)
     }
+    // Fire EVERY net-positive opportunity this tick that is independent of the
+    // ones already fired -- i.e. shares no pool (so reserves it read are still
+    // valid) and no input token (so the balance it was sized from isn't already
+    // committed). Previously the bot stopped after the first attempt and
+    // rescanned, leaving disjoint, independently-profitable trades on the table
+    // every tick. Each attempt is still simulated first, so a stale one costs
+    // zero gas -- this only adds fills, never risk.
+    const touchedPools = new Set<string>()
+    const committedInputs = new Set<string>()
     for (const candidate of rankedCandidates.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
       const { opp } = candidate
       if ((opp.expectedNetUsd ?? -Infinity) <= 0 || opp.profitPct < MIN_PROFIT_PCT) continue
       if (routeCooldownRemaining(opp.hops) > 0) continue
+      const inSym = opp.tokenIn.symbol
+      const poolsUsed = opp.hops.map(h => h.pool.pool.address.toLowerCase())
+      if (committedInputs.has(inSym) || poolsUsed.some(p => touchedPools.has(p))) continue
       const result = candidate.kind === 'cycle'
         ? await executeArb(candidate.opp, graph, availableEthForWrap)
         : await executeSettlementSwap(candidate.opp, graph, availableEthForWrap)
       if (result === 'attempted') {
         anyAttempted = true
-        break
+        committedInputs.add(inSym)
+        for (const p of poolsUsed) touchedPools.add(p)
       }
     }
   }
