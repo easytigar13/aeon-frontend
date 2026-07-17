@@ -12,6 +12,7 @@ interface Trade {
   tokenIn: string
   amountIn: string
   profit: string
+  profitToken?: string
   profitPct: number
   grossProfit?: string
   gasCost?: string
@@ -21,6 +22,11 @@ interface Trade {
   error?: string
   route?: 'internal' | 'openocean' | '1inch'
   venues?: string
+}
+
+function isClosedTrade(pair: string) {
+  const tokens = pair.split('→')
+  return tokens.length > 1 && tokens[0] === tokens[tokens.length - 1]
 }
 
 type StatusFilter = 'all' | 'success' | 'failed' | 'dry-run'
@@ -148,11 +154,19 @@ function BotTradesPageInner() {
                     </td>
                     <td className="px-4 py-3 text-right text-text-secondary font-mono whitespace-nowrap">{t.amountIn} {t.tokenIn}</td>
                     <td className={clsx('px-4 py-3 text-right font-mono whitespace-nowrap', t.status === 'success' ? 'text-emerald-400' : 'text-text-muted')}>
-                      {t.status === 'success' ? `+${parseFloat(t.profit).toFixed(6)} ${t.tokenIn}` : '—'}
+                      {t.status === 'success'
+                        ? isClosedTrade(t.pair)
+                          ? `+${parseFloat(t.profit).toFixed(6)} ${t.profitToken ?? t.tokenIn}`
+                          : 'P&L unverified'
+                        : '—'}
                     </td>
-                    <td className="px-4 py-3 text-right text-text-secondary font-mono">{t.profitPct.toFixed(3)}%</td>
+                    <td className="px-4 py-3 text-right text-text-secondary font-mono">{isClosedTrade(t.pair) ? `${t.profitPct.toFixed(3)}%` : '—'}</td>
                     <td className="px-4 py-3 text-right text-text-muted font-mono whitespace-nowrap">
-                      {t.gasCost ? `${parseFloat(t.gasCost).toFixed(6)} ${t.tokenIn}` : '—'}
+                      {t.gasCostEth
+                        ? `${parseFloat(t.gasCostEth).toFixed(6)} ETH`
+                        : t.gasCost
+                          ? `${parseFloat(t.gasCost).toFixed(6)} ${t.profitToken ?? t.tokenIn}`
+                          : '—'}
                     </td>
                     <td className="px-4 py-3">
                       <span className={clsx(

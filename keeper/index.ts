@@ -127,11 +127,12 @@ const TX_FEE_HEADROOM_BPS = BigInt(process.env.TX_FEE_HEADROOM_BPS ?? '20000')
 const AGGREGATOR_SCAN_INTERVAL_MS = parseInt(process.env.AGGREGATOR_SCAN_INTERVAL_MS ?? '30000')
 const AGGREGATOR_SLIPPAGE_PCT = parseFloat(process.env.AGGREGATOR_SLIPPAGE_PCT ?? '0.5')
 const ENABLE_CROSS_VENUE = process.env.ENABLE_CROSS_VENUE === 'true'
-// Settlement routes may start in AEON/USDG/WETH and finish in any of those
-// three assets. They still execute every hop atomically and enforce a live
-// USDG-equivalent output floor above input value + gas. Set true to restore
-// the stricter same-token-only mode.
-const SAME_TOKEN_ONLY = process.env.SAME_TOKEN_ONLY === 'true'
+// Every executable arbitrage must close in exactly the asset it started in.
+// This makes the profit invariant exact: amountOut must exceed amountIn plus
+// the gas floor in that same token. Do not make this depend on deployment
+// configuration; a missing/stale environment variable must never silently
+// re-enable cross-settlement valuation.
+const SAME_TOKEN_ONLY = true
 const ATOMIC_ONLY = process.env.ATOMIC_ONLY !== 'false'
 
 // Re-run idempotent venue discovery so newly created pools and pools that
@@ -2416,6 +2417,10 @@ const SETTLEMENT_SWAP_GAS_PER_HOP = EXEC_ARB_GAS_PER_HOP
 async function executeSettlementSwap(
   opp: SettlementOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint,
 ): Promise<ExecResult> {
+  // Kept only so old records/types remain readable. Cross-settlement execution
+  // is intentionally disabled: unlike a closed cycle, its P&L depends on a
+  // separate conversion price and cannot be enforced as an exact token gain.
+  if (SAME_TOKEN_ONLY) return 'skipped'
   if (Date.now() < pausedUntil) return 'skipped'
   const { tokenIn, tokenOut, hops: hopCandidates, amountIn, label } = opp
   if (routeCooldownRemaining(hopCandidates) > 0) return 'skipped'
@@ -3818,14 +3823,17 @@ async function tick() {
     const committedInputs = new Set<string>()
     for (const candidate of rankedCandidates.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
       const { opp } = candidate
+      const finalToken = opp.hops.at(-1)?.tokenOutSym
+      if (candidate.kind !== 'cycle' || finalToken !== opp.tokenIn.symbol) {
+        console.error(`   BLOCKED non-closing route: ${opp.label}`)
+        continue
+      }
       if ((opp.expectedNetUsd ?? -Infinity) <= 0 || opp.profitPct < MIN_PROFIT_PCT) continue
       if (routeCooldownRemaining(opp.hops) > 0) continue
       const inSym = opp.tokenIn.symbol
       const poolsUsed = opp.hops.map(h => h.pool.pool.address.toLowerCase())
       if (committedInputs.has(inSym) || poolsUsed.some(p => touchedPools.has(p))) continue
-      const result = candidate.kind === 'cycle'
-        ? await executeArb(candidate.opp, graph, availableEthForWrap)
-        : await executeSettlementSwap(candidate.opp, graph, availableEthForWrap)
+      const result = await executeArb(candidate.opp, graph, availableEthForWrap)
       if (result === 'attempted') {
         anyAttempted = true
         committedInputs.add(inSym)

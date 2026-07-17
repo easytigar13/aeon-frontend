@@ -27,6 +27,7 @@ interface ExecutedArb {
   tokenIn: string
   amountIn: string
   profit: string
+  profitToken?: string
   profitPct: number
   grossProfit?: string
   gasCost?: string
@@ -39,6 +40,11 @@ interface ExecutedArb {
   quotedProfit?: string
   realizedProfitUsd?: number
   quoteVariancePct?: number
+}
+
+function isClosedTrade(pair: string) {
+  const tokens = pair.split('→')
+  return tokens.length > 1 && tokens[0] === tokens[tokens.length - 1]
 }
 
 interface BotStatus {
@@ -353,7 +359,11 @@ export default function BotPage() {
                       </div>
                       <span className="text-text-muted text-xs">{new Date(a.time).toLocaleTimeString()}</span>
                       <span className={a.status === 'success' ? 'text-emerald-400 font-mono' : 'text-text-muted font-mono'}>
-                        {a.status === 'success' ? `net +${parseFloat(a.profit).toFixed(6)} ${a.tokenIn}${a.realizedProfitUsd != null ? ` ($${a.realizedProfitUsd.toFixed(4)})` : ''}${a.gasCost ? ` · gas ${parseFloat(a.gasCost).toFixed(6)}` : ''}${a.quoteVariancePct != null ? ` · quote ${a.quoteVariancePct >= 0 ? '+' : ''}${a.quoteVariancePct.toFixed(2)}%` : ''}` : a.status}
+                        {a.status === 'success'
+                          ? isClosedTrade(a.pair)
+                            ? `net +${parseFloat(a.profit).toFixed(6)} ${a.profitToken ?? a.tokenIn}${a.realizedProfitUsd != null ? ` ($${a.realizedProfitUsd.toFixed(4)})` : ''}${a.gasCost ? ` · gas ${parseFloat(a.gasCost).toFixed(6)} ${a.profitToken ?? a.tokenIn}` : ''}${a.quoteVariancePct != null ? ` · quote ${a.quoteVariancePct >= 0 ? '+' : ''}${a.quoteVariancePct.toFixed(2)}%` : ''}`
+                            : `legacy cross-settlement · P&L unverified${a.gasCostEth ? ` · gas ${parseFloat(a.gasCostEth).toFixed(6)} ETH` : ''}`
+                          : a.status}
                       </span>
                     </div>
                   ))}
