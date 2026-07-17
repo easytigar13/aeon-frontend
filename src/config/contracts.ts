@@ -158,6 +158,9 @@ export const CONTRACTS = {
   // covering tax tokens and any other quote/settlement mismatch, not just
   // the one already-observed case.
   UniversalRouter:     '0x63af965c901230667d3ff8e0a9dc0959563f5aa2' as `0x${string}`,
+  // Wraps native ETH, executes a WETH-settled UniversalRouter cycle, then
+  // unwraps the result back to ETH in the same atomic transaction.
+  NativeArbExecutor:   '0xdd550685837eaefb94675f3927a8f8a8f4f53464' as `0x${string}`,
   // Deployed 2026-07-05: backs the Tower Defense mini-game. 50 AEON entry fee
   // per session feeds a self-funded prize pool; claimReward() only pays out
   // with a signature from trustedSigner (a dedicated key held by

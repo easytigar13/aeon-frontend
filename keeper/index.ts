@@ -74,7 +74,7 @@ import * as dotenv from 'dotenv'
 import * as fs from 'fs'
 import { fileURLToPath } from 'url'
 import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES, UNISWAP_POOLS } from '../src/config/contracts'
-import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
+import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, AEON_NATIVE_ARB_EXECUTOR_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
 import { writeBotStatus, appendTrade, isBotStoreConfigured } from '../src/lib/botStore'
@@ -1269,9 +1269,11 @@ async function unwrapIdleWeth(): Promise<void> {
   const wethBal = await pub.readContract({
     address: TOKENS.WETH.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
-  // Unwrap gas is a fixed cost regardless of amount -- skip true dust
-  // rather than spend real gas converting a negligible remainder.
-  if (wethBal < minRawUnits(TOKENS.WETH.decimals)) return
+  // Pool-liquidity dust (0.01 token) is far too large for a wallet balance:
+  // it left several dollars of WETH resting and prevented native-cycle
+  // sizing. Only ignore genuine transfer dust here (default 0.000001 WETH).
+  const unwrapDust = parseEther(process.env.WETH_UNWRAP_DUST_ETH ?? '0.000001')
+  if (wethBal < unwrapDust) return
 
   console.log(`\n[${new Date().toISOString()}] Unwrapping idle WETH balance: ${formatEther(wethBal)} WETH → ETH`)
   try {
@@ -1932,11 +1934,15 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
 
   console.log(`\n🔄 ARB (CL/DLMM route, via UniversalRouter): ${pairLabel}  profit ${profitPct.toFixed(3)}%  in ${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`)
 
-  const allowance = await pub.readContract({
+  // WETH-settled cycles use native ETH directly: the executor wraps, routes,
+  // unwraps and returns ETH in one transaction. Fall back to the ERC20 path
+  // only when this tick lacks enough ETH above the protected gas reserve.
+  const useNativeCycle = tokenIn.symbol === 'WETH' && availableEthForWrap >= amountIn
+  const allowance = useNativeCycle ? amountIn : await pub.readContract({
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'allowance',
     args: [account.address, CONTRACTS.UniversalRouter],
   }) as bigint
-  const needsApproval = allowance < amountIn
+  const needsApproval = !useNativeCycle && allowance < amountIn
   const gasFloor = await gasCostFloorInToken(tokenIn.symbol, tokenIn.address, hopCandidates.length, graph, needsApproval)
   if (gasFloor === null) {
     console.warn(`   ⚠ No live WETH price path for ${tokenIn.symbol} -- can't verify profit clears gas cost, skipping for safety`)
@@ -1961,13 +1967,13 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     return 'attempted'
   }
 
-  let balIn = await pub.readContract({
+  let balIn = useNativeCycle ? await pub.getBalance({ address: account.address }) : await pub.readContract({
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
-  if (balIn < amountIn && tokenIn.symbol === 'WETH') {
+  if (!useNativeCycle && balIn < amountIn && tokenIn.symbol === 'WETH') {
     balIn = await ensureWethBalance(amountIn, availableEthForWrap)
   }
-  if (balIn < amountIn) {
+  if (!useNativeCycle && balIn < amountIn) {
     balIn = await ensureBaseTokenFunded(tokenIn.symbol as keyof typeof TOKENS, amountIn, graph)
   }
   if (balIn < amountIn) {
@@ -2004,11 +2010,17 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
 
     failureStage = 'gas_estimate'
     const gasPrice = await pub.getGasPrice()
-    const executionGas = await pub.estimateContractGas({
-      account: account.address,
-      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-      args: [hops, amountIn, amountOutMin, account.address, deadline],
-    })
+    const executionGas = useNativeCycle
+      ? await pub.estimateContractGas({
+          account: account.address,
+          address: CONTRACTS.NativeArbExecutor, abi: AEON_NATIVE_ARB_EXECUTOR_ABI, functionName: 'executeNativeCycle',
+          args: [hops, amountOutMin, account.address, deadline], value: amountIn,
+        })
+      : await pub.estimateContractGas({
+          account: account.address,
+          address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+          args: [hops, amountIn, amountOutMin, account.address, deadline],
+        })
     const bufferedGasWei = approvalGasWei + (executionGas * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
     const exactGasInToken = weiToToken(tokenIn.symbol, bufferedGasWei, graph)
     if (exactGasInToken === null) throw new Error(`cannot convert exact gas cost into ${tokenIn.symbol}`)
@@ -2020,31 +2032,47 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
       return 'attempted'
     }
 
-    console.log('   → simulate swapExactTokensForTokens...')
+    console.log(useNativeCycle ? '   → simulate atomic ETH→WETH→route→WETH→ETH...' : '   → simulate swapExactTokensForTokens...')
     failureStage = 'simulation'
-    const simulation = await pub.simulateContract({
-      account,
-      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-      args: [hops, amountIn, amountOutMin, account.address, deadline],
-    })
+    const simulation = useNativeCycle
+      ? await pub.simulateContract({
+          account,
+          address: CONTRACTS.NativeArbExecutor, abi: AEON_NATIVE_ARB_EXECUTOR_ABI, functionName: 'executeNativeCycle',
+          args: [hops, amountOutMin, account.address, deadline], value: amountIn,
+        })
+      : await pub.simulateContract({
+          account,
+          address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+          args: [hops, amountIn, amountOutMin, account.address, deadline],
+        })
     if (typeof simulation.result === 'bigint' && simulation.result < amountOutMin) {
       throw new Error('final simulation returned less than amountOutMin')
     }
 
     failureStage = 'submission'
-    console.log('   → swapExactTokensForTokens...')
-    const { hash: hSwap, receipt } = await writeContractTracked({
-      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-      args: [hops, amountIn, amountOutMin, account.address, deadline],
-    }, `arb ${pairLabel}`)
+    console.log(useNativeCycle ? '   → execute native atomic cycle...' : '   → swapExactTokensForTokens...')
+    const { hash: hSwap, receipt } = useNativeCycle
+      ? await writeContractTracked({
+          address: CONTRACTS.NativeArbExecutor, abi: AEON_NATIVE_ARB_EXECUTOR_ABI, functionName: 'executeNativeCycle',
+          args: [hops, amountOutMin, account.address, deadline], value: amountIn,
+        }, `native arb ${pairLabel}`)
+      : await writeContractTracked({
+          address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+          args: [hops, amountIn, amountOutMin, account.address, deadline],
+        }, `arb ${pairLabel}`)
     failureStage = 'confirmation'
 
     if (receipt.status === 'success') {
-      const balanceAfter = await pub.readContract({
-        address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
-      }) as bigint
-      const realizedGross = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n
       const totalGasWei = approvalGasWei + BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)
+      const balanceAfter = useNativeCycle
+        ? await pub.getBalance({ address: account.address })
+        : await pub.readContract({
+            address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+          }) as bigint
+      // Native balance delta already includes transaction gas. Add it back
+      // here to recover gross route profit, then subtract it once below.
+      const grossAdjustedAfter = useNativeCycle ? balanceAfter + totalGasWei : balanceAfter
+      const realizedGross = grossAdjustedAfter > balanceBefore ? grossAdjustedAfter - balanceBefore : 0n
       const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
       const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
       const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
@@ -2102,7 +2130,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
 
   // AeonArbKeeper (below) is vAMM/UniV2-only -- any route touching a CL or
   // DLMM pool needs the separate UniversalRouter-based path instead.
-  if (hasNonVammHop(hopCandidates)) {
+  if (hasNonVammHop(hopCandidates) || tokenIn.symbol === 'WETH') {
     return executeArbViaUniversalRouter(opp, graph, availableEthForWrap)
   }
 
@@ -3445,6 +3473,10 @@ async function tick() {
 
   const rankingGasPrice = await pub.getGasPrice()
   const graph = buildGraph(states)
+  // Migrate any old resting WETH back to native ETH before sizing. Native
+  // WETH cycles now wrap and unwrap inside one transaction, so this should
+  // normally be a one-time cleanup rather than a transaction every tick.
+  await unwrapIdleWeth()
   let balanceSnapshot = await fetchBalances(rankingGasPrice)
   if (!balanceSnapshot.gasReserveHealthy) {
     const refilled = await ensureNativeGasReserve(balanceSnapshot.nativeEth, balanceSnapshot.gasReserveWei, rankingGasPrice, graph)
@@ -3607,7 +3639,6 @@ async function tick() {
     }
   }
 
-  await unwrapIdleWeth()
   await writeStatus(rankedCandidates.map(candidate => candidate.opp), tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
 }
 

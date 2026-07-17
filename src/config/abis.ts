@@ -257,6 +257,26 @@ export const AEON_UNIVERSAL_ROUTER_ABI = [
   },
 ] as const
 
+// Native-ETH wrapper for WETH-settled arbitrage cycles. It performs
+// ETH -> WETH -> UniversalRouter hops -> WETH -> ETH atomically.
+export const AEON_NATIVE_ARB_EXECUTOR_ABI = [
+  {
+    name: 'executeNativeCycle', type: 'function', stateMutability: 'payable',
+    inputs: [
+      { name: 'hops', type: 'tuple[]', components: [
+        { name: 'poolType', type: 'uint8' }, { name: 'pool', type: 'address' },
+        { name: 'tokenIn', type: 'address' }, { name: 'tokenOut', type: 'address' },
+        { name: 'feeBps', type: 'uint24' }, { name: 'binStep', type: 'uint16' },
+        { name: 'tickSpacing', type: 'int24' }, { name: 'v4Native', type: 'bool' },
+      ]},
+      { name: 'amountOutMin', type: 'uint256' },
+      { name: 'recipient', type: 'address' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+  },
+] as const
+
 // Bundles "swap into WETH via AeonRouter, then unwrap to native ETH" into one
 // call -- same Route[]/amountIn/amountOutMin/deadline shape as AEON_ROUTER_ABI,
 // `to` just receives native ETH instead of WETH. Verified end-to-end against
