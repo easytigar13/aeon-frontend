@@ -275,6 +275,21 @@ export const AEON_NATIVE_ARB_EXECUTOR_ABI = [
     ],
     outputs: [{ name: 'amountOut', type: 'uint256' }],
   },
+  {
+    name: 'executeNativeSettlement', type: 'function', stateMutability: 'payable',
+    inputs: [
+      { name: 'hops', type: 'tuple[]', components: [
+        { name: 'poolType', type: 'uint8' }, { name: 'pool', type: 'address' },
+        { name: 'tokenIn', type: 'address' }, { name: 'tokenOut', type: 'address' },
+        { name: 'feeBps', type: 'uint24' }, { name: 'binStep', type: 'uint16' },
+        { name: 'tickSpacing', type: 'int24' }, { name: 'v4Native', type: 'bool' },
+      ]},
+      { name: 'amountOutMin', type: 'uint256' },
+      { name: 'recipient', type: 'address' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+    outputs: [{ name: 'amountOut', type: 'uint256' }],
+  },
 ] as const
 
 // Bundles "swap into WETH via AeonRouter, then unwrap to native ETH" into one

@@ -2431,11 +2431,16 @@ async function executeSettlementSwap(
     return 'skipped'
   }
 
-  const allowance = await pub.readContract({
+  // When spare native ETH covers a WETH-starting settlement, the native
+  // executor wraps and routes it in one transaction. No standalone WETH
+  // wrap or ERC20 approval is needed, so the opportunity cannot disappear
+  // between funding and execution.
+  const useNativeSettlement = tokenIn.symbol === 'WETH' && availableEthForWrap >= amountIn
+  const allowance = useNativeSettlement ? amountIn : await pub.readContract({
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'allowance',
     args: [account.address, CONTRACTS.UniversalRouter],
   }) as bigint
-  const needsApproval = allowance < amountIn
+  const needsApproval = !useNativeSettlement && allowance < amountIn
 
   const gasPrice = await pub.getGasPrice()
   let approveGasEstimate = 0n
@@ -2492,13 +2497,13 @@ async function executeSettlementSwap(
     return 'attempted'
   }
 
-  let balIn = await pub.readContract({
+  let balIn = useNativeSettlement ? await pub.getBalance({ address: account.address }) : await pub.readContract({
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
-  if (balIn < amountIn && tokenIn.symbol === 'WETH') {
+  if (!useNativeSettlement && balIn < amountIn && tokenIn.symbol === 'WETH') {
     balIn = await ensureWethBalance(amountIn, availableEthForWrap)
   }
-  if (balIn < amountIn) {
+  if (!useNativeSettlement && balIn < amountIn) {
     balIn = await ensureBaseTokenFunded(tokenIn.symbol as keyof typeof TOKENS, amountIn, graph)
   }
   if (balIn < amountIn) {
@@ -2534,18 +2539,37 @@ async function executeSettlementSwap(
 
     console.log('   → simulate swapExactTokensForTokens...')
     failureStage = 'simulation'
-    await pub.simulateContract({
-      account,
-      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-      args: [hops, amountIn, amountOutMin, account.address, deadline],
-    })
+    if (useNativeSettlement) {
+      await pub.simulateContract({
+        account,
+        address: CONTRACTS.NativeArbExecutor,
+        abi: AEON_NATIVE_ARB_EXECUTOR_ABI,
+        functionName: 'executeNativeSettlement',
+        args: [hops, amountOutMin, account.address, deadline],
+        value: amountIn,
+      })
+    } else {
+      await pub.simulateContract({
+        account,
+        address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+        args: [hops, amountIn, amountOutMin, account.address, deadline],
+      })
+    }
 
     console.log('   → swapExactTokensForTokens...')
     failureStage = 'submission'
-    const { hash: hSwap, receipt } = await writeContractTracked({
-      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-      args: [hops, amountIn, amountOutMin, account.address, deadline],
-    }, 'cross-settlement swap')
+    const { hash: hSwap, receipt } = useNativeSettlement
+      ? await writeContractTracked({
+          address: CONTRACTS.NativeArbExecutor,
+          abi: AEON_NATIVE_ARB_EXECUTOR_ABI,
+          functionName: 'executeNativeSettlement',
+          args: [hops, amountOutMin, account.address, deadline],
+          value: amountIn,
+        }, 'atomic native settlement')
+      : await writeContractTracked({
+          address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+          args: [hops, amountIn, amountOutMin, account.address, deadline],
+        }, 'cross-settlement swap')
     failureStage = 'confirmation'
 
     if (receipt.status === 'success') {
@@ -3578,6 +3602,7 @@ function sortRankedCandidates(candidates: RankedInternalCandidate[]) {
 // only attempts recorded in Recent Activity.
 const EXACT_QUOTE_CANDIDATES_PER_TICK = 16
 const EXACT_QUOTE_CONCURRENCY = 4
+const MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION = 8
 
 async function revalidateCandidateExact(
   candidate: RankedInternalCandidate,
@@ -3637,17 +3662,16 @@ async function exactRankedShortlist(
     selectedSet.add(candidate)
   }
 
-  for (const candidate of approximate.slice(0, 8)) add(candidate)
+  // Put the four best approximate candidates first, then guarantee early
+  // coverage for every funded settlement token and both route classes.
+  // This avoids an AEON-heavy top list starving WETH/USDG while still
+  // letting the keeper stop early once a real executable winner is found.
+  for (const candidate of approximate.slice(0, 4)) add(candidate)
   for (const symbol of SETTLEMENT_TOKENS) {
-    let addedForToken = 0
-    for (const candidate of approximate) {
-      if (candidate.opp.tokenIn.symbol !== symbol) continue
-      const before = selected.length
-      add(candidate)
-      if (selected.length > before && ++addedForToken >= 3) break
-      if (selected.length >= EXACT_QUOTE_CANDIDATES_PER_TICK) break
-    }
+    add(approximate.find(candidate => candidate.opp.tokenIn.symbol === symbol))
   }
+  add(approximate.find(candidate => candidate.kind === 'cycle'))
+  add(approximate.find(candidate => candidate.kind === 'settlement'))
   for (const candidate of approximate) add(candidate)
 
   const valid: RankedInternalCandidate[] = []
@@ -3655,6 +3679,11 @@ async function exactRankedShortlist(
     const batch = selected.slice(i, i + EXACT_QUOTE_CONCURRENCY)
     const results = await Promise.all(batch.map(candidate => revalidateCandidateExact(candidate, graph, rankingGasPrice)))
     for (let j = 0; j < batch.length; j++) if (results[j]) valid.push(batch[j])
+    const checked = i + batch.length
+    if (
+      checked >= MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION
+        && valid.some(candidate => (candidate.opp.expectedNetUsd ?? -Infinity) > 0)
+    ) break
   }
   sortRankedCandidates(valid)
   return valid
@@ -3942,6 +3971,7 @@ async function main() {
   console.log(`  Pool discovery refresh interval: ${POOL_REFRESH_INTERVAL_MS}ms`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
+  console.log(`  Block-aware scanning: enabled (at most one full scan per observed block)`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
   console.log(`  Cross-venue scan: ${ENABLE_CROSS_VENUE ? 'enabled' : 'disabled'}`)
   console.log(`  Non-atomic cross-venue execution: ${ENABLE_CROSS_VENUE && !ATOMIC_ONLY ? 'enabled' : 'disabled'}`)
@@ -3950,9 +3980,23 @@ async function main() {
   console.log(`  Status file: ${statusPath}`)
   console.log()
 
+  let lastScannedBlock: bigint | null = null
   while (true) {
-    await tick().catch(e => console.error('[tick error]', e))
-    await new Promise(r => setTimeout(r, INTERVAL_MS))
+    try {
+      const blockNumber = await pub.getBlockNumber()
+      if (lastScannedBlock !== null && blockNumber === lastScannedBlock) {
+        await new Promise(r => setTimeout(r, INTERVAL_MS))
+        continue
+      }
+      lastScannedBlock = blockNumber
+      await tick().catch(e => console.error('[tick error]', e))
+      // Do not add a fixed delay after a slow scan or transaction. If a new
+      // block arrived while it was running, rescan immediately; otherwise
+      // the same-block branch above applies the configured poll interval.
+    } catch (e) {
+      console.error('[block poll error]', e)
+      await new Promise(r => setTimeout(r, INTERVAL_MS))
+    }
   }
 }
 
