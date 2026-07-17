@@ -423,7 +423,19 @@ const account = privateKeyToAccount(PK)
 // 8s timeout across the entire pool set.
 const rpcTransport = fallback(RPC_URLS.map(url => http(url, { timeout: 3_000, retryCount: 0 }))) as unknown as ReturnType<typeof http>
 const pub = createPublicClient({ chain: robinhoodChain, transport: rpcTransport })
-const wal = createWalletClient({ account, chain: robinhoodChain, transport: rpcTransport })
+
+// The wallet -- transaction submission AND nonce reads -- is pinned to ONE
+// reliable endpoint (the full-node RPC), NOT the read fallback. The fallback
+// spans a flaky/lagging secondary (Blockscout: rate-limits, 429s, trails the
+// chain); when the primary momentarily timed out under 50ms polling, sends
+// and nonce reads fell over to it and ended up with DIFFERENT views of the
+// account nonce -> "nonce lower than the current nonce" on every wrap, which
+// starved every WETH-funded cycle. Sends/nonce on a single source of truth
+// removes the desync entirely; if this one endpoint hiccups a send just fails
+// cleanly and retries next tick (the nonce guard rolls back), never desyncs.
+const walletTransport = http(PRIMARY_RPC, { timeout: 8_000, retryCount: 1 })
+const walletRpc = createPublicClient({ chain: robinhoodChain, transport: walletTransport })
+const wal = createWalletClient({ account, chain: robinhoodChain, transport: walletTransport })
 
 async function discoverUniswapPools(): Promise<number> {
   const ownPools = [...ARB_POOLS]
@@ -1743,7 +1755,9 @@ type ExecResult = 'skipped' | 'attempted'
 // re-sync from the RPC on the next attempt.
 let nonceHighWater = -1
 async function acquireNonce(): Promise<number> {
-  const rpcPending = await pub.getTransactionCount({ address: account.address, blockTag: 'pending' })
+  // walletRpc (single pinned endpoint), NOT pub (fallback) -- the nonce must
+  // be read from the SAME node the tx is submitted to, or the two disagree.
+  const rpcPending = await walletRpc.getTransactionCount({ address: account.address, blockTag: 'pending' })
   const n = rpcPending > nonceHighWater ? rpcPending : nonceHighWater + 1
   nonceHighWater = n
   return n
@@ -1760,7 +1774,14 @@ async function writeContractTracked(args: any, label: string): Promise<{ hash: `
   try {
     hash = await wal.writeContract({ ...args, nonce, maxFeePerGas: initialMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
   } catch (sendErr: any) {
-    if (isNonceError(sendErr)) nonceHighWater = -1 // desynced -- re-read fresh next time
+    // "nonce too low" => the chain is AHEAD of us (a lagging RPC handed back a
+    // stale pending count). Keep the high-water where acquireNonce left it so
+    // the NEXT attempt walks UP (+1) toward the real nonce -- re-reading the
+    // same lagging endpoint would just return the same too-low value and loop.
+    // Any OTHER failure means this nonce was never consumed, so roll the
+    // high-water back one to reuse it instead of leaving a gap that stalls
+    // every later tx.
+    if (!isNonceError(sendErr)) nonceHighWater = nonce - 1
     throw sendErr
   }
   const originalHash = hash
