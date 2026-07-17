@@ -289,8 +289,14 @@ export const TOKENS = {
   CASHCAT: { address: '0x020bfC650A365f8BB26819deAAbF3E21291018b4' as `0x${string}`, symbol: 'CASHCAT', decimals: 18, name: 'Cash Cat' },
   // Active Robinhood Chain token, verified on-chain: name "The Index",
   // symbol "Index", 18 decimals. Routed through canonical Uniswap V3 and
-  // unhooked Uniswap V4 pools; it is never used as a settlement asset.
+  // executor-certified Uniswap V4 pools; it is never used as a settlement asset.
   INDEX: { address: '0x56910D4409F3a0C78C64DD8D0545FF0705389870' as `0x${string}`, symbol: 'INDEX', decimals: 18, name: 'The Index' },
+  // Curated external routing tokens. These are intermediate assets only:
+  // profitable cycles must still settle back into AEON, USDG, or WETH.
+  TENDIES: { address: '0x45242320DBB855EeA8Fd36804C6487E10E97FCF9' as `0x${string}`, symbol: 'TENDIES', decimals: 18, name: 'TENDIES' },
+  MARIAN: { address: '0x01637b14B7378B99dE75A64d50656d98488D9a4d' as `0x${string}`, symbol: 'MARIAN', decimals: 18, name: 'Lady Marian' },
+  VEX: { address: '0x8Ff92566f2e81BDd68EDfAa8cde73942A723796b' as `0x${string}`, symbol: 'VEX', decimals: 18, name: 'ProjectVex' },
+  JUGGERNAUT: { address: '0xD7321801CAae694090694Ff55A9323139F043B88' as `0x${string}`, symbol: 'JUGGERNAUT', decimals: 18, name: 'The Juggernaut' },
   // real, independently-deployed token (verified via Blockscout: 93 holders,
   // no price/volume data yet elsewhere on this chain) — added 2026-07-08 at
   // the user's request, with an AEON vAMM pool
@@ -532,6 +538,7 @@ export const UNISWAP_POOLS = [
   { name: 'WETH/VIRTUAL',  token0: 'WETH', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0xd95e8e2Cd04c207625C6F23c974d365a5F3A91D3' as `0x${string}` },
   { name: 'WETH/VIRTUAL',  token0: 'WETH', token1: 'VIRTUAL', type: 'UniV2', fee: '0.25%', address: '0xD65870Dc303b9CA01e07528B220C76d5fE917126' as `0x${string}` },
   { name: 'USDG/VIRTUAL',  token0: 'USDG', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D' as `0x${string}` },
+  { name: 'VEX/VIRTUAL',   token0: 'VEX', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0x817f16F5D8da83d1B089B082c0172af3923618dA' as `0x${string}` },
   { name: 'WETH/ROBINFUN', token0: 'WETH', token1: 'ROBINFUN', type: 'UniV2', fee: '0.3%', address: '0xE53377eB912D08e1B0160E5Ea0c626CF162870fF' as `0x${string}` },
 ]
 
