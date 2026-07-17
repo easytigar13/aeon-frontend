@@ -1179,7 +1179,14 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
 // always means profitable after fees -- never just profitable on the swap
 // math alone.
 
-const GAS_SAFETY_MULT_PCT = 130n   // require 1.30x the estimate -- buffer for gas price drift between quoting and inclusion
+// This chain confirms in a fraction of a second, so a 30% surcharge rejected
+// many historically profitable routes after the exact pre-submit estimate.
+// Keep a small configurable buffer, but never allow less than 100% of the
+// fresh estimate: amountOutMin still enforces amountIn + estimated gas + 1.
+const configuredGasSafetyPct = BigInt(process.env.GAS_SAFETY_MULT_PCT ?? '105')
+const GAS_SAFETY_MULT_PCT = configuredGasSafetyPct < 100n
+  ? 100n
+  : configuredGasSafetyPct > 200n ? 200n : configuredGasSafetyPct
 const APPROVE_GAS_FALLBACK = 60_000n
 const EXEC_ARB_BASE_GAS = 100_000n
 const EXEC_ARB_GAS_PER_HOP = 70_000n
@@ -1683,6 +1690,112 @@ function routeKey(hops: HopCandidate[]): string {
   return hops.map(h => `${h.tokenInSym}>${poolStateKey(h.pool.pool)}>${h.tokenOutSym}`).join('|')
 }
 
+interface RouteHistoryStats {
+  successes: number
+  failures: number
+  lastSuccessAt: number
+}
+
+// Learn from completed closed-cycle history across both keeper wallets. The
+// history is a ranking prior only: every configured pool and every new route
+// still gets searched, and a rotating exploration slot still exact-quotes
+// unproven families. This prevents a burst of attractive-but-unexecutable
+// new routes from crowding all historically productive families out of the
+// small exact-quote budget.
+const routeHistory = new Map<string, RouteHistoryStats>()
+const venueRouteHistory = new Map<string, RouteHistoryStats>()
+
+function tokenPathKey(label: string): string {
+  return (label.match(/[A-Z][A-Z0-9]*/g) ?? []).join('>')
+}
+
+function tokenPathKeyFromHops(hops: HopCandidate[]): string {
+  if (hops.length === 0) return ''
+  return [hops[0].tokenInSym, ...hops.map(h => h.tokenOutSym)].join('>')
+}
+
+function venueSequenceFromDescription(description: string): string {
+  const labels = description.match(/Uniswap V[234]|AEON CL|AEON DLMM|AEON DEX/gi) ?? []
+  return labels.map(label => {
+    const normalized = label.toLowerCase()
+    if (normalized === 'uniswap v2') return 'uniV2'
+    if (normalized === 'uniswap v3') return 'uniV3'
+    if (normalized === 'uniswap v4') return 'uniV4'
+    if (normalized === 'aeon cl') return 'CL'
+    if (normalized === 'aeon dlmm') return 'DLMM'
+    return 'vAMM'
+  }).join('>')
+}
+
+function venueSequenceFromHops(hops: HopCandidate[]): string {
+  return hops.map(hop => hop.pool.kind).join('>')
+}
+
+function recordHistoricalOutcome(
+  pathKey: string,
+  venueSequence: string,
+  status: 'success' | 'failed',
+  time: string,
+) {
+  const record = (history: Map<string, RouteHistoryStats>, key: string) => {
+    const stats = history.get(key) ?? { successes: 0, failures: 0, lastSuccessAt: 0 }
+    if (status === 'success') {
+      stats.successes++
+      stats.lastSuccessAt = Math.max(stats.lastSuccessAt, Date.parse(time) || 0)
+    } else {
+      stats.failures++
+    }
+    history.set(key, stats)
+  }
+  record(routeHistory, pathKey)
+  if (venueSequence) record(venueRouteHistory, `${pathKey}|${venueSequence}`)
+}
+
+function loadRouteHistory() {
+  const siblingTrades = fileURLToPath(new URL('../keeper2/trades.log', import.meta.url))
+  for (const historyPath of [tradesLogPath, siblingTrades]) {
+    if (!fs.existsSync(historyPath)) continue
+    for (const line of fs.readFileSync(historyPath, 'utf-8').split(/\r?\n/)) {
+      if (!line.trim()) continue
+      try {
+        const trade = JSON.parse(line)
+        if (trade.status !== 'success' && trade.status !== 'failed') continue
+        const key = tokenPathKey(String(trade.pair ?? ''))
+        const tokens = key.split('>').filter(Boolean)
+        if (tokens.length < 3 || tokens[0] !== tokens[tokens.length - 1]) continue
+        recordHistoricalOutcome(
+          key,
+          venueSequenceFromDescription(String(trade.venues ?? '')),
+          trade.status,
+          String(trade.time ?? ''),
+        )
+      } catch { /* ignore a partially written or legacy log line */ }
+    }
+  }
+}
+
+loadRouteHistory()
+
+function historicalStats(hops: HopCandidate[]): RouteHistoryStats {
+  const pathKey = tokenPathKeyFromHops(hops)
+  const venueStats = venueRouteHistory.get(`${pathKey}|${venueSequenceFromHops(hops)}`)
+  return venueStats ?? routeHistory.get(pathKey) ?? { successes: 0, failures: 0, lastSuccessAt: 0 }
+}
+
+function historicalExecutionFactor(hops: HopCandidate[]): number {
+  const stats = historicalStats(hops)
+  const attempts = stats.successes + stats.failures
+  if (stats.successes > 0) {
+    const completionRate = (stats.successes + 1) / (attempts + 2)
+    const evidenceBoost = Math.min(0.9, Math.log2(stats.successes + 1) * 0.16)
+    return 1 + evidenceBoost * completionRate
+  }
+  // No exclusion: an unproven family remains searchable/explorable. Repeated
+  // historical misses only stop it from monopolising execution priority.
+  if (stats.failures > 0) return Math.max(0.3, 1 / (1 + stats.failures * 0.08))
+  return 1
+}
+
 function decodeFailure(err: any): DecodedFailure {
   const parts = [err?.shortMessage, err?.details, err?.message, err?.cause?.shortMessage, err?.cause?.message]
     .filter(Boolean).map(String)
@@ -1767,14 +1880,21 @@ function scoreOpportunity<T extends { hops: HopCandidate[]; amountIn: bigint; re
   const depthUsage = opp.hops[0].reserveIn > 0n ? Number(opp.amountIn * 10_000n / opp.hops[0].reserveIn) / 10_000 : 1
   const depthFactor = Math.max(0.45, 1 - depthUsage)
   const hopFactor = 1 / (1 + Math.max(0, opp.hops.length - 2) * 0.08)
+  const historyFactor = historicalExecutionFactor(opp.hops)
   opp.reliabilityPct = reliability * 100
-  return netUsd * reliability * depthFactor * hopFactor
+  return netUsd * reliability * depthFactor * hopFactor * historyFactor
 }
 
 // Resume counters across restarts instead of losing history every deploy/reboot.
 try {
   const prior = JSON.parse(fs.readFileSync(statusPath, 'utf-8'))
-  recentArbs = prior.recentArbs ?? []
+  // Gas-estimate and simulation rejections never submitted a transaction and
+  // therefore are scanner diagnostics, not trades. Keep them out of Recent
+  // Activity after a restart while preserving the append-only trades.log.
+  recentArbs = (prior.recentArbs ?? []).filter((arb: ExecutedArb) => !(
+    arb.status === 'failed'
+      && (arb.failureStage === 'quote' || arb.failureStage === 'approval' || arb.failureStage === 'gas_estimate' || arb.failureStage === 'simulation')
+  ))
   const knownVenuePaths: Record<string, string> = {
     '0xb9a383f6e144c898ad4255e2d2e2ed804c1043e773aabf428da0e6d3dee999d8': 'AEON DEX (AEON→WETH) → Uniswap V4 (WETH→CASHCAT) → AEON DEX (CASHCAT→AEON)',
     '0x0986a4a9dbd054f86b96600abbd18020c61057ce9dfe2bfd82551f055d982e84': 'Uniswap V4 (WETH→CASHCAT) → AEON DEX (CASHCAT→WETH)',
@@ -1795,6 +1915,13 @@ try {
 // enough to sync immediately rather than on the status-sync throttle below,
 // but a Redis hiccup must never block or fail real trading.
 function recordArb(arb: ExecutedArb) {
+  if (arb.status === 'success' || arb.status === 'failed') {
+    const pathKey = tokenPathKey(arb.pair)
+    const tokens = pathKey.split('>').filter(Boolean)
+    if (tokens.length >= 3 && tokens[0] === tokens[tokens.length - 1]) {
+      recordHistoricalOutcome(pathKey, venueSequenceFromDescription(arb.venues ?? ''), arb.status, arb.time)
+    }
+  }
   recentArbs = [arb, ...recentArbs].slice(0, 30)
   try {
     fs.appendFileSync(tradesLogPath, JSON.stringify(arb) + '\n')
@@ -1817,6 +1944,9 @@ const scanTelemetry = {
   exactSelected: 0,
   exactChecked: 0,
   exactValid: 0,
+  historyProvenSelected: 0,
+  historicalClosedSuccesses: [...routeHistory.values()].reduce((sum, stats) => sum + stats.successes, 0),
+  provenVenueRoutes: [...venueRouteHistory.values()].filter(stats => stats.successes > 0).length,
   approximateCandidates: 0,
   routeVisits: 0,
   marginalPruned: 0,
@@ -2224,7 +2354,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     const finalQuotedProfit = finalQuotedOut > amountIn ? finalQuotedOut - amountIn : 0n
     if (finalQuotedProfit < requiredProfit) {
       console.log('   Fresh executable quote no longer clears gas; not submitting')
-      return needsApproval ? 'attempted' : 'skipped'
+      return 'skipped'
     }
 
     failureStage = 'gas_estimate'
@@ -2248,7 +2378,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     if (finalQuotedProfit < requiredProfit) {
       console.log('   Exact gas estimate removed profitability; not submitting')
       outcomeCounters.belowGas++
-      return 'attempted'
+      return 'skipped'
     }
 
     console.log(useNativeCycle ? '   → simulate atomic ETH→WETH→route→WETH→ETH...' : '   → simulate swapExactTokensForTokens...')
@@ -2320,23 +2450,29 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     countFailureOutcome(failure, failureStage)
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
     registerRouteFailure(hopCandidates, failure)
-    console.error(`   ❌ ARB FAILED (no funds lost -- amountOutMin reverts atomically): ${message}`)
-    totalFailed++
+    const reachedSubmission = failureStage === 'submission' || failureStage === 'confirmation'
+    console.error(reachedSubmission
+      ? `   ARB TRANSACTION FAILED (atomic revert): ${message}`
+      : `   Candidate rejected before submission (no transaction, no gas spent): ${message}`)
     // Route-local failures are isolated by their own cooldown and must not
     // pause unrelated routes through the global circuit breaker.
-    if (!failure.routeScoped) consecutiveFailures++
+    if (reachedSubmission && !failure.routeScoped) consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
     }
     recentErrors.unshift({ time: new Date().toISOString(), message })
     recentErrors = recentErrors.slice(0, 5)
-    recordArb({
-      time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
-      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
-      failureCategory: failure.category, failureStage, route: 'internal', venues,
-    })
-    return 'attempted'
+    if (reachedSubmission) {
+      totalFailed++
+      recordArb({
+        time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
+        amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
+        failureCategory: failure.category, failureStage, route: 'internal', venues,
+      })
+      return 'attempted'
+    }
+    return 'skipped'
   }
 }
 
@@ -2438,7 +2574,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     if (profitRaw < requiredProfit) {
       console.log('   Exact gas estimate removed profitability; not submitting')
       outcomeCounters.belowGas++
-      return needsApproval ? 'attempted' : 'skipped'
+      return 'skipped'
     }
 
     // Re-run the complete call against the latest chain state after the
@@ -2497,21 +2633,27 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     countFailureOutcome(failure, failureStage)
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
     registerRouteFailure(hopCandidates, failure)
-    console.error(`   ❌ ARB FAILED (no funds lost -- the contract reverts atomically): ${message}`)
-    totalFailed++
-    if (!failure.routeScoped) consecutiveFailures++
+    const reachedSubmission = failureStage === 'submission' || failureStage === 'confirmation'
+    console.error(reachedSubmission
+      ? `   ARB TRANSACTION FAILED (atomic revert): ${message}`
+      : `   Candidate rejected before submission (no transaction, no gas spent): ${message}`)
+    if (reachedSubmission && !failure.routeScoped) consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
     }
     recentErrors.unshift({ time: new Date().toISOString(), message })
     recentErrors = recentErrors.slice(0, 5)
-    recordArb({
-      time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
-      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
-      failureCategory: failure.category, failureStage, route: 'internal', venues,
-    })
-    return 'attempted'
+    if (reachedSubmission) {
+      totalFailed++
+      recordArb({
+        time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
+        amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
+        failureCategory: failure.category, failureStage, route: 'internal', venues,
+      })
+      return 'attempted'
+    }
+    return 'skipped'
   }
 }
 
@@ -3723,11 +3865,11 @@ function sortRankedCandidates(candidates: RankedInternalCandidate[]) {
 // loop from appearing to prefer AEON merely because those failures were the
 // only attempts recorded in Recent Activity.
 const EXACT_QUOTE_CANDIDATES_PER_TICK = Math.max(4, Math.min(32, parseInt(process.env.EXACT_QUOTE_CANDIDATES ?? '12')))
-// Quote the normal twelve-candidate shortlist in one concurrent wave. Each
-// route still walks its own dependent hops in order, but independent routes
-// no longer wait behind three earlier four-route waves.
-const EXACT_QUOTE_CONCURRENCY = Math.max(2, Math.min(32, parseInt(process.env.EXACT_QUOTE_CONCURRENCY ?? '12')))
+// Six independent routes per wave stays fast without the 12-route RPC burst
+// that triggered a 60-second public-endpoint rate limit in production.
+const EXACT_QUOTE_CONCURRENCY = Math.max(2, Math.min(32, parseInt(process.env.EXACT_QUOTE_CONCURRENCY ?? '6')))
 const MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION = Math.min(6, EXACT_QUOTE_CANDIDATES_PER_TICK)
+let explorationCursor = 0
 
 async function revalidateCandidateExact(
   candidate: RankedInternalCandidate,
@@ -3788,19 +3930,43 @@ async function exactRankedShortlist(
     selectedSet.add(candidate)
   }
 
-  // Put the four best approximate candidates first, then guarantee early
-  // coverage for every funded settlement token and both route classes.
-  // This avoids an AEON-heavy top list starving WETH/USDG while still
-  // letting the keeper stop early once a real executable winner is found.
-  for (const candidate of approximate.slice(0, 4)) add(candidate)
+  // A route on cooldown already failed the real executor and must not consume
+  // another scarce exact-quote slot. It remains in the graph and is eligible
+  // again as soon as its short route-local cooldown expires.
+  const eligible = approximate.filter(candidate => routeCooldownRemaining(candidate.opp.hops) <= 0)
+  const proven = eligible
+    .filter(candidate => historicalStats(candidate.opp.hops).successes > 0)
+    .sort((a, b) => {
+      const ah = historicalStats(a.opp.hops), bh = historicalStats(b.opp.hops)
+      const aRate = (ah.successes + 1) / (ah.successes + ah.failures + 2)
+      const bRate = (bh.successes + 1) / (bh.successes + bh.failures + 2)
+      return (bh.successes * bRate) - (ah.successes * aRate)
+        || (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
+    })
+
+  // Keep two slots for the best brand-new market edges, then fill the first
+  // wave with historically completed closed cycles across every funded base.
+  // This learns from 204 real closed-cycle successes without hardcoding or
+  // excluding any supplied pool.
+  for (const candidate of eligible.slice(0, 2)) add(candidate)
   for (const symbol of SETTLEMENT_TOKENS) {
-    add(approximate.find(candidate => candidate.opp.tokenIn.symbol === symbol))
+    add(proven.find(candidate => candidate.opp.tokenIn.symbol === symbol))
   }
-  add(approximate.find(candidate => candidate.kind === 'cycle'))
-  add(approximate.find(candidate => candidate.kind === 'settlement'))
-  for (const candidate of approximate) add(candidate)
+  for (const hopCount of [2, 3, 4]) add(proven.find(candidate => candidate.opp.hops.length === hopCount))
+  for (const candidate of proven) add(candidate)
+
+  // One rotating exploration candidate guarantees that an unproven family
+  // can establish its own success history instead of being permanently
+  // buried behind known routes.
+  const unproven = eligible.filter(candidate => historicalStats(candidate.opp.hops).successes === 0)
+  if (unproven.length > 0) {
+    add(unproven[explorationCursor % unproven.length])
+    explorationCursor++
+  }
+  for (const candidate of eligible) add(candidate)
 
   scanTelemetry.exactSelected = selected.length
+  scanTelemetry.historyProvenSelected = selected.filter(candidate => historicalStats(candidate.opp.hops).successes > 0).length
   scanTelemetry.exactChecked = 0
   scanTelemetry.exactValid = 0
   const valid: RankedInternalCandidate[] = []
@@ -3838,6 +4004,7 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
   scanTelemetry.exactSelected = 0
   scanTelemetry.exactChecked = 0
   scanTelemetry.exactValid = 0
+  scanTelemetry.historyProvenSelected = 0
   scanTelemetry.approximateCandidates = 0
   scanTelemetry.routeVisits = 0
   scanTelemetry.marginalPruned = 0
@@ -4217,10 +4384,12 @@ async function main() {
   console.log(`  AEON CL pools discovered: ${clPools}  |  AEON DLMM pools discovered: ${dlmmPools}`)
   console.log(`  Pool discovery refresh interval: ${POOL_REFRESH_INTERVAL_MS}ms`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
+  console.log(`  Exact gas safety margin: ${Number(GAS_SAFETY_MULT_PCT) / 100}x`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Block-aware scanning: enabled (at most one full scan per observed block)`)
   console.log(`  Event-driven pool refresh: ${EVENT_DRIVEN_SCANNING ? `enabled (${FULL_STATE_REFRESH_MS}ms safety refresh, ${GAS_ONLY_RECHECK_MS}ms gas recheck)` : 'disabled'}`)
   console.log(`  Exact quote wave: up to ${EXACT_QUOTE_CANDIDATES_PER_TICK} candidates / ${EXACT_QUOTE_CONCURRENCY} concurrent`)
+  console.log(`  Historical learning: ${scanTelemetry.historicalClosedSuccesses} closed-cycle successes across ${scanTelemetry.provenVenueRoutes} proven venue routes`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
   console.log(`  Cross-venue scan: ${ENABLE_CROSS_VENUE ? 'enabled' : 'disabled'}`)
   console.log(`  Non-atomic cross-venue execution: ${ENABLE_CROSS_VENUE && !ATOMIC_ONLY ? 'enabled' : 'disabled'}`)
