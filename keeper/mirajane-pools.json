@@ -122,50 +122,10 @@
       "v3Fee": 3000
     },
     {
-      "name": "UniV3 CASHCAT/WETH",
-      "address": "0x4E8649Be40aE67EBbcff99C291B92eE03015917b",
-      "token0": "CASHCAT",
-      "token1": "WETH",
-      "feeBps": 0,
-      "isUniV2": false,
-      "kind": "uniV3",
-      "v3Fee": 10000
-    },
-    {
       "name": "UniV3 CASHCAT/USDG",
       "address": "0x4B0c312fFbB068F6a0bEa128759E35d94B94D0E1",
       "token0": "CASHCAT",
       "token1": "USDG",
-      "feeBps": 0,
-      "isUniV2": false,
-      "kind": "uniV3",
-      "v3Fee": 10000
-    },
-    {
-      "name": "UniV3 CASHCAT/WETH",
-      "address": "0x13F501cbFd47a07cceE7E9ef4134bb0E770D138F",
-      "token0": "CASHCAT",
-      "token1": "WETH",
-      "feeBps": 0,
-      "isUniV2": false,
-      "kind": "uniV3",
-      "v3Fee": 5000
-    },
-    {
-      "name": "UniV3 CASHCAT/WETH",
-      "address": "0x5dA1Aa1ad4a357C9D1Ed4f78F8b0503C5b9d02E8",
-      "token0": "CASHCAT",
-      "token1": "WETH",
-      "feeBps": 0,
-      "isUniV2": false,
-      "kind": "uniV3",
-      "v3Fee": 10000
-    },
-    {
-      "name": "UniV3 CASHCAT/WETH",
-      "address": "0x1e4238E85B8C76c3a81d8E65544367ebb9A61b78",
-      "token0": "CASHCAT",
-      "token1": "WETH",
       "feeBps": 0,
       "isUniV2": false,
       "kind": "uniV3",

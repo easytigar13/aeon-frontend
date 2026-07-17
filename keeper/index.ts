@@ -73,12 +73,12 @@ import { privateKeyToAccount } from 'viem/accounts'
 import * as dotenv from 'dotenv'
 import * as fs from 'fs'
 import { fileURLToPath } from 'url'
-import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES, UNISWAP_POOLS } from '../src/config/contracts'
-import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, AEON_NATIVE_ARB_EXECUTOR_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
+import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES, UNISWAP_POOLS, ALGEBRA_CONTRACTS, DLMM_CONTRACTS } from '../src/config/contracts'
+import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, AEON_NATIVE_ARB_EXECUTOR_ABI, ALGEBRA_POOL_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
 import { writeBotStatus, appendTrade, isBotStoreConfigured } from '../src/lib/botStore'
-import { discoverUniswapV3Pools, quoteUniswapV3ExactInput, UNISWAP_V3_POOL_ABI, type UniswapV3PoolRef } from './uniswap-v3'
+import { discoverUniswapV3Pools, quoteUniswapV3ExactInput, UNISWAP_V3, UNISWAP_V3_FACTORY_ABI, UNISWAP_V3_POOL_ABI, type UniswapV3PoolRef } from './uniswap-v3'
 import { discoverUniswapV4Pools, quoteUniswapV4ExactInput, UNISWAP_V4, UNISWAP_V4_STATE_VIEW_ABI, type UniswapV4PoolRef } from './uniswap-v4'
 
 const envPath      = fileURLToPath(new URL('.env', import.meta.url))
@@ -307,6 +307,66 @@ function loadMirajanePools() {
   for (const r of v4Refs) uniswapV4Refs.set((r.id as string).toLowerCase(), r as UniswapV4PoolRef)
 }
 if (MIRAJANE_MODE) loadMirajanePools()
+
+let mirajaneV3Validated = false
+
+// Mirajane's V3 execution path is pinned to the canonical Uniswap V3
+// factory/router. A pool from a different V3-style deployment can expose
+// the same slot0/liquidity interface and look profitable to the scanner,
+// but the router will execute against the canonical factory's pool instead.
+// Validate that quote and execution therefore address the exact same pool
+// before allowing a configured V3 edge into the graph.
+async function validateMirajaneV3Pools(): Promise<void> {
+  if (!MIRAJANE_MODE || mirajaneV3Validated) return
+
+  const rejected = new Set<string>()
+  for (const pool of ARB_POOLS.filter(p => p.kind === 'uniV3')) {
+    const address = getAddress(pool.address)
+    const [factory, fee, token0, token1] = await Promise.all([
+      pub.readContract({ address, abi: UNISWAP_V3_POOL_ABI, functionName: 'factory' }),
+      pub.readContract({ address, abi: UNISWAP_V3_POOL_ABI, functionName: 'fee' }),
+      pub.readContract({ address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token0' }),
+      pub.readContract({ address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token1' }),
+    ])
+
+    const actualFactory = getAddress(factory as `0x${string}`)
+    const actualToken0 = getAddress(token0 as `0x${string}`)
+    const actualToken1 = getAddress(token1 as `0x${string}`)
+    const actualFee = Number(fee)
+    const expectedTokens = new Set([
+      getAddress(TOKENS[pool.token0].address).toLowerCase(),
+      getAddress(TOKENS[pool.token1].address).toLowerCase(),
+    ])
+    const tokenPairMatches = expectedTokens.has(actualToken0.toLowerCase())
+      && expectedTokens.has(actualToken1.toLowerCase())
+    const canonical = await pub.readContract({
+      address: UNISWAP_V3.factory,
+      abi: UNISWAP_V3_FACTORY_ABI,
+      functionName: 'getPool',
+      args: [actualToken0, actualToken1, actualFee],
+    }) as `0x${string}`
+    const reason = actualFactory.toLowerCase() !== UNISWAP_V3.factory.toLowerCase()
+      ? `factory ${actualFactory}`
+      : !tokenPairMatches
+        ? 'configured token pair does not match pool token0/token1'
+        : actualFee !== pool.v3Fee
+          ? `configured fee ${pool.v3Fee ?? 'missing'} != on-chain fee ${actualFee}`
+          : canonical.toLowerCase() !== address.toLowerCase()
+            ? `canonical pool is ${canonical}`
+            : null
+
+    if (reason) {
+      rejected.add(address.toLowerCase())
+      console.warn(`[mirajane] rejecting non-canonical V3 pool ${pool.name} ${address}: ${reason}`)
+    }
+  }
+
+  for (let i = ARB_POOLS.length - 1; i >= 0; i--) {
+    if (rejected.has(ARB_POOLS[i].address.toLowerCase())) ARB_POOLS.splice(i, 1)
+  }
+  mirajaneV3Validated = true
+  console.log(`[mirajane] canonical V3 validation complete: ${rejected.size} rejected, ${ARB_POOLS.filter(p => p.kind === 'uniV3').length} retained`)
+}
 
 async function discoverHighVolumeUniswapV3Pools(): Promise<number> {
   const symbols = (Object.keys(TOKENS) as (keyof typeof TOKENS)[]).filter(sym =>
@@ -1893,6 +1953,34 @@ async function quoteMixedRouteExact(hops: HopCandidate[], amountIn: bigint): Pro
       )
       if (!quote) return 0n
       amount = quote.amountOut
+    } else if (hop.pool.pool.kind === 'CL') {
+      const quote = await pub.readContract({
+        address: ALGEBRA_CONTRACTS.quoterV2,
+        abi: ALGEBRA_QUOTER_ABI,
+        functionName: 'quoteExactInputSingle',
+        args: [{
+          tokenIn: getAddress(TOKENS[hop.tokenInSym as keyof typeof TOKENS].address),
+          tokenOut: getAddress(TOKENS[hop.tokenOutSym as keyof typeof TOKENS].address),
+          deployer: ZERO_ADDRESS,
+          amountIn: amount,
+          limitSqrtPrice: 0n,
+        }],
+      }) as readonly [bigint, bigint, bigint, number, bigint, number]
+      amount = BigInt(quote[0])
+    } else if (hop.pool.pool.kind === 'DLMM') {
+      if (amount > ((1n << 128n) - 1n)) return 0n
+      const quote = await pub.readContract({
+        address: DLMM_CONTRACTS.router,
+        abi: LB_ROUTER_ABI,
+        functionName: 'getSwapOut',
+        args: [
+          getAddress(hop.pool.pool.address),
+          amount,
+          hop.tokenInSym === hop.pool.pool.token0,
+        ],
+      }) as readonly [bigint, bigint, bigint]
+      if (BigInt(quote[0]) !== 0n) return 0n
+      amount = BigInt(quote[1])
     } else if (hop.pool.pool.kind === 'uniV4') {
       const ref = hop.pool.pool.v4PoolId ? uniswapV4Refs.get(hop.pool.pool.v4PoolId.toLowerCase()) : undefined
       if (!ref) return 0n
@@ -1910,6 +1998,19 @@ async function quoteMixedRouteExact(hops: HopCandidate[], amountIn: bigint): Pro
     if (amount <= 0n) return 0n
   }
   return amount
+}
+
+async function exactValueInUsdg(tokenSym: string, amount: bigint, graph: Map<string, HopCandidate[]>): Promise<bigint> {
+  if (amount <= 0n) return 0n
+  if (tokenSym === 'USDG') return amount
+  const path = findConversionPath(graph, tokenSym, 'USDG')
+  if (!path) return 0n
+  return quoteMixedRouteExact(path, amount)
+}
+
+function ceilDiv(numerator: bigint, denominator: bigint): bigint {
+  if (denominator <= 0n) return 0n
+  return (numerator + denominator - 1n) / denominator
 }
 
 // Cyclic routes (same start/end token) that include a CL or DLMM hop can't
@@ -2352,10 +2453,30 @@ async function executeSettlementSwap(
   const gasUsdg = valueInUsdg('WETH', gasWei, graph)
   console.log(`   Est. gas cost: ~${formatUnits(gasUsdg, TOKENS.USDG.decimals)} USDG`)
 
-  const inUsdgValue = tokenIn.symbol === 'USDG' ? amountIn : convertSpot(amountIn, inUsdgPath)
-  const requiredOutUsdg = inUsdgValue + gasUsdg + 1n
-  const amountOutMin = tokenOut.symbol === 'USDG' ? requiredOutUsdg : convertSpotReverse(requiredOutUsdg, outUsdgPath)
-  if (amountOutMin <= 0n || opp.amountOut < amountOutMin) {
+  let inUsdgValue = 0n
+  let exactOut = 0n
+  let exactOutUsdg = 0n
+  let amountOutMin = 0n
+  const refreshExecutableFloor = async (): Promise<boolean> => {
+    exactOut = await quoteMixedRouteExact(hopCandidates, amountIn)
+    if (exactOut <= 0n) return false
+    inUsdgValue = await exactValueInUsdg(tokenIn.symbol, amountIn, graph)
+    exactOutUsdg = await exactValueInUsdg(tokenOut.symbol, exactOut, graph)
+    const requiredOutUsdg = inUsdgValue + gasUsdg + 1n
+    if (inUsdgValue <= 0n || exactOutUsdg <= requiredOutUsdg) return false
+
+    // Convert the required USDG floor into output-token units using the
+    // current executable quote itself. The old fee-free spot conversion is
+    // what made AEON routes look profitable and then revert on-chain.
+    amountOutMin = ceilDiv(exactOut * requiredOutUsdg, exactOutUsdg)
+    if (amountOutMin <= 0n || exactOut < amountOutMin) return false
+    opp.amountOut = exactOut
+    opp.profitUsdg = exactOutUsdg - inUsdgValue
+    opp.profitPct = Number(opp.profitUsdg * 10_000n / inUsdgValue) / 100
+    return true
+  }
+
+  if (!(await refreshExecutableFloor())) {
     console.log('   Profit does not clear the estimated gas cost, skipping')
     return 'skipped'
   }
@@ -2400,6 +2521,15 @@ async function executeSettlementSwap(
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.UniversalRouter, MAX_UINT256],
       }, 'settlement approval')
       approvalGasWei = (approveReceipt.gasUsed as bigint) * (approveReceipt.effectiveGasPrice as bigint)
+      failureStage = 'quote'
+      if (!(await refreshExecutableFloor())) {
+        console.log('   Fresh executable quote no longer clears gas; not submitting')
+        return 'attempted'
+      }
+    }
+    if (!needsApproval && !(await refreshExecutableFloor())) {
+      console.log('   Fresh executable quote no longer clears gas; not submitting')
+      return 'skipped'
     }
 
     console.log('   → simulate swapExactTokensForTokens...')
@@ -2423,7 +2553,10 @@ async function executeSettlementSwap(
         address: tokenOut.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
       }) as bigint
       const realizedOut = balanceAfterOut > balanceBeforeOut ? balanceAfterOut - balanceBeforeOut : 0n
-      const realizedOutUsdg = tokenOut.symbol === 'USDG' ? realizedOut : convertSpot(realizedOut, outUsdgPath)
+      let realizedOutUsdg = await exactValueInUsdg(tokenOut.symbol, realizedOut, graph)
+      if (realizedOutUsdg <= 0n) {
+        realizedOutUsdg = tokenOut.symbol === 'USDG' ? realizedOut : convertSpot(realizedOut, outUsdgPath)
+      }
       const totalGasWei = approvalGasWei + (receipt.gasUsed as bigint) * (receipt.effectiveGasPrice as bigint)
       const gasUsdgActual = valueInUsdg('WETH', totalGasWei, graph)
       const realizedGrossUsdg = realizedOutUsdg > inUsdgValue ? realizedOutUsdg - inUsdgValue : 0n
@@ -3423,9 +3556,111 @@ async function distributeMultiGaugeRewards() {
   }
 }
 
-// Bounds how many candidates get a real gas-floor check (each costs RPC
-// calls) before giving up for the tick -- sorted descending by profitPct,
-// so this only matters when the top few all fail to clear gas.
+type RankedInternalCandidate =
+  | { kind: 'cycle'; opp: ArbOpp }
+  | { kind: 'settlement'; opp: SettlementOpp }
+
+function sortRankedCandidates(candidates: RankedInternalCandidate[]) {
+  candidates.sort((a, b) => {
+    const scoreDiff = (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
+    if (scoreDiff !== 0) return scoreDiff
+    const outputA = a.kind === 'settlement' ? a.opp.tokenOut.symbol : a.opp.tokenIn.symbol
+    const outputB = b.kind === 'settlement' ? b.opp.tokenOut.symbol : b.opp.tokenIn.symbol
+    return (SETTLEMENT_PRIORITY[outputA] ?? 99) - (SETTLEMENT_PRIORITY[outputB] ?? 99)
+  })
+}
+
+// Exact quoter calls are materially more expensive than the virtual-reserve
+// graph scan. Validate a small, diverse shortlist (including candidates for
+// every settlement input token) before anything reaches the dashboard or
+// executor. This removes false-positive WETH rows and prevents the fallback
+// loop from appearing to prefer AEON merely because those failures were the
+// only attempts recorded in Recent Activity.
+const EXACT_QUOTE_CANDIDATES_PER_TICK = 16
+const EXACT_QUOTE_CONCURRENCY = 4
+
+async function revalidateCandidateExact(
+  candidate: RankedInternalCandidate,
+  graph: Map<string, HopCandidate[]>,
+  rankingGasPrice: bigint,
+): Promise<boolean> {
+  try {
+    const { opp } = candidate
+    const exactOut = await quoteMixedRouteExact(opp.hops, opp.amountIn)
+    if (exactOut <= 0n) return false
+
+    const gasUnits = (candidate.kind === 'settlement' ? SETTLEMENT_SWAP_GAS_BASE : EXEC_ARB_BASE_GAS)
+      + (candidate.kind === 'settlement' ? SETTLEMENT_SWAP_GAS_PER_HOP : EXEC_ARB_GAS_PER_HOP) * BigInt(opp.hops.length)
+    const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
+    const gasUsdg = await exactValueInUsdg('WETH', gasWei, graph)
+    if (gasUsdg <= 0n) return false
+
+    if (candidate.kind === 'cycle') {
+      const profitRaw = exactOut > opp.amountIn ? exactOut - opp.amountIn : 0n
+      if (profitRaw <= 0n) return false
+      const grossUsdg = await exactValueInUsdg(opp.tokenIn.symbol, profitRaw, graph)
+      if (grossUsdg <= 0n) return false
+      opp.profitRaw = profitRaw
+      opp.profitPct = Number(profitRaw * 10_000n / opp.amountIn) / 100
+      opp.gasCostUsd = Number(formatUnits(gasUsdg, TOKENS.USDG.decimals))
+      opp.expectedNetUsd = Number(formatUnits(grossUsdg - gasUsdg, TOKENS.USDG.decimals))
+      opp.routeScore = scoreOpportunity(opp, opp.expectedNetUsd)
+      return true
+    }
+
+    const inUsdg = await exactValueInUsdg(opp.tokenIn.symbol, opp.amountIn, graph)
+    const outUsdg = await exactValueInUsdg(opp.tokenOut.symbol, exactOut, graph)
+    if (inUsdg <= 0n || outUsdg <= inUsdg) return false
+    const profitUsdg = outUsdg - inUsdg
+    opp.amountOut = exactOut
+    opp.profitUsdg = profitUsdg
+    opp.profitPct = Number(profitUsdg * 10_000n / inUsdg) / 100
+    opp.gasCostUsd = Number(formatUnits(gasUsdg, TOKENS.USDG.decimals))
+    opp.expectedNetUsd = Number(formatUnits(profitUsdg - gasUsdg, TOKENS.USDG.decimals))
+    opp.routeScore = scoreOpportunity(opp, opp.expectedNetUsd)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function exactRankedShortlist(
+  approximate: RankedInternalCandidate[],
+  graph: Map<string, HopCandidate[]>,
+  rankingGasPrice: bigint,
+): Promise<RankedInternalCandidate[]> {
+  const selected: RankedInternalCandidate[] = []
+  const selectedSet = new Set<RankedInternalCandidate>()
+  const add = (candidate: RankedInternalCandidate | undefined) => {
+    if (!candidate || selected.length >= EXACT_QUOTE_CANDIDATES_PER_TICK || selectedSet.has(candidate)) return
+    selected.push(candidate)
+    selectedSet.add(candidate)
+  }
+
+  for (const candidate of approximate.slice(0, 8)) add(candidate)
+  for (const symbol of SETTLEMENT_TOKENS) {
+    let addedForToken = 0
+    for (const candidate of approximate) {
+      if (candidate.opp.tokenIn.symbol !== symbol) continue
+      const before = selected.length
+      add(candidate)
+      if (selected.length > before && ++addedForToken >= 3) break
+      if (selected.length >= EXACT_QUOTE_CANDIDATES_PER_TICK) break
+    }
+  }
+  for (const candidate of approximate) add(candidate)
+
+  const valid: RankedInternalCandidate[] = []
+  for (let i = 0; i < selected.length; i += EXACT_QUOTE_CONCURRENCY) {
+    const batch = selected.slice(i, i + EXACT_QUOTE_CONCURRENCY)
+    const results = await Promise.all(batch.map(candidate => revalidateCandidateExact(candidate, graph, rankingGasPrice)))
+    for (let j = 0; j < batch.length; j++) if (results[j]) valid.push(batch[j])
+  }
+  sortRankedCandidates(valid)
+  return valid
+}
+
+// Bounds how many already-exact candidates are attempted per tick.
 const EXECUTION_CANDIDATES_PER_TICK = 10
 
 async function tick() {
@@ -3517,20 +3752,12 @@ async function tick() {
     opp.routeScore = scoreOpportunity(opp, netUsd)
   }
 
-  type RankedInternalCandidate =
-    | { kind: 'cycle'; opp: ArbOpp }
-    | { kind: 'settlement'; opp: SettlementOpp }
-  const rankedCandidates: RankedInternalCandidate[] = [
+  const approximateCandidates: RankedInternalCandidate[] = [
     ...opps.map(opp => ({ kind: 'cycle' as const, opp })),
     ...settlementOpps.map(opp => ({ kind: 'settlement' as const, opp })),
   ]
-  rankedCandidates.sort((a, b) => {
-    const scoreDiff = (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
-    if (scoreDiff !== 0) return scoreDiff
-    const outputA = a.kind === 'settlement' ? a.opp.tokenOut.symbol : a.opp.tokenIn.symbol
-    const outputB = b.kind === 'settlement' ? b.opp.tokenOut.symbol : b.opp.tokenIn.symbol
-    return (SETTLEMENT_PRIORITY[outputA] ?? 99) - (SETTLEMENT_PRIORITY[outputB] ?? 99)
-  })
+  sortRankedCandidates(approximateCandidates)
+  const rankedCandidates = await exactRankedShortlist(approximateCandidates, graph, rankingGasPrice)
   outcomeCounters.detected += rankedCandidates.length
   const tickMs = Date.now() - t0
 
@@ -3652,8 +3879,9 @@ interface DiscoveryCounts {
 
 async function refreshPoolDiscovery(): Promise<DiscoveryCounts> {
   if (MIRAJANE_MODE) {
-    // Fixed explicit pool set loaded once at startup -- nothing to discover
-    // or refresh, ever. This is the whole point of the mode.
+    // The set remains fixed, but validate every configured V3 pool once at
+    // startup so the quoter and UniversalRouter cannot disagree on factory.
+    await validateMirajaneV3Pools()
     return { uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl: 0, dlmm: 0 }
   }
   if (POOL_ALLOWLIST_ACTIVE) {

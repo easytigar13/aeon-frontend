@@ -12,6 +12,7 @@ interface Opportunity {
   amountIn: string
   tokenIn: string
   grossProfit?: string
+  grossProfitToken?: string
   grossProfitUsd?: number
   expectedNetUsd?: number
   gasCostUsd?: number
@@ -99,7 +100,7 @@ function BotOpportunitiesPageInner() {
                     <td className="px-4 py-3 font-mono text-violet-400 text-xs whitespace-nowrap">{o.venues ?? '—'}</td>
                     <td className="px-4 py-3 text-right text-text-secondary font-mono whitespace-nowrap">{o.amountIn} {o.tokenIn}</td>
                     <td className="px-4 py-3 text-right text-text-secondary font-mono whitespace-nowrap">
-                      {o.grossProfit ?? '—'} {o.tokenIn}
+                      {o.grossProfit ?? '—'} {o.grossProfitToken ?? o.tokenIn}
                     </td>
                     <td className="px-4 py-3 text-right text-text-muted font-mono whitespace-nowrap">
                       {o.gasCostUsd != null ? `$${o.gasCostUsd.toFixed(4)}` : '—'}
