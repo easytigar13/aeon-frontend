@@ -96,9 +96,12 @@ const PRIMARY_RPC  = process.env.RPC_URL ?? 'https://rpc.mainnet.chain.robinhood
 const RPC_URLS     = Array.from(new Set([
   ...((process.env.RPC_URLS ?? '').split(',').map(url => url.trim()).filter(Boolean)),
   PRIMARY_RPC,
-  // Independent read/write proxy on the chain's Blockscout deployment. The
-  // official endpoint remains first; this is only used when it is unreachable.
-  'https://robinhoodchain.blockscout.com/api/eth-rpc',
+  // NOTE: the Blockscout proxy (robinhoodchain.blockscout.com) was removed
+  // from the default fallback -- it rate-limits (429) and lags the chain, and
+  // under aggressive polling the primary would time out and thrash to it,
+  // ballooning tick time to ~20s (stale quotes -> nothing executes). Add your
+  // own extra endpoint via RPC_URLS= if you have a fast one. For a cross-venue
+  // bot this hard: point RPC_URL at a dedicated/private node.
 ]))
 const PK            = (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`
 const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT ?? '0')  // consider every positive quote; execution still requires profit above the buffered gas cost
@@ -421,7 +424,7 @@ const account = privateKeyToAccount(PK)
 // Keep per-endpoint failure detection short: discovery performs hundreds of
 // reads, so an unhealthy primary must fail over in seconds, not multiply an
 // 8s timeout across the entire pool set.
-const rpcTransport = fallback(RPC_URLS.map(url => http(url, { timeout: 3_000, retryCount: 0 }))) as unknown as ReturnType<typeof http>
+const rpcTransport = fallback(RPC_URLS.map(url => http(url, { timeout: 8_000, retryCount: 1 }))) as unknown as ReturnType<typeof http>
 const pub = createPublicClient({ chain: robinhoodChain, transport: rpcTransport })
 
 // The wallet -- transaction submission AND nonce reads -- is pinned to ONE
