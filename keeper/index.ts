@@ -158,7 +158,7 @@ const GAS_ONLY_RECHECK_MS = Math.max(1_000, parseInt(process.env.GAS_ONLY_RECHEC
 // silently falls behind if gas prices rise. Either way, the reserve is
 // NEVER touched -- it's what keeps the bot able to pay for its own future
 // transactions no matter what.
-const GAS_RESERVE_ETH = parseFloat(process.env.GAS_RESERVE_ETH ?? '0.005')
+const GAS_RESERVE_ETH = parseFloat(process.env.GAS_RESERVE_ETH ?? '0.002')
 // A refill targets 120% of the live reserve so the unwrap transaction and the
 // next arb do not immediately put the wallet below the floor again.
 const GAS_REFILL_TARGET_BPS = BigInt(process.env.GAS_REFILL_TARGET_BPS ?? '12000')
