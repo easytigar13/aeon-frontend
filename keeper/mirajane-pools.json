@@ -257,6 +257,16 @@
       "v3Fee": 10000
     },
     {
+      "name": "UniV3 WETH/NASDAQ",
+      "address": "0x434DE0f0800D9653D26F96bEcD9702d8d740EE3c",
+      "token0": "WETH",
+      "token1": "NASDAQ",
+      "feeBps": 100,
+      "isUniV2": false,
+      "kind": "uniV3",
+      "v3Fee": 10000
+    },
+    {
       "name": "UniV4 WETH/AEON",
       "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
       "token0": "WETH",

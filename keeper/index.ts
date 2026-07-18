@@ -74,14 +74,16 @@ import * as dotenv from 'dotenv'
 import * as fs from 'fs'
 import { fileURLToPath } from 'url'
 import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES, UNISWAP_POOLS, ALGEBRA_CONTRACTS, DLMM_CONTRACTS } from '../src/config/contracts'
-import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, AEON_NATIVE_ARB_EXECUTOR_ABI, ALGEBRA_POOL_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
+import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, AEON_NATIVE_ARB_EXECUTOR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
 import { writeBotStatus, appendTrade, isBotStoreConfigured } from '../src/lib/botStore'
 import { discoverUniswapV3Pools, quoteUniswapV3ExactInput, UNISWAP_V3, UNISWAP_V3_FACTORY_ABI, UNISWAP_V3_POOL_ABI, type UniswapV3PoolRef } from './uniswap-v3'
 import { discoverUniswapV4Pools, quoteUniswapV4ExactInput, UNISWAP_V4, UNISWAP_V4_STATE_VIEW_ABI, type UniswapV4PoolRef } from './uniswap-v4'
 
-const envPath      = fileURLToPath(new URL('.env', import.meta.url))
+// A second PM2 process can run this exact, current implementation with its
+// own wallet/config instead of drifting on a stale copy of index.ts.
+const envPath      = fileURLToPath(new URL(process.env.KEEPER_ENV_FILE ?? '.env', import.meta.url))
 dotenv.config({ path: envPath })
 
 // Overridable so a test run (or a second isolated instance) never touches
@@ -93,6 +95,7 @@ const tradesLogPath = process.env.TRADES_LOG_FILE ?? fileURLToPath(new URL('trad
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const PRIMARY_RPC  = process.env.RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'
+const SUBMIT_RPC   = process.env.SUBMIT_RPC_URL ?? 'https://sequencer.mainnet.chain.robinhood.com'
 const RPC_URLS     = Array.from(new Set([
   ...((process.env.RPC_URLS ?? '').split(',').map(url => url.trim()).filter(Boolean)),
   PRIMARY_RPC,
@@ -120,6 +123,16 @@ const REPLACEMENT_GAS_BUMP_BPS = BigInt(process.env.REPLACEMENT_GAS_BUMP_BPS ?? 
 // it gives the sequencer room to include the transaction if base fees move
 // between signing and inclusion. Keep priority fee at zero, matching the L2.
 const TX_FEE_HEADROOM_BPS = BigInt(process.env.TX_FEE_HEADROOM_BPS ?? '20000')
+const TX_GAS_LIMIT_HEADROOM_BPS = BigInt(process.env.TX_GAS_LIMIT_HEADROOM_BPS ?? '12000')
+
+type KeeperRole = 'mirajane' | 'aeon-only' | 'general'
+const configuredRole = (process.env.KEEPER_ROLE ?? (process.env.MIRAJANE_MODE === 'true' ? 'mirajane' : 'general')).trim()
+if (!['mirajane', 'aeon-only', 'general'].includes(configuredRole)) {
+  console.error(`KEEPER_ROLE="${configuredRole}" must be mirajane, aeon-only, or general`)
+  process.exit(1)
+}
+const KEEPER_ROLE = configuredRole as KeeperRole
+const BOT_ID = (process.env.BOT_ID ?? (KEEPER_ROLE === 'aeon-only' ? 'aeon' : '')).trim() || undefined
 
 // Cross-venue (OpenOcean / 1inch) scan runs far less often than the internal
 // pool scan -- it costs real API calls (rate-limited, especially 1inch),
@@ -208,6 +221,19 @@ function parseFeeBps(fee: string): number {
 // only pool discovery, state-fetching, and on-chain execution differ by kind.
 type PoolKind = 'vAMM' | 'uniV2' | 'uniV3' | 'uniV4' | 'CL' | 'DLMM'
 
+const AEON_POOL_KINDS = new Set<PoolKind>(['vAMM', 'CL', 'DLMM'])
+function isAeonPoolKind(kind: PoolKind): boolean {
+  return AEON_POOL_KINDS.has(kind)
+}
+
+function routeAllowedForRole(hops: HopCandidate[]): boolean {
+  if (KEEPER_ROLE === 'aeon-only') return hops.every(hop => isAeonPoolKind(hop.pool.pool.kind))
+  // Mirajane owns external price discovery. AEON-only cycles belong to Bot 2,
+  // while mixed routes remain valid because they contain an external venue.
+  if (KEEPER_ROLE === 'mirajane') return hops.some(hop => !isAeonPoolKind(hop.pool.pool.kind))
+  return true
+}
+
 interface PoolConfig {
   name: string
   address: `0x${string}`
@@ -295,7 +321,7 @@ const uniswapV4Refs = new Map<string, UniswapV4PoolRef>()
 // is what makes it stupidly fast (tiny fixed graph, zero remote latency) while
 // still arbing AEON/CASHCAT/etc across every venue. Cycles still only ever
 // settle in AEON/ETH/USDG (SETTLEMENT_TOKENS), unchanged.
-const MIRAJANE_MODE = process.env.MIRAJANE_MODE === 'true'
+const MIRAJANE_MODE = KEEPER_ROLE === 'mirajane'
 function loadMirajanePools() {
   const path = fileURLToPath(new URL('mirajane-pools.json', import.meta.url))
   const { poolConfigs, v4Refs } = JSON.parse(fs.readFileSync(path, 'utf-8'))
@@ -328,31 +354,46 @@ async function validateMirajaneV3Pools(): Promise<void> {
   if (!MIRAJANE_MODE || mirajaneV3Validated) return
 
   const rejected = new Set<string>()
-  for (const pool of ARB_POOLS.filter(p => p.kind === 'uniV3')) {
+  const pools = ARB_POOLS.filter(p => p.kind === 'uniV3')
+  const metadata = await chunkedMulticall(pools.flatMap(pool => {
     const address = getAddress(pool.address)
-    const [factory, fee, token0, token1] = await Promise.all([
-      pub.readContract({ address, abi: UNISWAP_V3_POOL_ABI, functionName: 'factory' }),
-      pub.readContract({ address, abi: UNISWAP_V3_POOL_ABI, functionName: 'fee' }),
-      pub.readContract({ address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token0' }),
-      pub.readContract({ address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token1' }),
-    ])
-
-    const actualFactory = getAddress(factory as `0x${string}`)
-    const actualToken0 = getAddress(token0 as `0x${string}`)
-    const actualToken1 = getAddress(token1 as `0x${string}`)
-    const actualFee = Number(fee)
+    return [
+      { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'factory' as const },
+      { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'fee' as const },
+      { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token0' as const },
+      { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token1' as const },
+    ]
+  }))
+  const canonicalCalls: any[] = []
+  const resolved: { pool: PoolConfig; address: `0x${string}`; actualFactory: `0x${string}`; actualToken0: `0x${string}`; actualToken1: `0x${string}`; actualFee: number }[] = []
+  for (let i = 0; i < pools.length; i++) {
+    const values = metadata.slice(i * 4, i * 4 + 4)
+    if (values.some(value => value?.status !== 'success')) {
+      rejected.add(pools[i].address.toLowerCase())
+      continue
+    }
+    const actualFactory = getAddress(values[0].result as `0x${string}`)
+    const actualFee = Number(values[1].result)
+    const actualToken0 = getAddress(values[2].result as `0x${string}`)
+    const actualToken1 = getAddress(values[3].result as `0x${string}`)
+    resolved.push({ pool: pools[i], address: getAddress(pools[i].address), actualFactory, actualToken0, actualToken1, actualFee })
+    canonicalCalls.push({
+      address: UNISWAP_V3.factory, abi: UNISWAP_V3_FACTORY_ABI,
+      functionName: 'getPool' as const, args: [actualToken0, actualToken1, actualFee] as const,
+    })
+  }
+  const canonicalResults = await chunkedMulticall(canonicalCalls)
+  for (let i = 0; i < resolved.length; i++) {
+    const { pool, address, actualFactory, actualToken0, actualToken1, actualFee } = resolved[i]
     const expectedTokens = new Set([
       getAddress(TOKENS[pool.token0].address).toLowerCase(),
       getAddress(TOKENS[pool.token1].address).toLowerCase(),
     ])
     const tokenPairMatches = expectedTokens.has(actualToken0.toLowerCase())
       && expectedTokens.has(actualToken1.toLowerCase())
-    const canonical = await pub.readContract({
-      address: UNISWAP_V3.factory,
-      abi: UNISWAP_V3_FACTORY_ABI,
-      functionName: 'getPool',
-      args: [actualToken0, actualToken1, actualFee],
-    }) as `0x${string}`
+    const canonical = canonicalResults[i]?.status === 'success'
+      ? getAddress(canonicalResults[i].result as `0x${string}`)
+      : ZERO_ADDRESS
     const reason = actualFactory.toLowerCase() !== UNISWAP_V3.factory.toLowerCase()
       ? `factory ${actualFactory}`
       : !tokenPairMatches
@@ -366,6 +407,10 @@ async function validateMirajaneV3Pools(): Promise<void> {
     if (reason) {
       rejected.add(address.toLowerCase())
       console.warn(`[mirajane] rejecting non-canonical V3 pool ${pool.name} ${address}: ${reason}`)
+    } else {
+      // The generated manifest historically stored zero here. Correct it from
+      // the pool itself so approximate ranking includes the real V3 fee too.
+      pool.feeBps = (BigInt(actualFee) + 99n) / 100n
     }
   }
 
@@ -454,6 +499,10 @@ const PAIR_ABI = [
     ]},
   { name: 'token0', type: 'function', stateMutability: 'view',
     inputs: [], outputs: [{ type: 'address' }] },
+  { name: 'token1', type: 'function', stateMutability: 'view',
+    inputs: [], outputs: [{ type: 'address' }] },
+  { name: 'feeBps', type: 'function', stateMutability: 'view',
+    inputs: [], outputs: [{ type: 'uint24' }] },
 ] as const
 
 const UNISWAP_FACTORY_ABI = [{
@@ -495,18 +544,92 @@ const account = privateKeyToAccount(PK)
 const rpcTransport = fallback(RPC_URLS.map(url => http(url, { timeout: 8_000, retryCount: 1 }))) as unknown as ReturnType<typeof http>
 const pub = createPublicClient({ chain: robinhoodChain, transport: rpcTransport })
 
-// The wallet -- transaction submission AND nonce reads -- is pinned to ONE
-// reliable endpoint (the full-node RPC), NOT the read fallback. The fallback
-// spans a flaky/lagging secondary (Blockscout: rate-limits, 429s, trails the
-// chain); when the primary momentarily timed out under 50ms polling, sends
-// and nonce reads fell over to it and ended up with DIFFERENT views of the
-// account nonce -> "nonce lower than the current nonce" on every wrap, which
-// starved every WETH-funded cycle. Sends/nonce on a single source of truth
-// removes the desync entirely; if this one endpoint hiccups a send just fails
-// cleanly and retries next tick (the nonce guard rolls back), never desyncs.
-const walletTransport = http(PRIMARY_RPC, { timeout: 8_000, retryCount: 1 })
-const walletRpc = createPublicClient({ chain: robinhoodChain, transport: walletTransport })
-const wal = createWalletClient({ account, chain: robinhoodChain, transport: walletTransport })
+// Nonce reads stay on the full JSON-RPC endpoint. Signed raw transactions go
+// directly to Robinhood's sequencer endpoint, avoiding an extra provider hop.
+// The sequencer intentionally exposes eth_sendRawTransaction only, so every
+// transaction is fully prepared (nonce, fees and gas) from `pub` before send.
+const walletReadTransport = http(PRIMARY_RPC, { timeout: 8_000, retryCount: 1 })
+const submissionTransport = http(SUBMIT_RPC, { timeout: 8_000, retryCount: 1 })
+const walletRpc = createPublicClient({ chain: robinhoodChain, transport: walletReadTransport })
+const wal = createWalletClient({ account, chain: robinhoodChain, transport: submissionTransport })
+const providerWal = createWalletClient({ account, chain: robinhoodChain, transport: walletReadTransport })
+
+async function submitPreparedContract(request: any): Promise<`0x${string}`> {
+  try {
+    return await wal.writeContract(request)
+  } catch (error: any) {
+    const message = String(error?.shortMessage ?? error?.message ?? error).toLowerCase()
+    const transportFailure = message.includes('http request') || message.includes('fetch failed')
+      || message.includes('timeout') || message.includes('not available') || message.includes('method')
+    if (SUBMIT_RPC === PRIMARY_RPC || !transportFailure) throw error
+    console.warn('   Direct sequencer transport unavailable; broadcasting through the primary RPC fallback')
+    return providerWal.writeContract(request)
+  }
+}
+
+function enforcePoolUniverseForRole() {
+  if (KEEPER_ROLE !== 'aeon-only') return
+  for (let i = ARB_POOLS.length - 1; i >= 0; i--) {
+    if (!isAeonPoolKind(ARB_POOLS[i].kind)) ARB_POOLS.splice(i, 1)
+  }
+}
+
+// Do not rely on the website's static pool manifest for the defender. Read
+// both AEON factories so every compatible, known-token vAMM pool becomes
+// tradeable automatically after it is created. Directly deployed legacy
+// pools remain covered by the static seed and are de-duplicated here.
+async function discoverAeonVammPools(): Promise<number> {
+  const factories = [CONTRACTS.AeonFactory, CONTRACTS.AeonFactoryV2]
+  const lengths = await pub.multicall({
+    contracts: factories.map(address => ({ address, abi: AEON_FACTORY_ABI, functionName: 'allPoolsLength' as const })),
+    allowFailure: true,
+  })
+  const poolCalls: any[] = []
+  for (let fi = 0; fi < factories.length; fi++) {
+    const lengthResult = lengths[fi]
+    if (lengthResult?.status !== 'success') continue
+    const length = Number(lengthResult.result)
+    for (let i = 0; i < length; i++) {
+      poolCalls.push({ address: factories[fi], abi: AEON_FACTORY_ABI, functionName: 'allPools' as const, args: [BigInt(i)] as const })
+    }
+  }
+  if (poolCalls.length === 0) return 0
+  const poolResults = await chunkedMulticall(poolCalls)
+  const addresses = Array.from(new Set(poolResults
+    .filter(result => result?.status === 'success')
+    .map(result => getAddress(result.result as `0x${string}`))))
+    .filter(address => !ARB_POOLS.some(pool => pool.address.toLowerCase() === address.toLowerCase()))
+  if (addresses.length === 0) return 0
+
+  const metadata = await chunkedMulticall(addresses.flatMap(address => [
+    { address, abi: PAIR_ABI, functionName: 'token0' as const },
+    { address, abi: PAIR_ABI, functionName: 'token1' as const },
+    { address, abi: PAIR_ABI, functionName: 'feeBps' as const },
+  ]))
+  const addressToSymbol = new Map<string, keyof typeof TOKENS>()
+  for (const symbol of Object.keys(TOKENS) as (keyof typeof TOKENS)[]) {
+    addressToSymbol.set(TOKENS[symbol].address.toLowerCase(), symbol)
+  }
+
+  let added = 0
+  for (let i = 0; i < addresses.length; i++) {
+    const token0Result = metadata[i * 3]
+    const token1Result = metadata[i * 3 + 1]
+    const feeResult = metadata[i * 3 + 2]
+    if (token0Result?.status !== 'success' || token1Result?.status !== 'success' || feeResult?.status !== 'success') continue
+    const token0 = addressToSymbol.get(String(token0Result.result).toLowerCase())
+    const token1 = addressToSymbol.get(String(token1Result.result).toLowerCase())
+    if (!token0 || !token1) continue
+    ARB_POOLS.push({
+      name: `AEON ${token0}/${token1}`,
+      address: addresses[i], token0, token1,
+      feeBps: BigInt(feeResult.result as bigint),
+      isUniV2: false, kind: 'vAMM',
+    })
+    added++
+  }
+  return added
+}
 
 async function discoverUniswapPools(): Promise<number> {
   const ownPools = [...ARB_POOLS]
@@ -819,7 +942,7 @@ let poolStateCacheReady = false
 
 async function fetchAllStates(changedPoolKeys?: Set<string>): Promise<PoolState[]> {
   const poolsToFetch = !poolStateCacheReady || !changedPoolKeys
-    ? ARB_POOLS
+    ? [...ARB_POOLS]
     : ARB_POOLS.filter(pool => changedPoolKeys.has(poolStateKey(pool)) || !knownPoolStateKeys.has(poolStateKey(pool)))
 
   if (poolsToFetch.length > 0) {
@@ -1664,7 +1787,7 @@ function publishPendingTransaction() {
     const next = { ...prior, updatedAt: new Date().toISOString(), pendingTransaction }
     fs.writeFileSync(statusPath, JSON.stringify(next, null, 2))
     if (isBotStoreConfigured()) {
-      writeBotStatus(next).catch(err => console.error(`[bot store error] failed to sync pending transaction: ${err?.message ?? err}`))
+      writeBotStatus(next, BOT_ID).catch(err => console.error(`[bot store error] failed to sync pending transaction: ${err?.message ?? err}`))
     }
   } catch { /* the first full tick will create status.json */ }
 }
@@ -1731,6 +1854,14 @@ function venueSequenceFromHops(hops: HopCandidate[]): string {
   return hops.map(hop => hop.pool.kind).join('>')
 }
 
+function venueSequenceAllowedForRole(sequence: string): boolean {
+  const kinds = sequence.split('>').filter(Boolean) as PoolKind[]
+  if (kinds.length === 0) return false
+  if (KEEPER_ROLE === 'aeon-only') return kinds.every(isAeonPoolKind)
+  if (KEEPER_ROLE === 'mirajane') return kinds.some(kind => !isAeonPoolKind(kind))
+  return true
+}
+
 function recordHistoricalOutcome(
   pathKey: string,
   venueSequence: string,
@@ -1763,9 +1894,11 @@ function loadRouteHistory() {
         const key = tokenPathKey(String(trade.pair ?? ''))
         const tokens = key.split('>').filter(Boolean)
         if (tokens.length < 3 || tokens[0] !== tokens[tokens.length - 1]) continue
+        const venueSequence = venueSequenceFromDescription(String(trade.venues ?? ''))
+        if (!venueSequenceAllowedForRole(venueSequence)) continue
         recordHistoricalOutcome(
           key,
-          venueSequenceFromDescription(String(trade.venues ?? '')),
+          venueSequence,
           trade.status,
           String(trade.time ?? ''),
         )
@@ -1900,6 +2033,7 @@ try {
     '0x0986a4a9dbd054f86b96600abbd18020c61057ce9dfe2bfd82551f055d982e84': 'Uniswap V4 (WETH→CASHCAT) → AEON DEX (CASHCAT→WETH)',
   }
   recentArbs = recentArbs.map(arb => ({ ...arb, venues: arb.venues ?? (arb.txHash ? knownVenuePaths[arb.txHash] : undefined) }))
+  recentArbs = recentArbs.filter(arb => venueSequenceAllowedForRole(venueSequenceFromDescription(arb.venues ?? '')))
   cumulativeProfit = prior.cumulativeProfit ?? {}
   totalExecuted = prior.totalArbsExecuted ?? 0
   totalFailed = prior.totalArbsFailed ?? 0
@@ -1929,7 +2063,7 @@ function recordArb(arb: ExecutedArb) {
     console.error(`[trade log error] failed to append to trades.log: ${err?.message ?? err}`)
   }
   if (isBotStoreConfigured()) {
-    appendTrade(arb).catch(err => console.error(`[bot store error] failed to sync trade: ${err?.message ?? err}`))
+    appendTrade(arb, BOT_ID).catch(err => console.error(`[bot store error] failed to sync trade: ${err?.message ?? err}`))
   }
 }
 
@@ -1968,12 +2102,17 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
   const status = {
     updatedAt: new Date().toISOString(),
     keeperAddress: account.address,
+    keeperRole: KEEPER_ROLE,
+    botId: BOT_ID ?? null,
     dryRun: DRY_RUN,
     intervalMs: INTERVAL_MS,
     tickMs,
     scanTelemetry: { ...scanTelemetry },
     poolsMonitored: ARB_POOLS.length,
+    aeonPoolsMonitored: ARB_POOLS.filter(pool => isAeonPoolKind(pool.kind)).length,
+    externalPoolsMonitored: ARB_POOLS.filter(pool => !isAeonPoolKind(pool.kind)).length,
     rpcEndpointCount: RPC_URLS.length,
+    directSequencerSubmission: SUBMIT_RPC.includes('sequencer.'),
     gasReserve: {
       requiredEth: formatEther(gasReserveWei),
       availableEth: formatEther(nativeEth),
@@ -2027,7 +2166,7 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
   // Upstash's free-tier command budget fast (86,400+/day at 1s intervals).
   if (isBotStoreConfigured() && Date.now() - lastRedisStatusSync >= REDIS_STATUS_SYNC_INTERVAL_MS) {
     lastRedisStatusSync = Date.now()
-    writeBotStatus(status).catch(err => console.error(`[bot store error] failed to sync status: ${err?.message ?? err}`))
+    writeBotStatus(status, BOT_ID).catch(err => console.error(`[bot store error] failed to sync status: ${err?.message ?? err}`))
   }
 }
 
@@ -2050,7 +2189,7 @@ async function writeStatusHeartbeat(blockNumber: bigint): Promise<void> {
   fs.writeFileSync(statusPath, JSON.stringify(status, null, 2))
   if (isBotStoreConfigured() && Date.now() - lastRedisStatusSync >= REDIS_STATUS_SYNC_INTERVAL_MS) {
     lastRedisStatusSync = Date.now()
-    writeBotStatus(status).catch(err => console.error(`[bot store error] failed to sync heartbeat: ${err?.message ?? err}`))
+    writeBotStatus(status, BOT_ID).catch(err => console.error(`[bot store error] failed to sync heartbeat: ${err?.message ?? err}`))
   }
 }
 
@@ -2083,9 +2222,13 @@ async function writeContractTracked(args: any, label: string): Promise<{ hash: `
   const nonce = await acquireNonce()
   const currentGasPrice = await pub.getGasPrice()
   const initialMaxFeePerGas = (currentGasPrice * TX_FEE_HEADROOM_BPS) / 10_000n
+  // A sequencer endpoint is submit-only. Populate gas through the read RPC so
+  // viem can sign locally and make its sole sequencer call eth_sendRawTransaction.
+  const estimatedGas = args.gas ?? await pub.estimateContractGas({ ...args, account: account.address } as any)
+  const gas = (BigInt(estimatedGas) * TX_GAS_LIMIT_HEADROOM_BPS) / 10_000n + 1n
   let hash: `0x${string}`
   try {
-    hash = await wal.writeContract({ ...args, nonce, maxFeePerGas: initialMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
+    hash = await submitPreparedContract({ ...args, gas, nonce, maxFeePerGas: initialMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
   } catch (sendErr: any) {
     // "nonce too low" => the chain is AHEAD of us (a lagging RPC handed back a
     // stale pending count). Keep the high-water where acquireNonce left it so
@@ -2120,7 +2263,7 @@ async function writeContractTracked(args: any, label: string): Promise<{ hash: `
     const bumpedMaxFeePerGas = initialMaxFeePerGas + (initialMaxFeePerGas * REPLACEMENT_GAS_BUMP_BPS) / 10_000n + 1n
     console.warn(`   Pending ${label} ${hash} exceeded ${PENDING_TX_TIMEOUT_MS}ms; replacing nonce ${nonce} with a ${Number(REPLACEMENT_GAS_BUMP_BPS) / 100}% gas bump`)
     try {
-      const replacementHash = await wal.writeContract({ ...args, nonce, maxFeePerGas: bumpedMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
+      const replacementHash = await submitPreparedContract({ ...args, gas, nonce, maxFeePerGas: bumpedMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
       hash = replacementHash
       pendingTransaction = { hash, label, nonce, submittedAt: new Date().toISOString(), replacements: 1 }
       publishPendingTransaction()
@@ -3944,25 +4087,42 @@ async function exactRankedShortlist(
         || (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
     })
 
-  // Keep two slots for the best brand-new market edges, then fill the first
-  // wave with historically completed closed cycles across every funded base.
-  // This learns from 204 real closed-cycle successes without hardcoding or
-  // excluding any supplied pool.
-  for (const candidate of eligible.slice(0, 2)) add(candidate)
+  // Net profit wins first. Then explicitly diversify across funded inputs and
+  // venue families before history is allowed to fill the remaining budget.
+  // That prevents yesterday's AEON/CASHCAT winners from starving a new V2/V3
+  // edge while still retaining the useful evidence in completed trades.
+  for (const candidate of eligible.slice(0, 3)) add(candidate)
   for (const symbol of SETTLEMENT_TOKENS) {
-    add(proven.find(candidate => candidate.opp.tokenIn.symbol === symbol))
+    add(eligible.find(candidate => candidate.opp.tokenIn.symbol === symbol))
   }
-  for (const hopCount of [2, 3, 4]) add(proven.find(candidate => candidate.opp.hops.length === hopCount))
-  for (const candidate of proven) add(candidate)
+  if (KEEPER_ROLE === 'mirajane') {
+    add(eligible.find(candidate => candidate.opp.hops.every(hop => !isAeonPoolKind(hop.pool.pool.kind))))
+    add(eligible.find(candidate => {
+      const internal = candidate.opp.hops.some(hop => isAeonPoolKind(hop.pool.pool.kind))
+      const external = candidate.opp.hops.some(hop => !isAeonPoolKind(hop.pool.pool.kind))
+      return internal && external
+    }))
+    for (const kind of ['uniV2', 'uniV3', 'uniV4'] as PoolKind[]) {
+      add(eligible.find(candidate => candidate.opp.hops.some(hop => hop.pool.pool.kind === kind)))
+    }
+  } else if (KEEPER_ROLE === 'aeon-only') {
+    for (const kind of ['vAMM', 'CL', 'DLMM'] as PoolKind[]) {
+      add(eligible.find(candidate => candidate.opp.hops.some(hop => hop.pool.pool.kind === kind)))
+    }
+  }
 
   // One rotating exploration candidate guarantees that an unproven family
   // can establish its own success history instead of being permanently
   // buried behind known routes.
   const unproven = eligible.filter(candidate => historicalStats(candidate.opp.hops).successes === 0)
   if (unproven.length > 0) {
-    add(unproven[explorationCursor % unproven.length])
-    explorationCursor++
+    const explorationSlots = Math.min(3, unproven.length)
+    for (let i = 0; i < explorationSlots; i++) {
+      add(unproven[(explorationCursor + i) % unproven.length])
+    }
+    explorationCursor += explorationSlots
   }
+  for (const candidate of proven) add(candidate)
   for (const candidate of eligible) add(candidate)
 
   scanTelemetry.exactSelected = selected.length
@@ -4026,9 +4186,11 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     recentErrors = recentErrors.slice(0, 5)
   }
 
-  if (Date.now() - lastPoolRefresh >= POOL_REFRESH_INTERVAL_MS) {
+  if (!poolDiscoveryInFlight && Date.now() - lastPoolRefresh >= POOL_REFRESH_INTERVAL_MS) {
     lastPoolRefresh = Date.now()
-    try {
+    poolDiscoveryInFlight = true
+    const refreshStartedAt = Date.now()
+    void (async () => {
       const before = ARB_POOLS.length
       const counts = await refreshPoolDiscovery()
       const added = ARB_POOLS.length - before
@@ -4036,12 +4198,13 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
         poolStateCacheReady = false
         console.log(`\n[${new Date().toISOString()}] Pool discovery refresh: +${added} new pools (now ${ARB_POOLS.length} monitored) -- uniV2:${counts.uniswapV2} uniV3:${counts.uniswapV3} uniV4:${counts.uniswapV4} CL:${counts.cl} DLMM:${counts.dlmm}`)
       }
-    } catch (err: any) {
+      console.log(`[pool discovery refresh complete] ${Date.now() - refreshStartedAt}ms`)
+    })().catch((err: any) => {
       const message = err?.message ?? String(err)
       console.error(`[pool discovery refresh error] ${message}`)
       recentErrors.unshift({ time: new Date().toISOString(), message })
       recentErrors = recentErrors.slice(0, 5)
-    }
+    }).finally(() => { poolDiscoveryInFlight = false })
   }
   let states: PoolState[]
   const stateReadStartedAt = Date.now()
@@ -4130,10 +4293,19 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     opp.routeScore = scoreOpportunity(opp, netUsd)
   }
 
-  const approximateCandidates: RankedInternalCandidate[] = [
+  let approximateCandidates: RankedInternalCandidate[] = [
     ...opps.map(opp => ({ kind: 'cycle' as const, opp })),
     ...settlementOpps.map(opp => ({ kind: 'settlement' as const, opp })),
-  ]
+  ].filter(candidate => routeAllowedForRole(candidate.opp.hops))
+  // On an event-driven scan, a route whose pools did not change cannot have
+  // developed a new reserve edge. Restricting the expensive exact-quote wave
+  // to routes touching the changed pool is the defender's main latency win.
+  // Full and gas-only scans still consider every role-eligible route.
+  if (changedPoolKeys && changedPoolKeys.size > 0) {
+    approximateCandidates = approximateCandidates.filter(candidate =>
+      candidate.opp.hops.some(hop => changedPoolKeys.has(poolStateKey(hop.pool.pool))),
+    )
+  }
   scanTelemetry.approximateCandidates = approximateCandidates.length
   sortRankedCandidates(approximateCandidates)
   scanTelemetry.localSearchMs = Date.now() - localSearchStartedAt
@@ -4253,6 +4425,7 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
 }
 
 interface DiscoveryCounts {
+  aeonVamm: number
   uniswapV2: number
   uniswapV3: number
   uniswapV4: number
@@ -4260,30 +4433,35 @@ interface DiscoveryCounts {
   dlmm: number
 }
 
-async function refreshPoolDiscovery(): Promise<DiscoveryCounts> {
-  if (MIRAJANE_MODE) {
-    // The set remains fixed, but validate every configured V3 pool once at
-    // startup so the quoter and UniversalRouter cannot disagree on factory.
-    await validateMirajaneV3Pools()
-    return { uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl: 0, dlmm: 0 }
+async function refreshPoolDiscovery(includeRemoteExternal = true): Promise<DiscoveryCounts> {
+  const aeonVamm = await discoverAeonVammPools()
+  const { cl, dlmm } = await discoverClAndDlmmPools()
+  if (KEEPER_ROLE === 'aeon-only') {
+    enforcePoolUniverseForRole()
+    return { aeonVamm, uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl, dlmm }
   }
   if (POOL_ALLOWLIST_ACTIVE) {
     // Allowlist mode: skip every remote external discovery (the slow part).
     // Still run the local CL/DLMM registration so any allowlisted CL/DLMM
     // pool gets its proper (Algebra / LB) quoting path, then hard-filter
     // ARB_POOLS down to exactly the allowlist.
-    const { cl, dlmm } = await discoverClAndDlmmPools()
     applyPoolAllowlist()
-    return { uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl, dlmm }
+    return { aeonVamm, uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl, dlmm }
+  }
+  // The curated Mirajane manifest is a fast seed, not a permanent blindfold.
+  // Validate its V3 entries and then discover newly live external venues too.
+  await validateMirajaneV3Pools()
+  if (!includeRemoteExternal) {
+    return { aeonVamm, uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl, dlmm }
   }
   const uniswapV2 = await discoverUniswapPools()
   const uniswapV3 = await discoverHighVolumeUniswapV3Pools()
   const uniswapV4 = await discoverHighVolumeUniswapV4Pools()
-  const { cl, dlmm } = await discoverClAndDlmmPools()
-  return { uniswapV2, uniswapV3, uniswapV4, cl, dlmm }
+  return { aeonVamm, uniswapV2, uniswapV3, uniswapV4, cl, dlmm }
 }
 
 let lastPoolRefresh = 0
+let poolDiscoveryInFlight = false
 
 let eventWatchPoolCount = -1
 let directEventPoolKeys = new Map<string, string[]>()
@@ -4350,7 +4528,9 @@ async function main() {
   let retryDelayMs = 1000
   while (!discoveryCounts) {
     try {
-      discoveryCounts = await refreshPoolDiscovery()
+      // Mirajane already has a validated curated seed. Remote factory/API
+      // expansion runs later in the background and must never block startup.
+      discoveryCounts = await refreshPoolDiscovery(KEEPER_ROLE !== 'mirajane')
     } catch (err: any) {
       const message = err?.message ?? String(err)
       console.error(`[startup discovery error] ${message}; retrying in ${retryDelayMs}ms`)
@@ -4358,11 +4538,13 @@ async function main() {
       retryDelayMs = Math.min(30_000, retryDelayMs * 2)
     }
   }
-  const { uniswapV2: uniswapPools, uniswapV3: uniswapV3Pools, uniswapV4: uniswapV4Pools, cl: clPools, dlmm: dlmmPools } = discoveryCounts
+  const { aeonVamm: aeonVammPools, uniswapV2: uniswapPools, uniswapV3: uniswapV3Pools, uniswapV4: uniswapV4Pools, cl: clPools, dlmm: dlmmPools } = discoveryCounts
   lastPoolRefresh = Date.now()
   console.log(`AEON Arb Keeper`)
   console.log(`  Keeper address: ${account.address}`)
+  console.log(`  Keeper role: ${KEEPER_ROLE}`)
   console.log(`  RPC endpoints with automatic failover: ${RPC_URLS.length}`)
+  console.log(`  Direct sequencer submission: ${SUBMIT_RPC}`)
   console.log(`  Max wallet balance per opportunity: ${Number(MAX_BALANCE_USAGE_BPS) / 100}%`)
   console.log(`  Route cooldown: after ${ROUTE_FAILURE_THRESHOLD} failures, ${ROUTE_COOLDOWN_MS}ms base`)
   console.log(`  Settlement tokens: ${BASE_TOKEN_OVERRIDE || SETTLEMENT_TOKENS.join(', ')} (AEON preferred on equal net profit)`)
@@ -4372,12 +4554,13 @@ async function main() {
   console.log(`  Pools monitored: ${ARB_POOLS.length}`)
   if (MIRAJANE_MODE) {
     const byKind = ARB_POOLS.reduce((m, p) => (m[p.kind] = (m[p.kind] || 0) + 1, m), {} as Record<string, number>)
-    console.log(`  MIRAJANE MODE -- fixed curated cross-venue set, all discovery disabled: ${JSON.stringify(byKind)}`)
+    console.log(`  MIRAJANE MODE -- curated seed plus live external discovery; AEON-only routes excluded: ${JSON.stringify(byKind)}`)
     for (const p of ARB_POOLS) console.log(`    - ${p.name} [${p.kind}]${p.v3Fee ? ' fee ' + p.v3Fee : ''}${p.v4Native ? ' [native]' : ''}`)
   } else if (POOL_ALLOWLIST_ACTIVE) {
     console.log(`  Pool allowlist ACTIVE (${POOL_ALLOWLIST.size} pools) -- external discovery disabled:`)
     for (const p of ARB_POOLS) console.log(`    - ${p.name} [${p.kind}] ${p.address}`)
   }
+  console.log(`  AEON factory vAMM pools discovered: ${aeonVammPools}`)
   console.log(`  Uniswap V2 pools discovered: ${uniswapPools}`)
   console.log(`  Uniswap V3 pools above $${MIN_EXTERNAL_VOLUME_USD.toLocaleString()} volume discovered: ${uniswapV3Pools}`)
   console.log(`  Uniswap V4 pools above $${MIN_EXTERNAL_VOLUME_USD.toLocaleString()} volume discovered: ${uniswapV4Pools}`)

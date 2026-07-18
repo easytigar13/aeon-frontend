@@ -1,6 +1,6 @@
-// pm2 config for running arb keeper #2 24/7 -- an independent copy of
-// keeper/, its own process, own wallet, own config. Free to diverge from
-// keeper/'s logic entirely; nothing here is shared at runtime.
+// PM2 config for AEON-only keeper #2. It intentionally runs keeper/index.ts
+// so both wallets receive the same safety fixes; KEEPER_ROLE and the separate
+// env/status/log files enforce its independent AEON-only responsibility.
 //
 // Setup on the server (one time):
 //   npm install -g pm2
@@ -16,13 +16,18 @@
 module.exports = {
   apps: [
     {
-      // Calls tsx's own entry point directly instead of going through `npx` --
-      // pm2 on Windows can't execute the npx.cmd shim as a script (it tries to
-      // parse the batch file as JavaScript and fails immediately).
       name: 'aeon-arb-keeper-2',
-      script: './node_modules/tsx/dist/cli.mjs',
-      args: 'index.ts',
+      script: '../keeper/index.ts',
+      interpreter: 'node',
+      node_args: '--import tsx',
       cwd: __dirname,
+      env: {
+        KEEPER_ENV_FILE: '../keeper2/.env',
+        KEEPER_ROLE: 'aeon-only',
+        BOT_ID: 'aeon',
+        STATUS_FILE: '../keeper2/status.json',
+        TRADES_LOG_FILE: '../keeper2/trades.log',
+      },
       autorestart: true,
       restart_delay: 5000,
       max_restarts: 50,
