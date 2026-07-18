@@ -4,7 +4,7 @@
 //
 // Bot #1 ("Mirajane", keeper/) keeps botId=undefined so its Redis keys and
 // default API behavior are byte-identical to before this registry existed --
-// any already-configured deployment is unaffected. Bot #2 ("AEON", keeper2/)
+// any already-configured deployment is unaffected. Bot #2 ("ERZA", keeper2/)
 // is a fully independent second instance -- own wallet, own local files, own
 // Redis namespace (see src/lib/botStore.ts) -- added 2026-07-15.
 
@@ -18,7 +18,7 @@ export interface BotConfig {
 
 export const BOTS: BotConfig[] = [
   { slug: 'mirajane', botId: undefined, dir: 'keeper',  name: 'Mirajane', subtitle: 'Bot #1 — broad-scope arb + cross-venue' },
-  { slug: 'aeon',      botId: 'aeon',    dir: 'keeper2', name: 'AEON',     subtitle: 'Bot #2 — AEON pools only, tuned for speed' },
+  { slug: 'aeon',      botId: 'aeon',    dir: 'keeper2', name: 'ERZA',     subtitle: 'External-only WETH arb, tuned for speed' },
 ]
 
 export const DEFAULT_BOT = BOTS[0]
