@@ -7,12 +7,13 @@ import { useAccount, useReadContract, useReadContracts, useWriteContract, useWai
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, CL_GAUGES, DLMM_GAUGES, ALGEBRA_CONTRACTS, CONTRACTS, TOKENS, NATIVE_SENTINEL, LEGACY_AEON_VOTER } from '@/config/contracts'
-import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, CL_GAUGE_ABI, DLMM_GAUGE_ABI, ERC721_APPROVE_ABI } from '@/config/abis'
+import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, CL_GAUGE_ABI, DLMM_GAUGE_ABI, ERC721_APPROVE_ABI, FURNACE_ABI, VOTING_ESCROW_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { useClPositions, type ClPosition } from '@/hooks/useClPositions'
 import { useDlmmPositions } from '@/hooks/useDlmmPositions'
+import { useVeNftPositions } from '@/hooks/useVeNftPositions'
 import { TokenIcon } from '@/components/TokenIcon'
 import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
 import { binIdToPrice } from '@/lib/dlmmMath'
@@ -1196,7 +1197,37 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
   }, [])
   const totalDlmmUsd = Object.values(dlmmUsdByPool).reduce((s: number, v) => s + (v ?? 0), 0)
 
-  const totalTokenUsd = tokenOnlyUsd + totalLpUsd + totalClUsd + totalDlmmUsd
+  const aeonPx = prices['AEON'] ?? null
+
+  // veNFT locks — locked AEON lives in the escrow, NOT the wallet, so a plain
+  // balance view can't see it. For most ve(3,3) users this is the bulk of their
+  // AEON; omitting it is exactly why the portfolio total wouldn't match.
+  const veNfts = useVeNftPositions(wallet)
+  const totalLockedAeon = veNfts.reduce((s, p) => s + Number(formatUnits(p.lockedAmount, 18)), 0)
+  const totalVotingPower = veNfts.reduce((s, p) => s + Number(formatUnits(p.votingPower, 18)), 0)
+  const lockedUsd = aeonPx ? totalLockedAeon * aeonPx : 0
+
+  // Furnace burn position — burned AEON is permanently gone (deflationary) but
+  // grants voting power + a claimable reward stream. The burn itself is shown as
+  // an informational stat; only the CLAIMABLE reward is recoverable value.
+  const { data: furnaceTokenId } = useReadContract({
+    address: CONTRACTS.TheFurnace, abi: FURNACE_ABI, functionName: 'addressToTokenId',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!wallet, refetchInterval: 30000 },
+  })
+  const hasFurnace = furnaceTokenId !== undefined && (furnaceTokenId as bigint) > 0n
+  const { data: furnaceBurnedRaw } = useReadContract({
+    address: CONTRACTS.TheFurnace, abi: FURNACE_ABI, functionName: 'burnedByToken',
+    args: hasFurnace ? [furnaceTokenId as bigint] : undefined, query: { enabled: hasFurnace, refetchInterval: 30000 },
+  })
+  const { data: furnaceEarnedRaw } = useReadContract({
+    address: CONTRACTS.TheFurnace, abi: FURNACE_ABI, functionName: 'earned',
+    args: hasFurnace ? [furnaceTokenId as bigint] : undefined, query: { enabled: hasFurnace, refetchInterval: 30000 },
+  })
+  const furnaceBurned = furnaceBurnedRaw !== undefined ? Number(formatUnits(furnaceBurnedRaw as bigint, 18)) : 0
+  const furnaceEarned = furnaceEarnedRaw !== undefined ? Number(formatUnits(furnaceEarnedRaw as bigint, 18)) : 0
+  const furnaceClaimableUsd = aeonPx ? furnaceEarned * aeonPx : 0
+
+  const totalTokenUsd = tokenOnlyUsd + totalLpUsd + totalClUsd + totalDlmmUsd + lockedUsd + furnaceClaimableUsd
 
   return (
     <div className="space-y-8">
@@ -1207,7 +1238,7 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
         </div>
         <div className="text-4xl font-display font-bold text-text-primary mb-4">{wallet ? fmtUsd(totalTokenUsd || null) : '$—'}</div>
         {wallet && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-3 border-t border-bg-border">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-3 border-t border-bg-border">
             <div>
               <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">Token Balances</div>
               <div className="text-lg font-display font-semibold text-text-primary">{fmtUsd(tokenOnlyUsd || null)}</div>
@@ -1227,6 +1258,22 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
             <div>
               <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">DLMM Positions</div>
               <div className="text-lg font-display font-semibold text-amber-400">{totalDlmmUsd > 0 ? fmtUsd(totalDlmmUsd) : '$—'}</div>
+            </div>
+            <div>
+              <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">
+                Locked veAEON{veNfts.length > 0 ? ` · ${veNfts.length}` : ''}
+              </div>
+              <div className="text-lg font-display font-semibold text-aeon-400">{lockedUsd > 0 ? fmtUsd(lockedUsd) : '$—'}</div>
+              {totalLockedAeon > 0 && (
+                <div className="text-2xs font-mono text-text-muted">{totalLockedAeon.toLocaleString(undefined, { maximumFractionDigits: 2 })} AEON</div>
+              )}
+            </div>
+            <div>
+              <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">Furnace Claimable</div>
+              <div className="text-lg font-display font-semibold text-orange-400">{furnaceClaimableUsd > 0 ? fmtUsd(furnaceClaimableUsd) : '$—'}</div>
+              {furnaceBurned > 0 && (
+                <div className="text-2xs font-mono text-text-muted">{furnaceBurned.toLocaleString(undefined, { maximumFractionDigits: 2 })} AEON burned</div>
+              )}
             </div>
           </div>
         )}
@@ -1319,6 +1366,61 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
             {DLMM_POOLS.map(pool => (
               <DlmmPoolPositions key={pool.address} pool={pool} wallet={wallet} prices={prices} onUsd={onDlmmUsd} />
             ))}
+          </div>
+        </div>
+      )}
+
+      {wallet && veNfts.length > 0 && (
+        <div>
+          <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">
+            Locked veAEON · {totalVotingPower.toLocaleString(undefined, { maximumFractionDigits: 2 })} voting power
+          </div>
+          <div className="space-y-2">
+            {veNfts.map(nft => {
+              const locked = Number(formatUnits(nft.lockedAmount, 18))
+              const power = Number(formatUnits(nft.votingPower, 18))
+              const unlock = nft.lockedEnd > 0n ? new Date(Number(nft.lockedEnd) * 1000) : null
+              const usd = aeonPx ? locked * aeonPx : null
+              return (
+                <div key={nft.tokenId.toString()} className="card px-4 py-3 flex items-center justify-between transition-all duration-200 hover:-translate-y-0.5 hover:border-aeon-400/30 hover:shadow-[0_0_24px_-12px_rgba(255,184,0,0.4)]">
+                  <div className="flex items-center gap-3">
+                    <TokenIcon symbol="AEON" size={40} />
+                    <div>
+                      <div className="text-sm font-semibold text-text-primary">veNFT #{nft.tokenId.toString()}</div>
+                      <div className="text-2xs text-text-muted">
+                        {power.toLocaleString(undefined, { maximumFractionDigits: 2 })} veAEON
+                        {unlock ? ` · unlocks ${unlock.toLocaleDateString()}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="font-mono text-sm text-text-primary">{locked.toLocaleString(undefined, { maximumFractionDigits: 4 })} AEON</div>
+                    <div className="text-xs font-mono text-aeon-400">{usd ? fmtUsd(usd) : '—'}</div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {wallet && hasFurnace && furnaceBurned > 0 && (
+        <div>
+          <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Furnace Position</div>
+          <div className="card px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <TokenIcon symbol="AEON" size={40} />
+              <div>
+                <div className="text-sm font-semibold text-text-primary">Furnace #{(furnaceTokenId as bigint).toString()}</div>
+                <div className="text-2xs text-text-muted">
+                  {furnaceBurned.toLocaleString(undefined, { maximumFractionDigits: 2 })} AEON burned (permanent · grants voting power)
+                </div>
+              </div>
+            </div>
+            <div className="text-right">
+              <div className="font-mono text-sm text-orange-400">{furnaceEarned.toLocaleString(undefined, { maximumFractionDigits: 4 })} AEON</div>
+              <div className="text-xs font-mono text-text-muted">claimable{furnaceClaimableUsd > 0 ? ` · ${fmtUsd(furnaceClaimableUsd)}` : ''}</div>
+            </div>
           </div>
         </div>
       )}
