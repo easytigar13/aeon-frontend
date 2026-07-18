@@ -327,10 +327,17 @@ function loadMirajanePools() {
   const { poolConfigs, v4Refs } = JSON.parse(fs.readFileSync(path, 'utf-8'))
   ARB_POOLS.splice(0, ARB_POOLS.length) // drop the default POOLS-derived set
   for (const p of poolConfigs) {
+    // Curated V3 manifests historically stored feeBps=0 and relied on the
+    // exact quoter to catch the discrepancy. That made the fast search invent
+    // gross edges which disappeared at preflight. Always derive the AMM-model
+    // fee from the canonical V3 fee tier, even when an older manifest is read.
+    const modeledFeeBps = p.kind === 'uniV3' && p.v3Fee !== undefined
+      ? Math.ceil(Number(p.v3Fee) / 100)
+      : Number(p.feeBps)
     ARB_POOLS.push({
       name: p.name, address: p.address as `0x${string}`,
       token0: p.token0 as keyof typeof TOKENS, token1: p.token1 as keyof typeof TOKENS,
-      feeBps: BigInt(p.feeBps), isUniV2: !!p.isUniV2, kind: p.kind as PoolKind,
+      feeBps: BigInt(modeledFeeBps), isUniV2: !!p.isUniV2, kind: p.kind as PoolKind,
       ...(p.v3Fee !== undefined ? { v3Fee: p.v3Fee } : {}),
       ...(p.v4PoolId ? {
         v4PoolId: p.v4PoolId as `0x${string}`, v4Fee: p.v4Fee, v4TickSpacing: p.v4TickSpacing,
@@ -3685,17 +3692,42 @@ async function executeCashcatV3Arb(opp: CashcatV3Opp, graph: Map<string, HopCand
 // before the second leg, holding the intermediate token rather than force a
 // losing trade if it's no longer profitable after re-quote.
 
-// Only the two tokens with the STRONGEST confirmed external liquidity (see
-// contracts.ts's own comments on each -- VIRTUAL has real, verified
-// WETH/VIRTUAL and USDG/VIRTUAL pools; CASHCAT trades elsewhere on this
-// chain at ~$88M/24h volume) -- deliberately a short, curated list, not
-// every non-AEON-exclusive token. OpenOcean's public tier hard-caps at 1
-// request/second with a 1-HOUR lockout on exceeding it (see aggregators.ts's
-// throttleOpenOcean) -- every extra candidate here is real request budget
-// taken from that shared, global limit, so this stays intentionally small.
-// A single size fraction for the same reason (halves the request count
-// versus trying multiple sizes per pair).
-const EXTERNAL_ARB_MID_CANDIDATES: (keyof typeof TOKENS)[] = ['VIRTUAL', 'CASHCAT']
+// Do not hard-code intermediate tokens here. The atomic pool-graph scanner
+// above has always considered every connected token, and this slower
+// aggregator fallback must follow the same rule. Derive candidates from the
+// external pools Mirajane currently monitors, so a newly configured token
+// (PONS, another meme token, etc.) becomes eligible automatically as soon as
+// at least one executable external pool for it has been discovered.
+//
+// Aggregator public APIs are rate limited, so scan a rotating batch rather
+// than issuing requests for every token in the same tick. This changes only
+// cadence, not coverage: every eligible token gets a turn without CASHCAT or
+// VIRTUAL receiving special treatment.
+const EXTERNAL_ARB_CANDIDATES_PER_SCAN = Math.max(1, parseInt(process.env.EXTERNAL_ARB_CANDIDATES_PER_SCAN ?? '4'))
+let externalArbCandidateCursor = 0
+
+function externalArbMidCandidates(): (keyof typeof TOKENS)[] {
+  const eligible = new Set<keyof typeof TOKENS>()
+  for (const pool of ARB_POOLS) {
+    if (isAeonPoolKind(pool.kind)) continue
+    for (const sym of [pool.token0, pool.token1]) {
+      if (sym === 'ETH') continue
+      if ((SETTLEMENT_TOKENS as readonly string[]).includes(String(sym))) continue
+      if (UNISWAP_UNSUPPORTED_TOKENS.has(sym)) continue
+      eligible.add(sym)
+    }
+  }
+
+  const all = [...eligible].sort((a, b) => String(a).localeCompare(String(b)))
+  if (all.length <= EXTERNAL_ARB_CANDIDATES_PER_SCAN) return all
+
+  const selected: (keyof typeof TOKENS)[] = []
+  for (let i = 0; i < EXTERNAL_ARB_CANDIDATES_PER_SCAN; i++) {
+    selected.push(all[(externalArbCandidateCursor + i) % all.length])
+  }
+  externalArbCandidateCursor = (externalArbCandidateCursor + selected.length) % all.length
+  return selected
+}
 const EXTERNAL_ARB_SIZE_FRACTIONS = [0.10]
 
 interface ExternalArbOpp {
@@ -3714,13 +3746,14 @@ async function scanExternalToExternalArbs(
   balances: Record<string, bigint>, bases: (keyof typeof TOKENS)[],
 ): Promise<ExternalArbOpp[]> {
   const opps: ExternalArbOpp[] = []
+  const midCandidates = externalArbMidCandidates()
 
   for (const baseSym of bases) {
     const walletBal = balances[baseSym] ?? 0n
     if (walletBal <= 0n) continue
     const tokenBase = TOKENS[baseSym]
 
-    for (const midSym of EXTERNAL_ARB_MID_CANDIDATES) {
+    for (const midSym of midCandidates) {
       if (midSym === baseSym) continue
       const tokenMid = TOKENS[midSym]
 

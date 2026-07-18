@@ -297,6 +297,9 @@ export const TOKENS = {
   MARIAN: { address: '0x01637b14B7378B99dE75A64d50656d98488D9a4d' as `0x${string}`, symbol: 'MARIAN', decimals: 18, name: 'Lady Marian' },
   VEX: { address: '0x8Ff92566f2e81BDd68EDfAa8cde73942A723796b' as `0x${string}`, symbol: 'VEX', decimals: 18, name: 'ProjectVex' },
   JUGGERNAUT: { address: '0xD7321801CAae694090694Ff55A9323139F043B88' as `0x${string}`, symbol: 'JUGGERNAUT', decimals: 18, name: 'The Juggernaut' },
+  // Verified through Robinhood Chain's Blockscout API: ERC-20 "Vaults",
+  // symbol VAULTS, 18 decimals. External routing intermediate only.
+  VAULTS: { address: '0x768a8b3421742d5e17Bd901B63898674fC097777' as `0x${string}`, symbol: 'VAULTS', decimals: 18, name: 'Vaults' },
   // real, independently-deployed token (verified via Blockscout: 93 holders,
   // no price/volume data yet elsewhere on this chain) — added 2026-07-08 at
   // the user's request, with an AEON vAMM pool

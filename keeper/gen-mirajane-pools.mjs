@@ -33,6 +33,7 @@ const TOK = {
   '0x01637b14b7378b99de75a64d50656d98488d9a4d': 'MARIAN',
   '0x8ff92566f2e81bdd68edfaa8cde73942a723796b': 'VEX',
   '0xd7321801caae694090694ff55a9323139f043b88': 'JUGGERNAUT',
+  '0x768a8b3421742d5e17bd901b63898674fc097777': 'VAULTS',
 }
 const sym = a => TOK[(a || '').toLowerCase()]
 
@@ -53,6 +54,8 @@ const ADDRESSES = [
   '0x1e4238E85B8C76c3a81d8E65544367ebb9A61b78','0x9b950a37FeC9D64E9Ed95a169E64cd7B98677690',
   // canonical Uniswap V3 INDEX/WETH, fee 1%
   '0xD29893fFac8b29eC4Db2cfE0CDB3FE1377c028Ff',
+  // canonical Uniswap V3 NASDAQ/WETH, fee 1%
+  '0x434DE0f0800D9653D26F96bEcD9702d8d740EE3c',
   // verified V2-compatible external pairs
   '0x8803c117ccae7B5146297876c2A25DF135141C4d','0xd95e8e2Cd04c207625C6F23c974d365a5F3A91D3',
   '0xD65870Dc303b9CA01e07528B220C76d5fE917126','0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D',
@@ -62,6 +65,9 @@ const ADDRESSES = [
   '0x1Fb312C6eabfeCe638009A64d7688b6b44A382c0','0x237609918F330ADD285b8bC5f8f2922283D1C4C5',
   '0xFE331fD29b54bCE09D52988FA691e3B18B0A4081','0x4fA27693a052863bb5e9D3E63bA02857442A1Ecf',
   '0x588b0785f50063260003B7790C42f1eF74902746',
+  // VAULTS: canonical liquid WETH V2 and canonical active USDG V3 (1%).
+  // Zero-liquidity V3/V4 pools are intentionally excluded.
+  '0x1988b801dBb178D77956B67Fa9B6B61Ae59E3a0a','0xdf949e67A21761a52AE043982E640360f7986B25',
 ]
 const V4_POOL_IDS = [
   '0x68d8ea65260d4dd8266536f8e2d039ef84b0e2acc72241d0290c527a21ee02fb','0x524ac58d769cf6cca091ec78adac38f1b3fe5677879ace1754b6ed5310547f3a',
@@ -115,6 +121,7 @@ const verifiedExternalV2Fee = new Map([
   ['0xd65870dc303b9ca01e07528b220c76d5fe917126', 25],
   ['0xee8d21c0e5aaa31269867db4e3c66a90c3d5951d', 30],
   ['0x817f16f5d8da83d1b089b082c0172af3923618da', 30],
+  ['0x1988b801dbb178d77956b67fa9b6b61ae59e3a0a', 30],
 ])
 const certifiedHookedV4 = new Set([
   '0x00dd2df2f17d431cf3a0938f06c9cf9abc5e9643b6cc466ca3f71f3af246edf3',
@@ -166,7 +173,7 @@ for (const addr of ADDRESSES) {
       skipped.push(`${addr} (${s0}/${s1} -- not canonical Uniswap V3; excluded)`)
       continue
     }
-    poolConfigs.push({ name: `UniV3 ${s0}/${s1}`, address: getAddress(addr), token0: s0, token1: s1, feeBps: 0, isUniV2: false, kind: 'uniV3', v3Fee })
+    poolConfigs.push({ name: `UniV3 ${s0}/${s1}`, address: getAddress(addr), token0: s0, token1: s1, feeBps: Math.ceil(v3Fee / 100), isUniV2: false, kind: 'uniV3', v3Fee })
     continue
   }
   skipped.push(`${addr} (${s0}/${s1} -- not our vAMM/CL, not Uni V3; unknown AMM, excluded for safety)`)

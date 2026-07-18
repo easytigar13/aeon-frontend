@@ -69,7 +69,7 @@
       "address": "0x77fee4F698d2925d8437D678ab804886D0695d11",
       "token0": "WETH",
       "token1": "AEON",
-      "feeBps": 0,
+      "feeBps": 30,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 3000
@@ -106,7 +106,7 @@
       "address": "0xA70fc67C9F69da90B63a0e4C05D229954574E313",
       "token0": "CASHCAT",
       "token1": "WETH",
-      "feeBps": 0,
+      "feeBps": 100,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 10000
@@ -116,7 +116,7 @@
       "address": "0xd42A491087a15E5afd51FEb3606066Cc152d2b09",
       "token0": "CASHCAT",
       "token1": "WETH",
-      "feeBps": 0,
+      "feeBps": 30,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 3000
@@ -126,7 +126,7 @@
       "address": "0x4B0c312fFbB068F6a0bEa128759E35d94B94D0E1",
       "token0": "CASHCAT",
       "token1": "USDG",
-      "feeBps": 0,
+      "feeBps": 100,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 10000
@@ -136,7 +136,17 @@
       "address": "0xD29893fFac8b29eC4Db2cfE0CDB3FE1377c028Ff",
       "token0": "WETH",
       "token1": "INDEX",
-      "feeBps": 0,
+      "feeBps": 100,
+      "isUniV2": false,
+      "kind": "uniV3",
+      "v3Fee": 10000
+    },
+    {
+      "name": "UniV3 WETH/NASDAQ",
+      "address": "0x434DE0f0800D9653D26F96bEcD9702d8d740EE3c",
+      "token0": "WETH",
+      "token1": "NASDAQ",
+      "feeBps": 100,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 10000
@@ -191,7 +201,7 @@
       "address": "0x9cc8c4F6118419A27f113723F1DeA646685Be55F",
       "token0": "WETH",
       "token1": "VIRTUAL",
-      "feeBps": 0,
+      "feeBps": 5,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 500
@@ -201,7 +211,7 @@
       "address": "0x7a11bC7f32AEA2f81E83DA399C70315d9662869C",
       "token0": "WETH",
       "token1": "VIRTUAL",
-      "feeBps": 0,
+      "feeBps": 30,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 3000
@@ -211,7 +221,7 @@
       "address": "0x1Fb312C6eabfeCe638009A64d7688b6b44A382c0",
       "token0": "WETH",
       "token1": "VIRTUAL",
-      "feeBps": 0,
+      "feeBps": 100,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 10000
@@ -221,7 +231,7 @@
       "address": "0x237609918F330ADD285b8bC5f8f2922283D1C4C5",
       "token0": "WETH",
       "token1": "TENDIES",
-      "feeBps": 0,
+      "feeBps": 100,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 10000
@@ -231,7 +241,7 @@
       "address": "0xFE331fD29b54bCE09D52988FA691e3B18B0A4081",
       "token0": "MARIAN",
       "token1": "WETH",
-      "feeBps": 0,
+      "feeBps": 100,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 10000
@@ -241,7 +251,7 @@
       "address": "0x4fA27693a052863bb5e9D3E63bA02857442A1Ecf",
       "token0": "USDG",
       "token1": "VEX",
-      "feeBps": 0,
+      "feeBps": 30,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 3000
@@ -251,16 +261,25 @@
       "address": "0x588b0785f50063260003B7790C42f1eF74902746",
       "token0": "WETH",
       "token1": "JUGGERNAUT",
-      "feeBps": 0,
+      "feeBps": 100,
       "isUniV2": false,
       "kind": "uniV3",
       "v3Fee": 10000
     },
     {
-      "name": "UniV3 WETH/NASDAQ",
-      "address": "0x434DE0f0800D9653D26F96bEcD9702d8d740EE3c",
+      "name": "UniV2 WETH/VAULTS",
+      "address": "0x1988b801dBb178D77956B67Fa9B6B61Ae59E3a0a",
       "token0": "WETH",
-      "token1": "NASDAQ",
+      "token1": "VAULTS",
+      "feeBps": 30,
+      "isUniV2": true,
+      "kind": "uniV2"
+    },
+    {
+      "name": "UniV3 USDG/VAULTS",
+      "address": "0xdf949e67A21761a52AE043982E640360f7986B25",
+      "token0": "USDG",
+      "token1": "VAULTS",
       "feeBps": 100,
       "isUniV2": false,
       "kind": "uniV3",
