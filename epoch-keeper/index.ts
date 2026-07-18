@@ -49,6 +49,13 @@ const EMISSIONS_ENGINE_ADDRESS = (process.env.EMISSIONS_ENGINE_ADDRESS ?? CONTRA
 // like AeonVoter.distributeAll() does for vAMM gauges -- otherwise CL/DLMM LP
 // stakers' gauge rewardRate never gets set and they earn nothing.
 const MULTI_GAUGE_CONTROLLER_ADDRESS = (process.env.MULTI_GAUGE_CONTROLLER_ADDRESS ?? CONTRACTS.MultiGaugeController) as `0x${string}`
+// BuybackEngineV3 — 20% of each vAMM pool's finalized fees route here via
+// FeeDistributorV4.routeBuyback(pool, epoch, token): swapped to AEON (AEON fees
+// need no swap), then 50% burned + 50% distributed to Furnace burners. Nothing
+// drove routeBuyback before, so that 20% stranded. Fully wired on-chain
+// (distributor.notifier == buyback; poolForToken[USDG/WETH] registered) — the
+// only missing piece was a caller.
+const BUYBACK_ENGINE_ADDRESS = (process.env.BUYBACK_ENGINE_ADDRESS ?? CONTRACTS.BuybackEngine) as `0x${string}`
 
 // One-off: cutover (2026-07-16) happened mid-epoch, so the real fees
 // collected up to that point (~700 AEON) are stranded on the OLD
@@ -80,6 +87,11 @@ const GAUGE_ABI = parseAbi([
 const FEE_DIST_ABI = parseAbi([
   'function snapshotEpoch()',
   'function lastSnapshotPeriod() view returns (uint256)',
+  'function poolEpochTokens(address,uint256,uint256) view returns (address)',
+  'function routeBuyback(address pool, uint256 epoch, address token)',
+])
+const BUYBACK_ABI = parseAbi([
+  'function processDeferred()',
 ])
 const ENGINE_ABI = parseAbi([
   'function updatePeriod() returns (uint256)',
@@ -191,6 +203,45 @@ async function closeEpochIfNeeded() {
     }
   } catch (e: any) {
     log(`MultiGauge distributeBatch() failed (non-fatal): ${e.shortMessage ?? e.message}`)
+  }
+
+  // 3c. Drive the 20% buyback for the just-finalized epoch's fees. For each
+  //     vAMM pool that booked fees, routeBuyback() sends 20% to BuybackEngineV3
+  //     -> swapped to AEON (AEON fees skip the swap) -> 50% burned + 50% to
+  //     Furnace burners. Permissionless + idempotent (claimed[0] guard) and a
+  //     no-op on zero fees, so re-runs are safe. Non-fatal. Fork-verified: the
+  //     wiring (distributor.notifier == buyback, poolForToken[USDG/WETH] set)
+  //     is correct; only a caller was missing.
+  try {
+    const finalizedEpoch = currentEpoch - WEEK
+    const poolCount = await publicClient.readContract({ address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 'length' })
+    let routed = 0
+    for (let i = 0n; i < poolCount; i++) {
+      const pool = await publicClient.readContract({ address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 'pools', args: [i] })
+      for (let ti = 0n; ti < 4n; ti++) { // vAMM pools carry <=2 fee tokens; cap defensively
+        let token: `0x${string}`
+        try {
+          token = await publicClient.readContract({
+            address: FEE_DISTRIBUTOR_ADDRESS, abi: FEE_DIST_ABI, functionName: 'poolEpochTokens', args: [pool, finalizedEpoch, ti],
+          }) as `0x${string}`
+        } catch { break } // out of bounds -> no more fee tokens for this pool/epoch
+        try {
+          const hash = await walletClient.writeContract({
+            address: FEE_DISTRIBUTOR_ADDRESS, abi: FEE_DIST_ABI, functionName: 'routeBuyback',
+            args: [pool, finalizedEpoch, token], gas: 3_000_000n,
+          })
+          await publicClient.waitForTransactionReceipt({ hash })
+          routed++
+        } catch { /* already routed / zero fee / swap deferred internally -- non-fatal */ }
+      }
+    }
+    try {
+      const hash = await walletClient.writeContract({ address: BUYBACK_ENGINE_ADDRESS, abi: BUYBACK_ABI, functionName: 'processDeferred', gas: 6_000_000n })
+      await publicClient.waitForTransactionReceipt({ hash })
+    } catch { /* nothing deferred -- fine */ }
+    log(`Buyback: routed ${routed} pool/token fee stream(s) for epoch ${finalizedEpoch}`)
+  } catch (e: any) {
+    log(`Buyback routing failed (non-fatal): ${e.shortMessage ?? e.message}`)
   }
 
   // 4. Known bug workaround: old-style AeonGauge.notifyRewardAmount() sets
