@@ -43,6 +43,12 @@ const STATUS_FILE = fileURLToPath(new URL('status.json', import.meta.url))
 const VOTER_ADDRESS          = (process.env.VOTER_ADDRESS ?? CONTRACTS.AeonVoter) as `0x${string}`
 const FEE_DISTRIBUTOR_ADDRESS = (process.env.FEE_DISTRIBUTOR_ADDRESS ?? CONTRACTS.FeeDistributor) as `0x${string}`
 const EMISSIONS_ENGINE_ADDRESS = (process.env.EMISSIONS_ENGINE_ADDRESS ?? CONTRACTS.EmissionsEngine) as `0x${string}`
+// CL/DLMM emissions are vote-directed through the MultiGaugeController (the
+// engine sends it the multiGaugeBps share). Its epochReward must then be
+// forwarded into each CL/DLMM gauge via distribute()/distributeBatch(), exactly
+// like AeonVoter.distributeAll() does for vAMM gauges -- otherwise CL/DLMM LP
+// stakers' gauge rewardRate never gets set and they earn nothing.
+const MULTI_GAUGE_CONTROLLER_ADDRESS = (process.env.MULTI_GAUGE_CONTROLLER_ADDRESS ?? CONTRACTS.MultiGaugeController) as `0x${string}`
 
 // One-off: cutover (2026-07-16) happened mid-epoch, so the real fees
 // collected up to that point (~700 AEON) are stranded on the OLD
@@ -78,6 +84,10 @@ const FEE_DIST_ABI = parseAbi([
 const ENGINE_ABI = parseAbi([
   'function updatePeriod() returns (uint256)',
   'function activePeriod() view returns (uint256)',
+])
+const MULTI_GAUGE_ABI = parseAbi([
+  'function getPools() view returns (address[])',
+  'function distributeBatch(address[] poolList, uint256 epoch) returns (uint256)',
 ])
 const ERC20_ABI = parseAbi([
   'function balanceOf(address) view returns (uint256)',
@@ -160,6 +170,27 @@ async function closeEpochIfNeeded() {
   } catch (e: any) {
     log(`distributeAll() failed: ${e.shortMessage ?? e.message}`)
     return
+  }
+
+  // 3b. Forward vote-directed CL/DLMM emissions from the MultiGaugeController
+  //     into each registered CL/DLMM gauge for this epoch (mirrors distributeAll
+  //     for the vAMM side). Permissionless + idempotent: distribute() tracks
+  //     distributed[epoch][pool], so this is a no-op when the controller had no
+  //     votes/rewards this epoch. Non-fatal -- never blocks the vAMM path.
+  try {
+    const mgPools = await publicClient.readContract({
+      address: MULTI_GAUGE_CONTROLLER_ADDRESS, abi: MULTI_GAUGE_ABI, functionName: 'getPools',
+    }) as readonly `0x${string}`[]
+    if (mgPools.length > 0) {
+      const hash = await walletClient.writeContract({
+        address: MULTI_GAUGE_CONTROLLER_ADDRESS, abi: MULTI_GAUGE_ABI, functionName: 'distributeBatch',
+        args: [mgPools as `0x${string}`[], currentEpoch], gas: 15_000_000n,
+      })
+      await publicClient.waitForTransactionReceipt({ hash })
+      log(`MultiGauge distributeBatch() ok (${mgPools.length} CL/DLMM pools, epoch ${currentEpoch})`)
+    }
+  } catch (e: any) {
+    log(`MultiGauge distributeBatch() failed (non-fatal): ${e.shortMessage ?? e.message}`)
   }
 
   // 4. Known bug workaround: old-style AeonGauge.notifyRewardAmount() sets

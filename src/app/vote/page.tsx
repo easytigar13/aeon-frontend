@@ -398,11 +398,15 @@ export default function VotePage() {
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000
   const now = Date.now()
   const elapsedDays = (now - Math.floor(now / WEEK_MS) * WEEK_MS) / (24 * 60 * 60 * 1000)
-  const seenEmissionPools = new Set<string>()
-  const emissionPools = [...POOLS, ...CL_POOLS, ...DLMM_POOLS].filter(pool => {
+  // ONLY vAMM pools' fees reach the FeeDistributor and size the emission mint
+  // (their gauges call collectFees->notifyFees). CL/DLMM swap fees accrue to
+  // LPs natively and never enter lastEpochFeesUSD, so the emission budget is
+  // computed over vAMM POOLS only.
+  const seenFeePools = new Set<string>()
+  const feeBudgetPools = POOLS.filter(pool => {
     const address = pool.address.toLowerCase()
-    if (seenEmissionPools.has(address)) return false
-    seenEmissionPools.add(address)
+    if (seenFeePools.has(address)) return false
+    seenFeePools.add(address)
     return true
   })
   const hasLiveFeeData = Object.keys(volResult.byPoolWeek).length > 0
@@ -413,7 +417,7 @@ export default function VotePage() {
   // uses RAW all-token fees, because voters really do receive every fee token
   // in-kind regardless of whether the oracle can price it.
   const liveEpochFeesUSD = hasLiveFeeData
-    ? emissionPools.reduce((sum, pool) => {
+    ? feeBudgetPools.reduce((sum, pool) => {
         const volumeWeek = volResult.byPoolWeek[pool.address.toLowerCase()]
         if (volumeWeek === undefined) return sum
         const raw = (volumeWeek / 7) * elapsedDays * parseFeeRate(pool.fee)

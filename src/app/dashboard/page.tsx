@@ -236,7 +236,12 @@ export default function DashboardPage() {
   // current epoch we are, tracks live activity instead -- same fix pattern
   // as the APR calc above (real trailing average, not a stale/blended guess).
   const pricedTokens = useOraclePricedTokens()
-  const realFeesThisEpoch = uniquePools.reduce((sum, p) => {
+  // Only vAMM pools' fees reach the FeeDistributor (their gauges call
+  // collectFees->notifyFees). CL/DLMM swap fees accrue to LPs natively and are
+  // NOT part of the voter/emission fee flow, so every FeeDistributor-derived
+  // number below (voter 80% share AND the 25% emission budget) is vAMM-only.
+  const vammFeePools = POOLS
+  const realFeesThisEpoch = vammFeePools.reduce((sum, p) => {
     const volWeek = volByAddrWeek[p.address.toLowerCase()]
     if (volWeek === undefined || volWeek === null) return sum
     return sum + (volWeek / 7) * elapsedDays * parseFeeRate(p.fee)
@@ -245,7 +250,7 @@ export default function DashboardPage() {
   // counts unpriced (memecoin) fees as $0 toward lastEpochFeesUSD. Weight each
   // pool's fees by its priced fraction so the projected mint matches reality
   // instead of overstating it with fees the protocol values at zero.
-  const pricedRealFeesThisEpoch = uniquePools.reduce((sum, p) => {
+  const pricedRealFeesThisEpoch = vammFeePools.reduce((sum, p) => {
     const volWeek = volByAddrWeek[p.address.toLowerCase()]
     if (volWeek === undefined || volWeek === null) return sum
     const raw = (volWeek / 7) * elapsedDays * parseFeeRate(p.fee)
@@ -286,7 +291,7 @@ export default function DashboardPage() {
   // basis is the SAME live weekly-volume estimate now powering the fee/APR
   // numbers elsewhere (byPoolWeek), not the on-chain snapshot -- that
   // snapshot only updates when the fee-collection keeper runs.
-  const feesByPool = uniquePools
+  const feesByPool = vammFeePools
     .map(p => {
       const volWeek = volByAddrWeek[p.address.toLowerCase()]
       const feesWeek = volWeek !== undefined ? volWeek * parseFeeRate(p.fee) : null
