@@ -14,6 +14,7 @@ import { useVolume24h } from '@/hooks/useVolume24h'
 import { useClPositions, type ClPosition } from '@/hooks/useClPositions'
 import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { useVeNftPositions } from '@/hooks/useVeNftPositions'
+import { usePendingRewards } from '@/hooks/usePendingRewards'
 import { TokenIcon } from '@/components/TokenIcon'
 import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
 import { binIdToPrice } from '@/lib/dlmmMath'
@@ -1227,7 +1228,12 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
   const furnaceEarned = furnaceEarnedRaw !== undefined ? Number(formatUnits(furnaceEarnedRaw as bigint, 18)) : 0
   const furnaceClaimableUsd = aeonPx ? furnaceEarned * aeonPx : 0
 
-  const totalTokenUsd = tokenOnlyUsd + totalLpUsd + totalClUsd + totalDlmmUsd + lockedUsd + furnaceClaimableUsd
+  // Pending gauge emissions — claimable AEON across every staked vAMM/CL/DLMM
+  // gauge. Real recoverable value the wallet can claim right now.
+  const { pendingAeon } = usePendingRewards(wallet)
+  const pendingRewardsUsd = aeonPx ? pendingAeon * aeonPx : 0
+
+  const totalTokenUsd = tokenOnlyUsd + totalLpUsd + totalClUsd + totalDlmmUsd + lockedUsd + furnaceClaimableUsd + pendingRewardsUsd
 
   return (
     <div className="space-y-8">
@@ -1273,6 +1279,13 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
               <div className="text-lg font-display font-semibold text-orange-400">{furnaceClaimableUsd > 0 ? fmtUsd(furnaceClaimableUsd) : '$—'}</div>
               {furnaceBurned > 0 && (
                 <div className="text-2xs font-mono text-text-muted">{furnaceBurned.toLocaleString(undefined, { maximumFractionDigits: 2 })} AEON burned</div>
+              )}
+            </div>
+            <div>
+              <div className="text-2xs font-mono text-text-muted uppercase tracking-wider mb-1">Pending Rewards</div>
+              <div className="text-lg font-display font-semibold text-emerald-400">{pendingRewardsUsd > 0 ? fmtUsd(pendingRewardsUsd) : '$—'}</div>
+              {pendingAeon > 0.000001 && (
+                <div className="text-2xs font-mono text-text-muted">{pendingAeon.toLocaleString(undefined, { maximumFractionDigits: 4 })} AEON claimable</div>
               )}
             </div>
           </div>
