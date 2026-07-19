@@ -15,6 +15,7 @@ import { useClPositions, type ClPosition } from '@/hooks/useClPositions'
 import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { useVeNftPositions } from '@/hooks/useVeNftPositions'
 import { usePendingRewards } from '@/hooks/usePendingRewards'
+import { LegacyPositions } from '@/components/LegacyPositions'
 import { TokenIcon } from '@/components/TokenIcon'
 import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
 import { binIdToPrice } from '@/lib/dlmmMath'
@@ -1291,6 +1292,8 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
           </div>
         )}
       </div>
+
+      <LegacyPositions />
 
       <div>
         <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Token Balances</div>

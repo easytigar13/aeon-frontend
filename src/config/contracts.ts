@@ -262,6 +262,29 @@ export const DLMM_GAUGES: Record<string, `0x${string}`> = {
   '0xA41bf62FbD1EeDa210C65F7fE2B82B4f71bF819F': '0x60f1e81ddb461754eca6a89afeed230a792c321d', // DLMM ROBINFUN/USDG
 }
 
+// Orphaned pre-cutover vAMM gauges. The V2->V3 voter cutover (2026-07-16)
+// created BRAND-NEW gauges, so LP staked in the old gauges before then is
+// still there but invisible on the current site (the current voter doesn't
+// reference these). Discovered on-chain by scanning wallet LP-deposit history;
+// every one is confirmed `voter.isGauge()==false` (orphaned). The `pool` LP
+// token is a CURRENT pool -- so after withdrawing, LP can be re-staked in the
+// live gauge. Standard AeonGauge interface: withdraw(uint256)/getReward(address).
+export const LEGACY_GAUGES: { gauge: `0x${string}`; pool: `0x${string}`; token0: string; token1: string }[] = [
+  { gauge: '0xfae70b39b28e4c6a4ced518d394000884e7e5b4e', pool: '0x3c643f22f0b24795710638cdef2296ea12896317', token0: 'HOODIE',   token1: 'AEON' },
+  { gauge: '0x586414a2b52fff772307499e9904c2cfe911a3ca', pool: '0x8ca7acde0218b5a905dc29cc9d650fadc706fd9e', token0: 'CASHCAT',  token1: 'ROBINFUN' },
+  { gauge: '0x5dad710f2f13e3d211b66c03697e0d225eba429e', pool: '0xbf5fcff8e5604b3ba404a4cb5be49ef230e0da76', token0: 'NASDAQ',   token1: 'AEON' },
+  { gauge: '0xffda930827cda863886024e3a0f156e54941ffd1', pool: '0xb4692a778e33fba0b97feaa863377c6322c83aa4', token0: 'SHERWOOD', token1: 'AEON' },
+  { gauge: '0x753616f2a102382a446db9fd5e3a0f7f468912ef', pool: '0xeb638e1fa253e5526c2be76626de26f02e4bdaba', token0: 'ROBINFUN', token1: 'AEON' },
+  { gauge: '0xf3c133f657cf5dd436e6d1fca148e6f797e11bf7', pool: '0x22d76bf4e8d2c1dfcca7de6c9dc46ec2a8ed7eb7', token0: 'CASHCAT',  token1: 'AEON' },
+  { gauge: '0x23c11852c96d14d79d336298a821275e86b4025c', pool: '0x67b2da1742187aa09b427082b06acdc5bbca2d99', token0: 'VIRTUAL',  token1: 'AEON' },
+  { gauge: '0xad59a37982f5bfdb04128c0c3d48e661b09d9943', pool: '0x625fcd4ca1ca34eb8ac74883748419de037d78df', token0: 'WETH',     token1: 'ROBINFUN' },
+  { gauge: '0x65f5a63dd146271e62c3c2e68f88aea18abf68d0', pool: '0x3dc6b6c354fb1e9cfdaa8a36ff845728f7176f4e', token0: 'CASHCAT',  token1: 'WETH' },
+  { gauge: '0x2a9e18cb7bbf00af04eac163a9c6823fcbf26157', pool: '0xd215650cb628113a64d938164ee5cd72293f9ea6', token0: 'WETH',     token1: 'AEON' },
+  { gauge: '0xdb87e68417061321a508d078aa90462eabedafc3', pool: '0x2732e1312e5bba5729534e9d94d44c090b200f14', token0: 'WETH',     token1: 'USDG' },
+  { gauge: '0xd8b34f913791721ab4822c240d7ef48b68b4d959', pool: '0x82203a764428fbf826dcd1ce48fdd57655b604f2', token0: 'CASHCAT',  token1: 'USDG' },
+  { gauge: '0x6fe2d57c3106d1540a0a2b1a182b4c4940c88462', pool: '0xb60d3dea956204c6731ca22622be2b8befac4029', token0: 'ROBINFUN', token1: 'USDG' },
+]
+
 // Native ETH sentinel — convention used across the app for "the chain's
 // native gas token" wherever an ERC20 address is expected.
 export const NATIVE_SENTINEL = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE' as `0x${string}`
