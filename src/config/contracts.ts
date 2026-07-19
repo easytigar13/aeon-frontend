@@ -241,6 +241,50 @@ export const CL_GAUGES: Record<string, `0x${string}`> = {
   '0x14E266508d68107509487DE6Ead5ded5764C5F20': '0x87e27373bee17f043553b60b9321518d0b50a083', // CL CASHCAT/ROBINFUN
   '0xC6b5b34133E290e5c28B19844970cee783DD9b40': '0x424cfb459b83ed272e0df87e95c8fbcd19af263f', // CL ROBINFUN/ETH
   '0xBb6aA9914f53afb8e7C89Bf05D4DD2525aF4E4ce': '0x05581a779096183bc15387f81a784ab22d40abfe', // CL ROBINFUN/USDG
+  // Added 2026-07-19 -- CL gauges for the 43 newly-added pairs (see CL_POOLS).
+  '0x9Ea50b0d2f7f65c9026e499E514d53e7D1e75185': '0x356ceb89cc204d6538e6c7fa2c8e1aeba21fdf3d', // CL NASDAQ/AEON
+  '0x7d6a6E87AE038F213FfD7F65F738e782b1715CbE': '0x43ff665dcbd4ed7d5065baa78b8f8145ffba5acf', // CL SHERWOOD/AEON
+  '0xCC2CfeD37161BD79cdcBA5d323583801933b0643': '0x67821c3ef30dfd094abaf31933b859cbddb8f62a', // CL HOODIE/AEON
+  '0x178Bcdd939DB918bd9D2549516426fa5a0e6C35e': '0x95c0e348b5bac16132ce32b676549e2b1e3e3f43', // CL AAPL/AEON
+  '0x0fd8900F1743f4186eb95e801E7eafF3ABEd772B': '0xcdf9a70f384aa1a94d53266946a50b238a5791b1', // CL AAPL/USDG
+  '0xa4d4AC50C4d988d6aB0434451675075B8B9365CB': '0xaa646b904bce87f080c9714d03480ae1b945a6e0', // CL AMD/AEON
+  '0xE970B046a9a45690A19E698537F63556872Ec6E2': '0xe53a97d6a8815f5a1a337a600c613500f5133200', // CL AMD/USDG
+  '0x357E21Be34378b7C8394b70C2f48Eb8977545a02': '0x5c2cbc84ffa75addd2762eb4ba85d1482ed67b59', // CL AMZN/AEON
+  '0x76292f3c6041Ef5fD806deB40Dd457eE30117B05': '0x71d79ac578786d55dcfb74d06c6d07801ba6ccef', // CL AMZN/USDG
+  '0xe66F993F5faf84d2a73e3102158afefaf2bD7De1': '0xa22e095ba8f1afd6d772cd0ed0f8ee54865296c0', // CL BABA/AEON
+  '0x4F09e841614c2c1661EBE92294c0fdDC21E6bdF3': '0x1e8c7a354051c3ecd39410bf652d96e50f986475', // CL BABA/USDG
+  '0x925bb57E9Fc44D12bD763ffc77E7142a981d3e6b': '0x2b8cd35a03f964be58709585f8a6f45f675842eb', // CL BE/AEON
+  '0x1A43c8de3A995F55847238789b2c66D06581f928': '0x382781f7c381fbbb9f8ff452b52f347eabbbb483', // CL BE/USDG
+  '0x5e93631c484dC81f286Fe58d0108944B469fC8Aa': '0x56d1029543fb47938a98e75561cc3ff78b38c0c0', // CL COIN/AEON
+  '0x14fB9639B0007a5B15e4Ba8bDb92b4723B872132': '0x4b56625ecb196e88028db363b503a009c4ea5cd0', // CL COIN/USDG
+  '0xB9B73c10017F57b24F5744c08945e2E15463C898': '0x87b8ef8923e31271ebfaa76dcd1f1a4dfd95b47c', // CL CRCL/AEON
+  '0xa7705F343e4043402dE7959741B872E6ba033768': '0xa0ecfdd21534d1cf89b7135478ae9975533a5e5f', // CL CRCL/USDG
+  '0xD45195068B12225b34f4e7E98e2A12e2c28a424F': '0xee13fd9a76254e18e3366c0ad6f258eeb1f4c9bb', // CL CRWV/AEON
+  '0xbaB8EaFC0b830a17e15Fe5b3Cd8e561f9F3acDa7': '0x69691169cbb7091bdfdcddbc6e3ab2c9e9cfa4cf', // CL CRWV/USDG
+  '0x1a2c2f76f40475119aC308DaA3699f7A6C198B79': '0xdc956fd34f6394305cab7a2a80f4cb7c8fcc6016', // CL GOOGL/AEON
+  '0xe9Cd1148d94C597dB8D64371722cd64587861Bc8': '0x493e4eb5836ffe226698a2a293796d7d2a995c8b', // CL GOOGL/USDG
+  '0x973FD855A10f8729116470Da8FCd94cb3503BEfe': '0xc2da9406c75648ed5761ca48ed04e0bf3680db28', // CL INTC/AEON
+  '0xb7F2af8ddAC0F7EaF61B3E8608202D7c6Da7561d': '0xc538ee4c4eaa827d0c9035f08203c5228fe723f9', // CL INTC/USDG
+  '0x2ca1Fb22D4AdF4633C50665FA1A8CdbE7AfCd71c': '0x8B136D55F94690B513f0D4BcA6B3e5b662d2aCEA', // CL META/AEON
+  '0xEDDd9777919e88804E5988Cd888B19A13c71ea97': '0x236089d84d603d6670d6f0b169ae34d262841366', // CL META/USDG
+  '0x00E21eD7725F2EE8a38d3d14cacD566F1d9CAE0b': '0xf5bbd11b7d99a05d5da1fd0cb0ec4cf9a8b458ba', // CL MSFT/AEON
+  '0x66179D027b9784C79eC8227a7F8aA4A57B310fc7': '0x602827f1f3db8784b42fbb73f76d91bc38185506', // CL MSFT/USDG
+  '0x3cfcBf2d69812dC9D5630bc545656be16AbFf917': '0x8af450e4df4318dcbc2e83f6505cb35f20813760', // CL MU/AEON
+  '0x3F769264a2Fb0283A0FE2fa18398FA2d80b2c733': '0xa13be13ccd5495eb016ed7007da22f12d5f9eaf1', // CL MU/USDG
+  '0x479a47a7A886C7DBF14a67d44Ea333E25e730113': '0x4f77606100942be986b010e184fba81bf863b23f', // CL NVDA/AEON
+  '0x1F8412785EAA6177041A4b6E5591860890E511d3': '0xb448efbda00ee8459ce26d30c19b8d27f8c4bfef', // CL NVDA/USDG
+  '0xd87F56f826942E0327D5d47E8E1609921b0d06E0': '0x5fac34d5cac262587e00665ecdc3a315bd86303d', // CL ORCL/AEON
+  '0x9584884204f0CB20029204E6D2E1Fcc1D71C51e7': '0xa401068031a115abd18abefbe06fac8f9e478750', // CL ORCL/USDG
+  '0x2b03283A4733486F90eA260452bF51CBEbCef46F': '0xf20fe4cd5a080b465e8037a94cdb3bfc1ccac0d5', // CL PLTR/AEON
+  '0x3cD62AA67d886c5c9bdb191c3a4FE704973F98EF': '0xe2596f8d78c2c849401dbed5e994280726c01235', // CL PLTR/USDG
+  '0xe7178Be751aD9db2C69f66C6E6FcB6bB600ed379': '0xc36fbe165122794601f478f6c3fa62c7b16804cd', // CL SNDK/AEON
+  '0xcE6170C62a1779CeB6Ffc5C1f3440F9089cf6Fb6': '0x8e632c027d66f91ed296e74a94ec053bf0c91220', // CL SNDK/USDG
+  '0xDC490f45ff1c5D0cBE1b10B7A1Ead1C3594F54ae': '0x51e5edefa4cfece8ce665ff7f07ecb8f9d624cfa', // CL SPCX/AEON
+  '0x803eD03e79c57379fc211eD786bCc7055161E946': '0x6bf3a5687715a0e4efd9e5882853f59bcda6e979', // CL SPCX/USDG
+  '0xA02F62ADc07e19F9d9077824E2304ec4e514e110': '0xad949648079f8e5190aba03669dfd17e2bf6c4d8', // CL TSLA/AEON
+  '0x01D9dE7f5826eb4f5f94948E646bC11b88391c2d': '0xc6df00658614933afe3b2e8737b9decf61337723', // CL TSLA/USDG
+  '0x8a57FC5dB97fA95C8bB01CC48B231194309A685C': '0x0f428b88f55e305cd1562db0e084195602fda7f0', // CL USAR/AEON
+  '0x944923F4C9194428577bb74074d07962b2522524': '0xd17cca0094c8c1c92e4fc2f016e0f1f241e43c45', // CL USAR/USDG
 }
 export const DLMM_GAUGES: Record<string, `0x${string}`> = {
   '0x736d8E418673253b2CDE1ef3Df6205Fc9780816b': '0xe3c3457d17f7a63b6f1af36274be141af97e3ac2', // DLMM AEON/ETH
@@ -501,6 +545,53 @@ export const CL_POOLS: {
   { name: 'CASHCAT/AEON', token0: 'CASHCAT', token1: 'AEON',    type: 'CL', fee: '0.25%', address: '0xbCD1Bf0d9F25503DDfEd0b663827811637B27B80' as `0x${string}` },
   { name: 'CASHCAT/USDG', token0: 'CASHCAT', token1: 'USDG',    type: 'CL', fee: '0.25%', address: '0x9ebd1C556967d8e3f6f1C043D57eb7762047D60D' as `0x${string}` },
   { name: 'CASHCAT/ETH',  token0: 'CASHCAT', token1: 'WETH',    type: 'CL', fee: '0.25%', address: '0x09e729D9e077EB1Ad10aDccDE4D18C143035fe04' as `0x${string}` },
+  // Added 2026-07-19 -- CL pools+gauges for every remaining vAMM pair (3 memecoins
+  // + 20 stocks x AEON/USDG), all registered + active in the MultiGaugeController
+  // (votable). Deployed via paced viem (forge's fork backend trips the RPC's
+  // Cloudflare wall). Empty at creation -- first LP sets the market.
+  { name: 'NASDAQ/AEON',   token0: 'NASDAQ',   token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x9Ea50b0d2f7f65c9026e499E514d53e7D1e75185' as `0x${string}` },
+  { name: 'SHERWOOD/AEON', token0: 'SHERWOOD', token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x7d6a6E87AE038F213FfD7F65F738e782b1715CbE' as `0x${string}` },
+  { name: 'HOODIE/AEON',   token0: 'HOODIE',   token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xCC2CfeD37161BD79cdcBA5d323583801933b0643' as `0x${string}` },
+  { name: 'AAPL/AEON',  token0: 'AAPL',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x178Bcdd939DB918bd9D2549516426fa5a0e6C35e' as `0x${string}` },
+  { name: 'AAPL/USDG',  token0: 'AAPL',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x0fd8900F1743f4186eb95e801E7eafF3ABEd772B' as `0x${string}` },
+  { name: 'AMD/AEON',   token0: 'AMD',   token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xa4d4AC50C4d988d6aB0434451675075B8B9365CB' as `0x${string}` },
+  { name: 'AMD/USDG',   token0: 'AMD',   token1: 'USDG', type: 'CL', fee: '0.25%', address: '0xE970B046a9a45690A19E698537F63556872Ec6E2' as `0x${string}` },
+  { name: 'AMZN/AEON',  token0: 'AMZN',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x357E21Be34378b7C8394b70C2f48Eb8977545a02' as `0x${string}` },
+  { name: 'AMZN/USDG',  token0: 'AMZN',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x76292f3c6041Ef5fD806deB40Dd457eE30117B05' as `0x${string}` },
+  { name: 'BABA/AEON',  token0: 'BABA',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xe66F993F5faf84d2a73e3102158afefaf2bD7De1' as `0x${string}` },
+  { name: 'BABA/USDG',  token0: 'BABA',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x4F09e841614c2c1661EBE92294c0fdDC21E6bdF3' as `0x${string}` },
+  { name: 'BE/AEON',    token0: 'BE',    token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x925bb57E9Fc44D12bD763ffc77E7142a981d3e6b' as `0x${string}` },
+  { name: 'BE/USDG',    token0: 'BE',    token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x1A43c8de3A995F55847238789b2c66D06581f928' as `0x${string}` },
+  { name: 'COIN/AEON',  token0: 'COIN',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x5e93631c484dC81f286Fe58d0108944B469fC8Aa' as `0x${string}` },
+  { name: 'COIN/USDG',  token0: 'COIN',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x14fB9639B0007a5B15e4Ba8bDb92b4723B872132' as `0x${string}` },
+  { name: 'CRCL/AEON',  token0: 'CRCL',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xB9B73c10017F57b24F5744c08945e2E15463C898' as `0x${string}` },
+  { name: 'CRCL/USDG',  token0: 'CRCL',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0xa7705F343e4043402dE7959741B872E6ba033768' as `0x${string}` },
+  { name: 'CRWV/AEON',  token0: 'CRWV',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xD45195068B12225b34f4e7E98e2A12e2c28a424F' as `0x${string}` },
+  { name: 'CRWV/USDG',  token0: 'CRWV',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0xbaB8EaFC0b830a17e15Fe5b3Cd8e561f9F3acDa7' as `0x${string}` },
+  { name: 'GOOGL/AEON', token0: 'GOOGL', token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x1a2c2f76f40475119aC308DaA3699f7A6C198B79' as `0x${string}` },
+  { name: 'GOOGL/USDG', token0: 'GOOGL', token1: 'USDG', type: 'CL', fee: '0.25%', address: '0xe9Cd1148d94C597dB8D64371722cd64587861Bc8' as `0x${string}` },
+  { name: 'INTC/AEON',  token0: 'INTC',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x973FD855A10f8729116470Da8FCd94cb3503BEfe' as `0x${string}` },
+  { name: 'INTC/USDG',  token0: 'INTC',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0xb7F2af8ddAC0F7EaF61B3E8608202D7c6Da7561d' as `0x${string}` },
+  { name: 'META/AEON',  token0: 'META',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x2ca1Fb22D4AdF4633C50665FA1A8CdbE7AfCd71c' as `0x${string}` },
+  { name: 'META/USDG',  token0: 'META',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0xEDDd9777919e88804E5988Cd888B19A13c71ea97' as `0x${string}` },
+  { name: 'MSFT/AEON',  token0: 'MSFT',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x00E21eD7725F2EE8a38d3d14cacD566F1d9CAE0b' as `0x${string}` },
+  { name: 'MSFT/USDG',  token0: 'MSFT',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x66179D027b9784C79eC8227a7F8aA4A57B310fc7' as `0x${string}` },
+  { name: 'MU/AEON',    token0: 'MU',    token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x3cfcBf2d69812dC9D5630bc545656be16AbFf917' as `0x${string}` },
+  { name: 'MU/USDG',    token0: 'MU',    token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x3F769264a2Fb0283A0FE2fa18398FA2d80b2c733' as `0x${string}` },
+  { name: 'NVDA/AEON',  token0: 'NVDA',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x479a47a7A886C7DBF14a67d44Ea333E25e730113' as `0x${string}` },
+  { name: 'NVDA/USDG',  token0: 'NVDA',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x1F8412785EAA6177041A4b6E5591860890E511d3' as `0x${string}` },
+  { name: 'ORCL/AEON',  token0: 'ORCL',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xd87F56f826942E0327D5d47E8E1609921b0d06E0' as `0x${string}` },
+  { name: 'ORCL/USDG',  token0: 'ORCL',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x9584884204f0CB20029204E6D2E1Fcc1D71C51e7' as `0x${string}` },
+  { name: 'PLTR/AEON',  token0: 'PLTR',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x2b03283A4733486F90eA260452bF51CBEbCef46F' as `0x${string}` },
+  { name: 'PLTR/USDG',  token0: 'PLTR',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x3cD62AA67d886c5c9bdb191c3a4FE704973F98EF' as `0x${string}` },
+  { name: 'SNDK/AEON',  token0: 'SNDK',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xe7178Be751aD9db2C69f66C6E6FcB6bB600ed379' as `0x${string}` },
+  { name: 'SNDK/USDG',  token0: 'SNDK',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0xcE6170C62a1779CeB6Ffc5C1f3440F9089cf6Fb6' as `0x${string}` },
+  { name: 'SPCX/AEON',  token0: 'SPCX',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xDC490f45ff1c5D0cBE1b10B7A1Ead1C3594F54ae' as `0x${string}` },
+  { name: 'SPCX/USDG',  token0: 'SPCX',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x803eD03e79c57379fc211eD786bCc7055161E946' as `0x${string}` },
+  { name: 'TSLA/AEON',  token0: 'TSLA',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xA02F62ADc07e19F9d9077824E2304ec4e514e110' as `0x${string}` },
+  { name: 'TSLA/USDG',  token0: 'TSLA',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x01D9dE7f5826eb4f5f94948E646bC11b88391c2d' as `0x${string}` },
+  { name: 'USAR/AEON',  token0: 'USAR',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x8a57FC5dB97fA95C8bB01CC48B231194309A685C' as `0x${string}` },
+  { name: 'USAR/USDG',  token0: 'USAR',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x944923F4C9194428577bb74074d07962b2522524' as `0x${string}` },
 ]
 // Still hidden -- VIRTUAL/ROBINFUN pairs, not part of the restored subset.
 // // { name: 'VIRTUAL/AEON',     token0: 'VIRTUAL',  token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
