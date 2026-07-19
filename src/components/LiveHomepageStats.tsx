@@ -7,6 +7,7 @@ import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { CountUp } from '@/components/CountUp'
+import { hasMeaningfulPoolLiquidity } from '@/lib/poolVisibility'
 
 // Same accent language as the dashboard's KPI cards (see dashboard/page.tsx's
 // ACCENT table) -- distinct color per stat instead of every card getting the
@@ -33,7 +34,9 @@ export function LiveHomepageStats() {
   const dlmmPoolStats = useDlmmPoolStats(prices)
   const volResult     = useVolume24h(prices)
 
-  const totalTvl  = useTotalTVL([...poolStats, ...clPoolStats, ...dlmmPoolStats])
+  const allPoolStats = [...poolStats, ...clPoolStats, ...dlmmPoolStats]
+  const liquidPoolStats = allPoolStats.filter(stat => hasMeaningfulPoolLiquidity(stat.tvlUsd))
+  const totalTvl  = useTotalTVL(liquidPoolStats)
   const aeonPrice = prices['AEON'] ?? null
 
   const { data: totalBurnedRaw } = useReadContract({
@@ -54,7 +57,7 @@ export function LiveHomepageStats() {
   for (const pool of UNIQUE_POOLS) {
     const tvl = poolStats.find(s => s.address === pool.address)?.tvlUsd ?? null
     const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
-    if (tvl && tvl > 0 && volWeek !== null) {
+    if (hasMeaningfulPoolLiquidity(tvl) && volWeek !== null) {
       const feeRate = parseFloat(pool.fee.replace('%', '')) / 100
       const feesWeek = volWeek * feeRate
       const apr = (feesWeek * (365 / 7) / tvl) * 100
@@ -66,7 +69,7 @@ export function LiveHomepageStats() {
     {
       label: 'Total Value Locked',
       node: <CountUp value={totalTvl || null} format={fmtUsd} nullText="$—" />,
-      sub: `across ${UNIQUE_POOLS.length + CL_POOLS.length + DLMM_POOLS.length} pools`,
+      sub: `across ${new Set(liquidPoolStats.map(pool => pool.address.toLowerCase())).size} non-empty pools`,
     },
     {
       label: 'AEON Price',

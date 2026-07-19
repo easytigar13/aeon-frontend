@@ -13,6 +13,7 @@ import { useVolume24h } from '@/hooks/useVolume24h'
 import { projectNextEmission } from '@/lib/emissionsProjection'
 import { useOraclePricedTokens } from '@/hooks/useOraclePricedTokens'
 import { pricedFeeFraction } from '@/lib/pricedFees'
+import { hasMeaningfulPoolLiquidity } from '@/lib/poolVisibility'
 
 function fmtUsd(n: number | null, compact = false): string {
   if (n === null) return '$—'
@@ -164,19 +165,28 @@ export default function DashboardPage() {
   const poolStats     = usePoolStats(prices)
   const clPoolStats   = useClPoolStats(prices)
   const dlmmPoolStats = useDlmmPoolStats(prices)
-  const totalTVL      = useTotalTVL([...poolStats, ...clPoolStats, ...dlmmPoolStats])
+  const allPoolStats  = [...poolStats, ...clPoolStats, ...dlmmPoolStats]
+  const liquidPoolStats = allPoolStats.filter(stat => hasMeaningfulPoolLiquidity(stat.tvlUsd))
+  const totalTVL      = useTotalTVL(liquidPoolStats)
   const volResult     = useVolume24h(prices)
   const volume24h = volResult.total
   const volByAddr = volResult.byPool
   const volByAddrWeek = volResult.byPoolWeek
-  const statByAddr = Object.fromEntries([...poolStats, ...clPoolStats, ...dlmmPoolStats].map(s => [s.address, s]))
+  const statByAddr = Object.fromEntries(allPoolStats.map(s => [s.address.toLowerCase(), s]))
 
   const seenAddrs = new Set<string>()
   const uniquePools = [...POOLS, ...CL_POOLS, ...DLMM_POOLS].filter(p => {
-    if (seenAddrs.has(p.address)) return false
-    seenAddrs.add(p.address)
+    const address = p.address.toLowerCase()
+    if (seenAddrs.has(address)) return false
+    seenAddrs.add(address)
     return true
   })
+  const liquidPools = uniquePools.filter(pool => hasMeaningfulPoolLiquidity(statByAddr[pool.address.toLowerCase()]?.tvlUsd ?? null))
+  const nameCounts = liquidPools.reduce<Record<string, number>>((counts, pool) => {
+    counts[pool.name] = (counts[pool.name] ?? 0) + 1
+    return counts
+  }, {})
+  const chartName = (pool: typeof liquidPools[number]) => nameCounts[pool.name] > 1 ? `${pool.name} · ${pool.type}` : pool.name
 
   // Matches usePoolStats (30s) / usePrices (15s) / useVolume24h (60s) below --
   // these 6 reads used to fire once on mount and never again, so the top
@@ -329,14 +339,13 @@ export default function DashboardPage() {
     ? ((Number(totalVotes) / Number(aeonSupply)) * 100).toFixed(1)
     : '—'
 
-  const tvlChartData = uniquePools
-    .map(p => ({ name: p.name, value: statByAddr[p.address]?.tvlUsd ?? 0 }))
-    .filter(d => d.value > 0)
+  const tvlChartData = liquidPools
+    .map(p => ({ name: chartName(p), value: statByAddr[p.address.toLowerCase()]?.tvlUsd ?? 0 }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10)
 
-  const volChartData = uniquePools
-    .map(p => ({ name: p.name, value: volByAddr[p.address.toLowerCase()] ?? 0 }))
+  const volChartData = liquidPools
+    .map(p => ({ name: chartName(p), value: volByAddr[p.address.toLowerCase()] ?? 0 }))
     .filter(d => d.value > 0)
     .sort((a, b) => b.value - a.value)
     .slice(0, 10)
@@ -358,7 +367,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-          <KpiCard label="Total Value Locked" value={fmtUsd(totalTVL || null, true)} accent="emerald" icon={<TrendingUp size={16} className="text-emerald-400" />} delta={`${POOLS.length + CL_POOLS.length + DLMM_POOLS.length} pools`} />
+          <KpiCard label="Total Value Locked" value={fmtUsd(totalTVL || null, true)} accent="emerald" icon={<TrendingUp size={16} className="text-emerald-400" />} delta={`${liquidPools.length} non-empty pools`} />
           <KpiCard label="Volume 24h"         value={fmtUsd(volume24h, true)}         accent="blue"    icon={<BarChart3  size={16} className="text-blue-400" />}    delta="from on-chain swap events" />
           <KpiCard label="AEON Supply"        value={`${fmt18(aeonSupply)} AEON`}     accent="aeon"    icon={<Coins      size={16} className="text-aeon-400" />}    delta="genesis: 90,000" />
           <KpiCard label="Circulating Supply" value={`${fmt18(circulatingSupply)} AEON`} accent="violet" icon={<Vote      size={16} className="text-violet-400" />}  delta="supply − burned" />

@@ -17,6 +17,7 @@ import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { TokenIcon } from '@/components/TokenIcon'
 import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, amountsForLiquidity, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
 import { binIdToPrice, dlmmRangeSide, computeSpotDistribution } from '@/lib/dlmmMath'
+import { hasMeaningfulPoolLiquidity, shouldDisplayPool } from '@/lib/poolVisibility'
 import { ConfettiBurst } from '@/components/ConfettiBurst'
 import { GlowPanel, MetricCard, ProtocolBackdrop } from '@/components/ProtocolVisuals'
 
@@ -214,7 +215,7 @@ function usePoolListData(): UnifiedPool[] {
     const riskNote = type === 'CL' ? 'Returns depend on the position remaining in its active price range.'
       : type === 'DLMM' ? 'Returns depend on active bins and market volatility.'
       : health === 'Healthy' ? 'Full-range constant-product liquidity.' : 'Higher price impact and execution risk.'
-    return { utilizationPct: tvl && tvl > 0 && vol !== null ? (vol / tvl) * 100 : null, health, riskNote }
+    return { utilizationPct: hasMeaningfulPoolLiquidity(tvl) && vol !== null ? (vol / tvl) * 100 : null, health, riskNote }
   }
 
   const vamm: UnifiedPool[] = POOLS.map(p => {
@@ -232,7 +233,7 @@ function usePoolListData(): UnifiedPool[] {
     // volume, so a pool with real but sporadic trading (nothing in the exact
     // last 24h, but real swaps 2-3 days ago) doesn't show a misleading "—%"
     // just because nothing happened to trade very recently.
-    const aprPct = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
+    const aprPct = (hasMeaningfulPoolLiquidity(tvlUsd) && feesUsdWeek !== null)
       ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
     return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, ...healthFor('vAMM', tvlUsd, volUsd) }
@@ -265,7 +266,7 @@ function usePoolListData(): UnifiedPool[] {
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
     const feesUsdWeek = volUsdWeek !== null ? volUsdWeek * feeRate : null
-    const aprPct = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
+    const aprPct = (hasMeaningfulPoolLiquidity(tvlUsd) && feesUsdWeek !== null)
       ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
     return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, ...healthFor('CL', tvlUsd, volUsd) }
@@ -278,7 +279,7 @@ function usePoolListData(): UnifiedPool[] {
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
     const feesUsdWeek = volUsdWeek !== null ? volUsdWeek * feeRate : null
-    const aprPct = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
+    const aprPct = (hasMeaningfulPoolLiquidity(tvlUsd) && feesUsdWeek !== null)
       ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
     return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, ...healthFor('DLMM', tvlUsd, volUsd) }
@@ -298,12 +299,13 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
   const [search, setSearch] = useState('')
 
   const pools = usePoolListData()
-  const poolCount = pools.length
-  const totalTvl = pools.reduce((sum, pool) => sum + (pool.tvlUsd ?? 0), 0)
-  const volume24h = pools.reduce((sum, pool) => sum + (pool.volUsd ?? 0), 0)
-  const feeGeneratingPools = pools.filter(pool => (pool.feesUsd ?? 0) > 0).length
+  const visiblePools = pools.filter(pool => shouldDisplayPool(pool.tvlUsd))
+  const poolCount = visiblePools.length
+  const totalTvl = visiblePools.reduce((sum, pool) => sum + (pool.tvlUsd ?? 0), 0)
+  const volume24h = visiblePools.reduce((sum, pool) => sum + (pool.volUsd ?? 0), 0)
+  const feeGeneratingPools = visiblePools.filter(pool => (pool.feesUsd ?? 0) > 0).length
 
-  const filtered = pools.filter(p => {
+  const filtered = visiblePools.filter(p => {
     if (filter !== 'ALL' && p.type !== filter) return false
     if (search.trim()) {
       const q = search.trim().toLowerCase()
