@@ -1,6 +1,5 @@
-// PM2 config for AEON-only keeper #2. It intentionally runs keeper/index.ts
-// so both wallets receive the same safety fixes; KEEPER_ROLE and the separate
-// env/status/log files enforce its independent AEON-only responsibility.
+// PM2 config for ERZA. She runs keeper2/index.ts and is therefore fully
+// isolated from Mirajane's keeper/index.ts process and strategy.
 //
 // Setup on the server (one time):
 //   npm install -g pm2
@@ -10,20 +9,21 @@
 //
 // Start / manage:
 //   pm2 start ecosystem.config.cjs
-//   pm2 logs aeon-arb-keeper-2
+//   pm2 logs erza-arb-keeper
 //   pm2 save && pm2 startup     # survive server reboots
-//   pm2 stop aeon-arb-keeper-2
+//   pm2 stop erza-arb-keeper
 module.exports = {
   apps: [
     {
-      name: 'aeon-arb-keeper-2',
-      script: '../keeper/index.ts',
+      name: 'erza-arb-keeper',
+      script: './index.ts',
       interpreter: 'node',
       node_args: '--import tsx',
       cwd: __dirname,
       env: {
         KEEPER_ENV_FILE: '../keeper2/.env',
-        KEEPER_ROLE: 'aeon-only',
+        KEEPER_ROLE: 'external-first',
+        BASE_TOKEN: 'WETH',
         BOT_ID: 'aeon',
         STATUS_FILE: '../keeper2/status.json',
         TRADES_LOG_FILE: '../keeper2/trades.log',

@@ -15,6 +15,10 @@ export const UNISWAP_V3_FACTORY_ABI = [{
 }] as const
 
 export const UNISWAP_V3_POOL_ABI = [
+  { name: 'factory', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { name: 'fee', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint24' }] },
+  { name: 'token0', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
+  { name: 'token1', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { name: 'liquidity', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint128' }] },
   { name: 'slot0', type: 'function', stateMutability: 'view', inputs: [], outputs: [
     { name: 'sqrtPriceX96', type: 'uint160' }, { name: 'tick', type: 'int24' },
@@ -45,29 +49,69 @@ export interface UniswapV3PoolRef {
   liquidity: bigint
 }
 
+type UniswapV3PoolQuery = {
+  token0: Address
+  token1: Address
+  fee: number
+}
+
+const DISCOVERY_MULTICALL_CHUNK = 120
+
+async function chunkedMulticall(client: any, contracts: any[]): Promise<any[]> {
+  const results: any[] = []
+  for (let i = 0; i < contracts.length; i += DISCOVERY_MULTICALL_CHUNK) {
+    const batch = await client.multicall({
+      contracts: contracts.slice(i, i + DISCOVERY_MULTICALL_CHUNK),
+      allowFailure: true,
+    })
+    results.push(...batch)
+  }
+  return results
+}
+
 // Kept deliberately client-agnostic because the keeper and test harness use
 // different viem client generics while exposing the same methods.
 export async function discoverUniswapV3Pools(
   client: any,
   tokens: Address[],
 ): Promise<UniswapV3PoolRef[]> {
-  const refs: UniswapV3PoolRef[] = []
+  const queries: UniswapV3PoolQuery[] = []
   for (let i = 0; i < tokens.length; i++) {
     for (let j = i + 1; j < tokens.length; j++) {
       for (const fee of UNISWAP_V3_FEE_TIERS) {
-        const raw = await client.readContract({
-          address: UNISWAP_V3.factory, abi: UNISWAP_V3_FACTORY_ABI,
-          functionName: 'getPool', args: [tokens[i], tokens[j], fee],
-        }) as Address
-        if (/^0x0{40}$/i.test(raw)) continue
-        const address = getAddress(raw)
-        const liquidity = await client.readContract({
-          address, abi: UNISWAP_V3_POOL_ABI, functionName: 'liquidity',
-        }) as bigint
-        if (liquidity === 0n) continue
-        refs.push({ address, token0: tokens[i], token1: tokens[j], fee, liquidity })
+        queries.push({ token0: tokens[i], token1: tokens[j], fee })
       }
     }
+  }
+
+  const poolResults = await chunkedMulticall(client, queries.map(query => ({
+    address: UNISWAP_V3.factory,
+    abi: UNISWAP_V3_FACTORY_ABI,
+    functionName: 'getPool' as const,
+    args: [query.token0, query.token1, query.fee] as const,
+  })))
+  const discovered: Array<UniswapV3PoolQuery & { address: Address }> = []
+  for (let i = 0; i < queries.length; i++) {
+    const result = poolResults[i]
+    if (result?.status !== 'success') continue
+    const raw = result.result as Address
+    if (/^0x0{40}$/i.test(raw)) continue
+    discovered.push({ ...queries[i], address: getAddress(raw) })
+  }
+
+  const liquidityResults = await chunkedMulticall(client, discovered.map(pool => ({
+    address: pool.address,
+    abi: UNISWAP_V3_POOL_ABI,
+    functionName: 'liquidity' as const,
+  })))
+  const refs: UniswapV3PoolRef[] = []
+  for (let i = 0; i < discovered.length; i++) {
+    const result = liquidityResults[i]
+    if (result?.status !== 'success') continue
+    const liquidity = result.result as bigint
+    if (liquidity === 0n) continue
+    const pool = discovered[i]
+    refs.push({ address: pool.address, token0: pool.token0, token1: pool.token1, fee: pool.fee, liquidity })
   }
   return refs
 }
@@ -93,4 +137,3 @@ export async function quoteUniswapV3ExactInput(
     return null
   }
 }
-
