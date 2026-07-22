@@ -1,8 +1,8 @@
 'use client'
-import { useReadContracts } from 'wagmi'
+import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, TOKENS, CONTRACTS } from '@/config/contracts'
-import { PAIR_ABI, VOTER_ABI, ERC20_ABI } from '@/config/abis'
+import { PAIR_ABI, VOTER_ABI, ERC20_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '@/config/abis'
 import type { PriceMap } from './usePrices'
 import type { DiscoveredPool } from './useAllPools'
 
@@ -108,10 +108,38 @@ export function useDiscoveredPoolStats(discovered: DiscoveredPool[], prices: Pri
   })
 }
 
+// CL and DLMM pools ARE now vote-directed, but through the
+// MultiGaugeController (epoch-scoped `weights[epoch][pool]`), NOT the legacy
+// AeonVoter that vAMM pools use. This reads the controller's current-epoch
+// weight for a list of pools so the "Votes" column shows the real veAEON
+// backing a CL/DLMM gauge instead of a hardcoded 0. currentEpoch() must be
+// read first, so the per-pool weight reads are gated on it.
+function useControllerWeights(pools: readonly { address: `0x${string}` }[]): Record<string, bigint> {
+  const { data: epoch } = useReadContract({
+    address: CONTRACTS.MultiGaugeController,
+    abi: MULTI_GAUGE_CONTROLLER_ABI,
+    functionName: 'currentEpoch',
+    query: { refetchInterval: 30000 },
+  })
+  const { data } = useReadContracts({
+    contracts: pools.map(p => ({
+      address: CONTRACTS.MultiGaugeController,
+      abi: MULTI_GAUGE_CONTROLLER_ABI,
+      functionName: 'weights' as const,
+      args: [epoch as bigint, p.address] as const,
+    })),
+    query: { enabled: epoch !== undefined && pools.length > 0, refetchInterval: 30000 },
+  })
+  const out: Record<string, bigint> = {}
+  pools.forEach((p, i) => {
+    out[p.address.toLowerCase()] = data?.[i]?.status === 'success' ? (data[i].result as bigint) : 0n
+  })
+  return out
+}
+
 // CL pools don't have vAMM-style getReserves() — every deposited token just
 // sits in the pool contract regardless of tick range, so token0/token1
-// balanceOf(pool) gives an exact TVL directly (no gauge/vote weight yet;
-// CL pools aren't wired into AeonVoterV2).
+// balanceOf(pool) gives an exact TVL directly.
 const CL_POOL_STAT_CONTRACTS = CL_POOLS.flatMap(p => ([
   { address: p.address, abi: PAIR_ABI, functionName: 'token0' } as const,
   { address: TOKENS[p.token0 as keyof typeof TOKENS]?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [p.address] } as const,
@@ -120,6 +148,7 @@ const CL_POOL_STAT_CONTRACTS = CL_POOLS.flatMap(p => ([
 
 export function useClPoolStats(prices: PriceMap): PoolStat[] {
   const { data } = useReadContracts({ contracts: CL_POOL_STAT_CONTRACTS, query: { refetchInterval: 30000 } })
+  const weights = useControllerWeights(CL_POOLS)
 
   return CL_POOLS.map((pool, i) => {
     const base = i * 3
@@ -142,7 +171,8 @@ export function useClPoolStats(prices: PriceMap): PoolStat[] {
       else if (valB !== null) tvlUsd = valB * 2
     }
 
-    return { address: pool.address, tvlUsd, votesWei: 0n, votesFormatted: '0' }
+    const votes = weights[pool.address.toLowerCase()] ?? 0n
+    return { address: pool.address, tvlUsd, votesWei: votes, votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : '0' }
   })
 }
 
@@ -156,6 +186,7 @@ const DLMM_POOL_STAT_CONTRACTS = DLMM_POOLS.flatMap(p => ([
 
 export function useDlmmPoolStats(prices: PriceMap): PoolStat[] {
   const { data } = useReadContracts({ contracts: DLMM_POOL_STAT_CONTRACTS, query: { refetchInterval: 30000 } })
+  const weights = useControllerWeights(DLMM_POOLS)
 
   return DLMM_POOLS.map((pool, i) => {
     const base = i * 2
@@ -177,7 +208,8 @@ export function useDlmmPoolStats(prices: PriceMap): PoolStat[] {
       else if (valY !== null) tvlUsd = valY * 2
     }
 
-    return { address: pool.address, tvlUsd, votesWei: 0n, votesFormatted: '0' }
+    const votes = weights[pool.address.toLowerCase()] ?? 0n
+    return { address: pool.address, tvlUsd, votesWei: votes, votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : '0' }
   })
 }
 
