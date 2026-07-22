@@ -182,6 +182,15 @@ export default function DashboardPage() {
     return true
   })
   const liquidPools = uniquePools.filter(pool => hasMeaningfulPoolLiquidity(statByAddr[pool.address.toLowerCase()]?.tvlUsd ?? null))
+  // The All Pools table also surfaces pools with no liquidity yet that ARE
+  // receiving votes this epoch (CL/DLMM gauges vote-directed via the
+  // MultiGaugeController). Otherwise a freshly-voted pool with no LP is hidden
+  // by the empty-pool filter and its votes look lost. Charts/TVL still use the
+  // liquidity-only `liquidPools` so empty pools don't add 0-value noise there.
+  const tablePools = uniquePools.filter(pool => {
+    const stat = statByAddr[pool.address.toLowerCase()]
+    return hasMeaningfulPoolLiquidity(stat?.tvlUsd ?? null) || (stat?.votesWei ?? 0n) > 0n
+  })
   const nameCounts = liquidPools.reduce<Record<string, number>>((counts, pool) => {
     counts[pool.name] = (counts[pool.name] ?? 0) + 1
     return counts
@@ -635,7 +644,7 @@ export default function DashboardPage() {
       <div className="card overflow-hidden">
         <div className="px-6 py-4 border-b border-bg-border flex items-center justify-between">
           <h2 className="font-display font-semibold text-text-primary">All Pools</h2>
-          <span className="text-xs font-mono text-text-muted">{liquidPools.length} non-empty pools</span>
+          <span className="text-xs font-mono text-text-muted">{tablePools.length} pools</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -647,7 +656,7 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-bg-border">
-              {liquidPools.map(pool => {
+              {tablePools.map(pool => {
                 const stat    = statByAddr[pool.address.toLowerCase()]
                 const vol     = volByAddr[pool.address.toLowerCase()] ?? null
                 const volWeek = volByAddrWeek[pool.address.toLowerCase()] ?? null
