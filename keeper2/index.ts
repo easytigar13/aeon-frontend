@@ -136,10 +136,11 @@ const TX_FEE_HEADROOM_BPS = BigInt(process.env.TX_FEE_HEADROOM_BPS ?? '20000')
 const TX_GAS_LIMIT_HEADROOM_BPS = BigInt(process.env.TX_GAS_LIMIT_HEADROOM_BPS ?? '12000')
 
 type KeeperRole = 'mirajane' | 'aeon-only' | 'external-only' | 'external-first' | 'general'
-// This entry point belongs exclusively to ERZA. External venues remain her
-// focus, but a mixed route may use an AEON hop when it also contains an
-// external venue. Pure AEON-only cycles remain outside ERZA's route universe.
-const KEEPER_ROLE = 'external-first' as KeeperRole
+// This entry point belongs exclusively to ERZA. She trades ONLY on external
+// (non-AEON) venues -- every hop must be a non-AEON DEX. No AEON DEX/CL/DLMM
+// hop is ever used, not even in a mixed route: pure WETH->token->WETH arb
+// across all external Robinhood DEXes, taken only when net-of-gas positive.
+const KEEPER_ROLE = 'external-only' as KeeperRole
 // Keep the existing Redis namespace so the dashboard retains Bot 2's history.
 const BOT_ID = (process.env.BOT_ID ?? 'aeon').trim() || 'aeon'
 
@@ -2690,6 +2691,7 @@ const scanTelemetry = {
   exactSelected: 0,
   exactChecked: 0,
   exactValid: 0,
+  exactDeferredQuoteMisses: 0,
   exactFamilyQueueSize: 0,
   exactFamilyCursor: 0,
   exactSelectedFamilies: [] as string[],
@@ -4753,6 +4755,26 @@ function candidateNonCoreTokens(candidate: RankedInternalCandidate): string[] {
   return tokens.size > 0 ? [...tokens].sort() : ['CORE']
 }
 
+// Approximate constant-product reserve math is only a discovery hint. It can
+// materially overstate routes that later return zero from a venue's canonical
+// quoter (especially concentrated-liquidity and hook-enabled pools). Keep
+// final/executable candidates profit-first, but do not let the same failed
+// estimate consume ERZA's bounded exact-quote budget on every scan.
+const EXACT_QUOTE_MISS_RETRY_MS = Math.max(
+  5_000,
+  parseInt(process.env.EXACT_QUOTE_MISS_RETRY_MS ?? '60000'),
+)
+const exactQuoteMissRetryAt = new Map<string, number>()
+
+function deferExactQuoteMiss(candidate: RankedInternalCandidate, reason: string) {
+  if (reason !== 'exact_quote_zero_output') return
+  exactQuoteMissRetryAt.set(routeKey(candidate.opp.hops), Date.now() + EXACT_QUOTE_MISS_RETRY_MS)
+}
+
+function clearExactQuoteMiss(candidate: RankedInternalCandidate) {
+  exactQuoteMissRetryAt.delete(routeKey(candidate.opp.hops))
+}
+
 function candidateTokenFamily(candidate: RankedInternalCandidate): string {
   return candidateNonCoreTokens(candidate).join('+')
 }
@@ -4827,7 +4849,13 @@ async function exactRankedShortlist(
   // A route on cooldown already failed the real executor and must not consume
   // another scarce exact-quote slot. It remains in the graph and is eligible
   // again as soon as its short route-local cooldown expires.
-  const eligible = approximate.filter(candidate => routeCooldownRemaining(candidate.opp.hops) <= 0)
+  const now = Date.now()
+  for (const [key, retryAt] of exactQuoteMissRetryAt) {
+    if (retryAt <= now) exactQuoteMissRetryAt.delete(key)
+  }
+  const executionEligible = approximate.filter(candidate => routeCooldownRemaining(candidate.opp.hops) <= 0)
+  const eligible = executionEligible.filter(candidate => (exactQuoteMissRetryAt.get(routeKey(candidate.opp.hops)) ?? 0) <= now)
+  scanTelemetry.exactDeferredQuoteMisses = executionEligible.length - eligible.length
 
   // Reserve the first exact-quote slots for the highest estimated net profit
   // across the entire eligible graph. Token identity, venue, and hop count do
@@ -4951,9 +4979,11 @@ async function exactRankedShortlist(
     const result = await revalidateCandidateExact(immediate, graph, rankingGasPrice, cache)
     checkedRouteKeys.add(routeKey(immediate.opp.hops))
     if (result.valid) {
+      clearExactQuoteMiss(immediate)
       valid.push(immediate)
       scanTelemetry.exactValidRoutes.push(immediate.opp.label)
     } else {
+      deferExactQuoteMiss(immediate, result.reason)
       scanTelemetry.exactRejectedRoutes.push({
         pair: immediate.opp.label,
         family: candidateTokenFamily(immediate),
@@ -4979,9 +5009,11 @@ async function exactRankedShortlist(
     for (let j = 0; j < batch.length; j++) {
       checkedRouteKeys.add(routeKey(batch[j].opp.hops))
       if (results[j].valid) {
+        clearExactQuoteMiss(batch[j])
         valid.push(batch[j])
         scanTelemetry.exactValidRoutes.push(batch[j].opp.label)
       } else if (scanTelemetry.exactRejectedRoutes.length < EXACT_QUOTE_MAX_ATTEMPTS_PER_TICK) {
+        deferExactQuoteMiss(batch[j], results[j].reason)
         scanTelemetry.exactRejectedRoutes.push({
           pair: batch[j].opp.label,
           family: candidateTokenFamily(batch[j]),
