@@ -136,11 +136,11 @@ const TX_FEE_HEADROOM_BPS = BigInt(process.env.TX_FEE_HEADROOM_BPS ?? '20000')
 const TX_GAS_LIMIT_HEADROOM_BPS = BigInt(process.env.TX_GAS_LIMIT_HEADROOM_BPS ?? '12000')
 
 type KeeperRole = 'mirajane' | 'aeon-only' | 'external-only' | 'external-first' | 'general'
-// This entry point belongs exclusively to ERZA. She trades ONLY on external
-// (non-AEON) venues -- every hop must be a non-AEON DEX. No AEON DEX/CL/DLMM
-// hop is ever used, not even in a mixed route: pure WETH->token->WETH arb
-// across all external Robinhood DEXes, taken only when net-of-gas positive.
-const KEEPER_ROLE = 'external-only' as KeeperRole
+// This entry point belongs exclusively to ERZA. She trades EVERYWHERE: all
+// external Robinhood DEXes AND AEON DEX (a route may use an AEON hop as long
+// as it also uses an external venue). WETH->token->WETH arb, taken only when
+// net-of-gas positive. AEON DEX is included, not excluded.
+const KEEPER_ROLE = 'external-first' as KeeperRole
 // Keep the existing Redis namespace so the dashboard retains Bot 2's history.
 const BOT_ID = (process.env.BOT_ID ?? 'aeon').trim() || 'aeon'
 
