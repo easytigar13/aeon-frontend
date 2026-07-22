@@ -5,10 +5,10 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
-import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI } from '@/config/abis'
+import { POOLS, CL_POOLS, DLMM_POOLS, CL_GAUGES, DLMM_GAUGES, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
+import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI, CL_GAUGE_ABI, DLMM_GAUGE_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
-import { usePoolStats } from '@/hooks/usePoolStats'
+import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { projectNextEmission } from '@/lib/emissionsProjection'
 
@@ -292,7 +292,13 @@ export default function VotePage() {
 
   const prices    = usePrices()
   const poolStats = usePoolStats(prices)
-  const tvlByAddr   = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
+  // CL/DLMM pools were previously missing from tvlByAddr entirely (only
+  // vAMM's poolStats fed it), so every CL/DLMM row in the CL+DLMM vote tab
+  // showed a blank TVL despite real on-chain balances -- merged the same way
+  // the Liquidity page's pool list already does.
+  const clPoolStats   = useClPoolStats(prices)
+  const dlmmPoolStats = useDlmmPoolStats(prices)
+  const tvlByAddr   = Object.fromEntries([...poolStats, ...clPoolStats, ...dlmmPoolStats].map(s => [s.address, s.tvlUsd]))
   const votesByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.votesFormatted]))
   const volResult   = useVolume24h(prices)
   const { data: gaugeAddressReads } = useReadContracts({
@@ -309,10 +315,14 @@ export default function VotePage() {
   // Fee APR per pool: trailing-week volume, not literal 24h -- a pool with
   // real but sporadic trading shouldn't show "—%" just because nothing
   // happened to trade in the exact last 24h. volWeek -> daily avg (÷7) ->
-  // annualized (×365) = ×(365/7).
+  // annualized (×365) = ×(365/7). useVolume24h already indexes real Swap
+  // events across vAMM, CL (Algebra), and DLMM (Liquidity Book) pools alike
+  // -- volResult.byPoolWeek was never the gap, only tvlByAddr and this loop
+  // itself being scoped to POOLS were, so CL/DLMM get real trading-fee APR
+  // here too now, not just vAMM.
   const aprByAddr: Record<string, number | null> = {}
   const feesWeekByAddr: Record<string, number | null> = {}
-  for (const pool of POOLS) {
+  for (const pool of [...POOLS, ...CL_POOLS, ...DLMM_POOLS]) {
     const tvl = tvlByAddr[pool.address] ?? null
     const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
     const feesWeek = volWeek !== null ? volWeek * parseFeeRate(pool.fee) : null
@@ -321,6 +331,34 @@ export default function VotePage() {
       ? (feesWeek * (365 / 7) / tvl) * 100
       : null
   }
+
+  // CL/DLMM gauges don't have a clean per-pool "staked TVL" the way vAMM's
+  // fungible LP balanceOf(gauge) gives one (CL stakes are individual NFTs,
+  // DLMM stakes are per-bin-id) -- rather than fabricate an approximate vAPR
+  // number, mirror this app's own Earn page precedent (see ClGaugeRow /
+  // DlmmGaugeRow there): show whether the gauge currently has a live AEON
+  // reward stream at all (rewardRate > 0 and periodFinish still in the
+  // future), same signal, not a guessed percentage.
+  const CL_DLMM_GAUGE_CONTRACTS = [
+    ...CL_POOLS.map(p => ({ address: CL_GAUGES[p.address], abi: CL_GAUGE_ABI, functionName: 'rewardRate' as const })),
+    ...CL_POOLS.map(p => ({ address: CL_GAUGES[p.address], abi: CL_GAUGE_ABI, functionName: 'periodFinish' as const })),
+    ...DLMM_POOLS.map(p => ({ address: DLMM_GAUGES[p.address], abi: DLMM_GAUGE_ABI, functionName: 'rewardRate' as const })),
+    ...DLMM_POOLS.map(p => ({ address: DLMM_GAUGES[p.address], abi: DLMM_GAUGE_ABI, functionName: 'periodFinish' as const })),
+  ]
+  const { data: clDlmmGaugeReads } = useReadContracts({ contracts: CL_DLMM_GAUGE_CONTRACTS, query: { refetchInterval: 60000 } })
+  const emittingByAddr: Record<string, boolean> = {}
+  const nowSecForEmitting = BigInt(Math.floor(Date.now() / 1000))
+  ;[...CL_POOLS, ...DLMM_POOLS].forEach((pool, i) => {
+    const isCl = i < CL_POOLS.length
+    const base = isCl ? 0 : CL_POOLS.length * 2
+    const localIndex = isCl ? i : i - CL_POOLS.length
+    const setLength = isCl ? CL_POOLS.length : DLMM_POOLS.length
+    const rewardRateRead   = clDlmmGaugeReads?.[base + localIndex]
+    const periodFinishRead = clDlmmGaugeReads?.[base + setLength + localIndex]
+    const rewardRate   = rewardRateRead?.status === 'success' ? rewardRateRead.result as bigint : 0n
+    const periodFinish = periodFinishRead?.status === 'success' ? periodFinishRead.result as bigint : 0n
+    emittingByAddr[pool.address] = rewardRate > 0n && periodFinish > nowSecForEmitting
+  })
 
   // "If you vote here" — FeeDistributorV3 pays 80% of a pool's RAW fees
   // (feesVoterSplit) to voters for that specific epoch, split by
@@ -760,7 +798,16 @@ export default function VotePage() {
                     <div className="col-span-2 text-sm font-mono text-text-secondary">{fmtUsd(tvlByAddr[pool.address] ?? null)}</div>
                     <div className="col-span-2 text-sm font-mono text-text-secondary">{fmtUsd(volResult.byPool[pool.address.toLowerCase()] ?? null)}</div>
                     <div className="col-span-2 text-sm font-mono text-emerald-400">{fmtApr(aprByAddr[pool.address] ?? null)}</div>
-                    <div className="col-span-1 text-sm font-mono text-violet-400">{fmtApr(vaprByAddr[pool.address] ?? null)}</div>
+                    {pool.type === 'vAMM' ? (
+                      <div className="col-span-1 text-sm font-mono text-violet-400">{fmtApr(vaprByAddr[pool.address] ?? null)}</div>
+                    ) : (
+                      <div
+                        title="CL/DLMM stakes are individual NFTs or bin shares, not a fungible LP balance, so there's no clean per-pool staked-TVL to project a vAPR % from. Shows whether the gauge has a live AEON reward stream instead of guessing a number."
+                        className={clsx('col-span-1 text-2xs font-mono font-bold', emittingByAddr[pool.address] ? 'text-aeon-400' : 'text-text-muted')}
+                      >
+                        {emittingByAddr[pool.address] ? 'Emitting' : 'No rewards'}
+                      </div>
+                    )}
                     <div className="col-span-1 flex justify-end">
                       <button
                         onClick={() => isSelected ? removePool(pool.address) : addPool(pool)}
