@@ -349,7 +349,10 @@ function applyPoolAllowlist() {
   }
 }
 
-const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?? '1000000')
+// ERZA trades everywhere/everything: no volume floor on external pools. Every
+// discovered external pool is eligible; the only gate that matters is the
+// net-of-gas profit check at execution (ETH in -> ETH out, positive after gas).
+const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?? '0')
 // Explicit user-requested external token pins. A pool containing one of these
 // tokens bypasses the general DexScreener liquidity/indexing preference and
 // remains eligible for canonical V2/V3/V4 validation. ROBINFUN deliberately
