@@ -39,7 +39,10 @@ function readEnvKey(): string {
   return ''
 }
 const BOT_PK = readEnvKey()
-const DRY_RUN = (process.env.DRY_RUN ?? 'true').toLowerCase() !== 'false'
+// Only thing you need to do: put BOT_PK in keeper3/.env. With a key present the
+// bot trades automatically; with no key it stays in safe dry-run. You can still
+// force dry-run WITH a key by setting DRY_RUN=true.
+const DRY_RUN = !BOT_PK ? true : (process.env.DRY_RUN ?? 'false').toLowerCase() === 'true'
 const MIN_PROFIT_WETH = parseEther(process.env.MIN_PROFIT_WETH ?? '0.0002') // safety buffer over gas
 const V3_SWAP_ROUTER = getAddress('0xcaf681a66d020601342297493863e78c959e5cb2')
 
