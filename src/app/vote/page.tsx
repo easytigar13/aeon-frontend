@@ -123,6 +123,16 @@ export default function VotePage() {
   // staked LP, so that migration needs to happen carefully, not rushed. This
   // blocks the easy path through OUR OWN UI only; it does not stop someone
   // calling the contract directly.
+  //
+  // MultiGaugeController (CL/DLMM) is a SEPARATE contract with its own
+  // per-epoch hasVoted(epoch, tokenId) tracking -- voting there never
+  // touches AeonVoter.lastVoted and vice versa. The guard below used to
+  // check AeonVoter.lastVoted unconditionally regardless of voteMode, which
+  // both (a) falsely blocked CL/DLMM voting with a fresh veNFT just because
+  // a *different* owned veNFT had voted on the unrelated legacy vAMM voter,
+  // and (b) never actually caught the same multi-vote pattern replayed
+  // entirely within MultiGaugeController. Now checks whichever contract the
+  // active voteMode actually votes through.
   const { data: ownedLastVotedReads } = useReadContracts({
     contracts: ownedTokenIds.map(id => ({
       address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'lastVoted' as const, args: [id] as const,
@@ -130,11 +140,6 @@ export default function VotePage() {
     query: { enabled: ownedTokenIds.length > 1 },
   })
   const CURRENT_EPOCH_START_SEC = BigInt(Math.floor(Date.now() / 1000 / 604800) * 604800)
-  const walletAlreadyVotedTokenId = ownedTokenIds.find((id, i) => {
-    if (tokenId !== undefined && id === tokenId) return false
-    const r = ownedLastVotedReads?.[i]
-    return r?.status === 'success' && (r.result as bigint) >= CURRENT_EPOCH_START_SEC
-  })
 
   const { data: nftOwner } = useReadContract({
     address: CONTRACTS.AeonVotingEscrow,
@@ -172,6 +177,26 @@ export default function VotePage() {
     functionName: 'hasVoted',
     args: multiEpoch !== undefined && tokenId !== undefined ? [multiEpoch, tokenId] : undefined,
     query: { enabled: multiEpoch !== undefined && tokenId !== undefined },
+  })
+
+  // Same multi-veNFT guard as ownedLastVotedReads above, but scoped to
+  // MultiGaugeController's own epoch/hasVoted bookkeeping for CL/DLMM mode.
+  const { data: ownedMultiHasVotedReads } = useReadContracts({
+    contracts: ownedTokenIds.map(id => ({
+      address: CONTRACTS.MultiGaugeController, abi: MULTI_GAUGE_CONTROLLER_ABI, functionName: 'hasVoted' as const,
+      args: multiEpoch !== undefined ? [multiEpoch, id] as const : undefined,
+    })),
+    query: { enabled: ownedTokenIds.length > 1 && multiEpoch !== undefined },
+  })
+
+  const walletAlreadyVotedTokenId = ownedTokenIds.find((id, i) => {
+    if (tokenId !== undefined && id === tokenId) return false
+    if (voteMode === 'vAMM') {
+      const r = ownedLastVotedReads?.[i]
+      return r?.status === 'success' && (r.result as bigint) >= CURRENT_EPOCH_START_SEC
+    }
+    const r = ownedMultiHasVotedReads?.[i]
+    return r?.status === 'success' && !!r.result
   })
 
   const { data: lastVotedTs } = useReadContract({
