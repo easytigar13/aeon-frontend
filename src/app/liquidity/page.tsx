@@ -7,7 +7,7 @@ import { useAccount, useBalance, useReadContract, useReadContracts, useWriteCont
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_POOLS, CL_RANGE_PRESETS, DLMM_CONTRACTS, DLMM_POOLS, TOKENS, CONTRACTS, ALGEBRA_CONTRACTS, NATIVE_SENTINEL } from '@/config/contracts'
-import { ERC20_ABI, LIQUIDITY_HELPER_V2_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WHITELIST_ABI } from '@/config/abis'
+import { ERC20_ABI, LIQUIDITY_HELPER_V2_ABI, PAIR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_POSITION_MANAGER_ABI, ALGEBRA_PM_ENUMERABLE_ABI, ALGEBRA_SWAP_ROUTER_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WHITELIST_ABI, VOTER_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { useAllPools } from '@/hooks/useAllPools'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats, useDiscoveredPoolStats } from '@/hooks/usePoolStats'
@@ -198,6 +198,10 @@ interface UnifiedPool {
   utilizationPct: number | null
   health: 'Healthy' | 'Low liquidity' | 'Critical liquidity' | 'Data pending'
   riskNote: string
+  // null while the on-chain gauges() read is still pending; CL/DLMM pools are
+  // never checked (their gauges are curated up front in CL_GAUGES/DLMM_GAUGES,
+  // so any pool listed there already has one) and are always true.
+  hasGauge: boolean | null
 }
 
 type ListFilter = 'ALL' | PoolMode
@@ -218,6 +222,26 @@ function usePoolListData(): UnifiedPool[] {
     return { utilizationPct: hasMeaningfulPoolLiquidity(tvl) && vol !== null ? (vol / tvl) * 100 : null, health, riskNote }
   }
 
+  // Whether each pool has a real gauge registered on AeonVoter. Every static
+  // POOLS entry is created through the normal governed flow and (per the
+  // comments alongside each in contracts.ts) already has one -- but
+  // self-service pools from Create Pool categorically don't (gauge creation
+  // is governor-only, see the CreatePoolView comment below), so this can't
+  // just be assumed true. One multicall covers both static and discovered
+  // vAMM pools; CL/DLMM pools skip this entirely since CL_GAUGES/DLMM_GAUGES
+  // are hand-curated and only ever list pools that already have a gauge.
+  const gaugeCheckPools = [...POOLS, ...discovered]
+  const { data: gaugeReads } = useReadContracts({
+    contracts: gaugeCheckPools.map(p => ({ address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'gauges' as const, args: [p.address] as const })),
+    query: { enabled: gaugeCheckPools.length > 0 },
+  })
+  const hasGaugeFor = (address: `0x${string}`): boolean | null => {
+    const i = gaugeCheckPools.findIndex(p => p.address.toLowerCase() === address.toLowerCase())
+    const r = i === -1 ? undefined : gaugeReads?.[i]
+    if (!r || r.status !== 'success') return null
+    return (r.result as string).toLowerCase() !== ZERO_ADDR.toLowerCase()
+  }
+
   const vamm: UnifiedPool[] = POOLS.map(p => {
     const tvlUsd = poolStats.find(s => s.address === p.address)?.tvlUsd ?? null
     const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
@@ -236,7 +260,7 @@ function usePoolListData(): UnifiedPool[] {
     const aprPct = (hasMeaningfulPoolLiquidity(tvlUsd) && feesUsdWeek !== null)
       ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
-    return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, ...healthFor('vAMM', tvlUsd, volUsd) }
+    return { type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, hasGauge: hasGaugeFor(p.address), ...healthFor('vAMM', tvlUsd, volUsd) }
   })
 
   // Pools anyone created themselves via Create Pool, discovered live from
@@ -252,13 +276,14 @@ function usePoolListData(): UnifiedPool[] {
     return {
       type: 'vAMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address,
       feeLabel: p.fee, tvlUsd, volUsd: null, feesUsd: null, volUsdWeek: null, feesUsdWeek: null, aprPct: null,
+      hasGauge: hasGaugeFor(p.address),
       ...healthFor('vAMM', tvlUsd, null),
     }
   })
 
-  // CL_POOLS/DLMM_POOLS are currently empty (see contracts.ts comment), so
-  // these two always produce []. Kept consistent with vamm's byPoolWeek APR
-  // fix above in case CL/DLMM ever comes back.
+  // CL_POOLS/DLMM_POOLS were restored 2026-07-12 (see contracts.ts comment)
+  // to the CASHCAT/AEON/ETH/USDG subset -- kept consistent with vamm's
+  // byPoolWeek APR fix above.
   const cl: UnifiedPool[] = CL_POOLS.map(p => {
     const tvlUsd = clPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
     const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
@@ -269,7 +294,7 @@ function usePoolListData(): UnifiedPool[] {
     const aprPct = (hasMeaningfulPoolLiquidity(tvlUsd) && feesUsdWeek !== null)
       ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
-    return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, ...healthFor('CL', tvlUsd, volUsd) }
+    return { type: 'CL', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: p.fee, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, hasGauge: true, ...healthFor('CL', tvlUsd, volUsd) }
   })
 
   const dlmm: UnifiedPool[] = DLMM_POOLS.map(p => {
@@ -282,7 +307,7 @@ function usePoolListData(): UnifiedPool[] {
     const aprPct = (hasMeaningfulPoolLiquidity(tvlUsd) && feesUsdWeek !== null)
       ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100
       : null
-    return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, ...healthFor('DLMM', tvlUsd, volUsd) }
+    return { type: 'DLMM', name: p.name, token0: p.token0, token1: p.token1, address: p.address, feeLabel: `${p.binStep}bp bins`, tvlUsd, volUsd, feesUsd, volUsdWeek, feesUsdWeek, aprPct, hasGauge: true, ...healthFor('DLMM', tvlUsd, volUsd) }
   })
 
   return [...vamm, ...vammDiscovered, ...cl, ...dlmm]
@@ -393,6 +418,14 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
                         <span className="text-2xs font-mono text-text-muted">{p.feeLabel}</span>
                       </div>
                       <span className={clsx('inline-block mt-0.5 text-2xs font-mono px-1.5 py-0.5 rounded border', TYPE_BADGE[p.type])}>{p.type}</span>
+                      {p.hasGauge === false && (
+                        <span
+                          title="No gauge registered yet — LPs won't earn AEON emissions from voting until the team creates one. Trading and organic fees still work normally."
+                          className="inline-block mt-0.5 ml-1 text-2xs font-mono px-1.5 py-0.5 rounded border bg-red-400/10 text-red-400 border-red-400/20"
+                        >
+                          NO GAUGE
+                        </span>
+                      )}
                     </div>
                   </div>
                 </td>
@@ -870,6 +903,16 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   })
   const totalSupply = (totalSupplyRaw as bigint | undefined) ?? 0n
 
+  // Surfaces the same "no gauge yet" fact the pool list badges and the
+  // Create Pool success screen show, but here for whichever pool the user
+  // has open right now -- self-service pools stay gauge-less indefinitely
+  // until the team registers one, so this isn't a one-time thing to just
+  // mention at creation and forget.
+  const { data: selectedGaugeRaw } = useReadContract({
+    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'gauges', args: [selectedPool.address],
+  })
+  const selectedHasGauge = selectedGaugeRaw !== undefined ? (selectedGaugeRaw as string).toLowerCase() !== ZERO_ADDR.toLowerCase() : null
+
   const allowance0 = useAllowance(token0Addr, address, HELPER)
   const allowance1 = useAllowance(token1Addr, address, HELPER)
 
@@ -1101,6 +1144,12 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
           </div>
         )}
       </div>
+
+      {selectedHasGauge === false && (
+        <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 mb-4">
+          This pool has no gauge yet — LPs won't earn AEON emissions from voting until the team registers one. Trading and organic fees work normally either way.
+        </div>
+      )}
 
       {tab === 'add' ? (
         <div className="space-y-4">
