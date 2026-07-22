@@ -8,7 +8,7 @@ import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG, LEGACY_AEON_VOTER, LEGACY_FEE_DISTRIBUTOR } from '@/config/contracts'
 import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI, FEE_DISTRIBUTOR_ABI, LEGACY_FEE_DISTRIBUTOR_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
-import { usePoolStats } from '@/hooks/usePoolStats'
+import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { projectNextEmission } from '@/lib/emissionsProjection'
 import { useOraclePricedTokens } from '@/hooks/useOraclePricedTokens'
@@ -283,9 +283,14 @@ export default function VotePage() {
   const isResetting = resetPending || resetConfirming
 
   const prices    = usePrices()
-  const poolStats = usePoolStats(prices)
-  const tvlByAddr   = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
-  const votesByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.votesFormatted]))
+  const poolStats     = usePoolStats(prices)
+  const clPoolStats   = useClPoolStats(prices)
+  const dlmmPoolStats = useDlmmPoolStats(prices)
+  // Merge all three so the CL+DLMM tab has TVL/votes too -- usePoolStats alone
+  // only covers vAMM POOLS, which left every CL/DLMM row showing $—/—%.
+  const allStats    = [...poolStats, ...clPoolStats, ...dlmmPoolStats]
+  const tvlByAddr   = Object.fromEntries(allStats.map(s => [s.address, s.tvlUsd]))
+  const votesByAddr = Object.fromEntries(allStats.map(s => [s.address, s.votesFormatted]))
   const volResult   = useVolume24h(prices)
   const { data: gaugeAddressReads } = useReadContracts({
     contracts: POOLS.map(pool => ({ address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'gauges' as const, args: [pool.address] as const })),
@@ -304,7 +309,7 @@ export default function VotePage() {
   // annualized (×365) = ×(365/7).
   const aprByAddr: Record<string, number | null> = {}
   const feesWeekByAddr: Record<string, number | null> = {}
-  for (const pool of POOLS) {
+  for (const pool of [...POOLS, ...CL_POOLS, ...DLMM_POOLS]) {
     const tvl = tvlByAddr[pool.address] ?? null
     const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
     const feesWeek = volWeek !== null ? volWeek * parseFeeRate(pool.fee) : null
@@ -451,6 +456,19 @@ export default function VotePage() {
     const poolWeight = poolStats.find(s => s.address === pool.address)?.votesWei ?? 0n
     vaprByAddr[pool.address] = (stakedTvl > 0 && aeonPrice && onChainTotalWeight && onChainTotalWeight > 0n)
       ? (projectedWeeklyToVoterUSD * (Number(poolWeight) / Number(onChainTotalWeight)) * 52 / stakedTvl) * 100
+      : null
+  }
+  // CL/DLMM vAPR: these gauges are funded by the MultiGaugeController, not the
+  // legacy voter -- so a pool's projected AEON = toMultiGaugeAeon split by its
+  // controller vote share (weights[epoch][pool] / totalWeight[epoch]), over the
+  // pool's TVL. (Uses total pool TVL as the denominator; CL positions earn only
+  // when staked, so this is the "if this TVL were staked" projection.)
+  const projectedWeeklyToMultiUSD = aeonPrice ? toMultiGaugeAeon * aeonPrice : 0
+  for (const pool of [...CL_POOLS, ...DLMM_POOLS]) {
+    const tvl = tvlByAddr[pool.address] ?? null
+    const poolWeight = allStats.find(s => s.address === pool.address)?.votesWei ?? 0n
+    vaprByAddr[pool.address] = (tvl && tvl > 0 && poolWeight > 0n && currentMultiWeight && currentMultiWeight > 0n)
+      ? (projectedWeeklyToMultiUSD * (Number(poolWeight) / Number(currentMultiWeight)) * 52 / tvl) * 100
       : null
   }
 
