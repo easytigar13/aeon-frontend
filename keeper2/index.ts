@@ -359,8 +359,11 @@ const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?
 // remains excluded because its transfer behavior is incompatible with the
 // current atomic executor; force-adding an incompatible token would only burn
 // gas on guaranteed reverts.
+// VIRTUAL and VEX removed: their pin kept ERZA regenerating a dead
+// WETH->USDG->VEX->VIRTUAL->WETH route every cycle (net-negative). Unpinned,
+// they're subject to the normal $500 floor like everything else.
 const MANUAL_EXTERNAL_TOKENS = new Set<keyof typeof TOKENS>([
-  'VIRTUAL', 'CASHCAT', 'INDEX', 'TENDIES', 'MARIAN', 'VEX', 'JUGGERNAUT',
+  'CASHCAT', 'INDEX', 'TENDIES', 'MARIAN', 'JUGGERNAUT',
   'VAULTS', 'SLEEP', 'SHERWOOD', 'HOODIE', 'NASDAQ',
 ])
 const MANUAL_EXTERNAL_TOKEN_ADDRESSES = new Set(
@@ -2775,7 +2778,10 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
       .filter(([, health]) => health.cooldownUntil > Date.now())
       .map(([route, health]) => ({ route, failures: health.failures, category: health.lastCategory, until: new Date(health.cooldownUntil).toISOString() })),
     balances,
-    lastOpportunities: lastOpps.slice(0, 20).map(o => {
+    // Only publish opportunities that actually clear gas (net-of-gas positive).
+    // Negative-net candidates are internal search noise and must never surface
+    // on the dashboard -- if it shows here, it's worth trading.
+    lastOpportunities: lastOpps.filter(o => o.expectedNetUsd > 0).slice(0, 20).map(o => {
       const isSettlement = 'profitUsdg' in o
       const grossProfit = isSettlement
         ? formatUnits(o.profitUsdg, TOKENS.USDG.decimals)
