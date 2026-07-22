@@ -8,10 +8,16 @@
 // even collected fees never turned into a real, claimable mint. Both were
 // being done by hand in a Claude session; this automates them.
 //
-// Every INTERVAL_MS: sweep collectFees() across every pool's gauge (keeps
-// the running epoch's fee tally accurate throughout the week, not just at
-// the end). When the on-chain epoch boundary advances past what this keeper
-// last processed: snapshotEpoch() -> updatePeriod() -> distributeAll(), then
+// Fee collection is ONCE PER EPOCH, in the final window before the boundary
+// (SWEEP_WINDOW_MS) -- NOT every tick. collectFees() pulls ALL fees a gauge
+// has accrued whenever it's called, so a single end-of-epoch sweep captures
+// the identical week of fees that 336 half-hourly sweeps would, for ~1/300th
+// the gas. Critically, FeeDistributor.notifyFees() tags fees to the epoch in
+// which collectFees() is CALLED (not when earned), so the sweep must land
+// just before the boundary for the fees to belong to the closing epoch and
+// be claimable by that epoch's voters. When the on-chain epoch boundary
+// advances past what this keeper last processed:
+// snapshotEpoch() -> updatePeriod() -> distributeAll(), then
 // verify + top up any gauge whose real AEON balance doesn't match what
 // distributeAll() told it to expect (AeonGauge.notifyRewardAmount() sets
 // rewardRate but doesn't pull tokens -- known bug, fixed in AeonGaugeV2, but
@@ -35,8 +41,22 @@ dotenv.config({ path: fileURLToPath(new URL('.env', import.meta.url)) })
 const RPC_URL = process.env.RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'
 const PK = (process.env.DEPLOYER_PK ?? '') as `0x${string}`
 const INTERVAL_MS = parseInt(process.env.INTERVAL_MS ?? '1800000') // 30 min default
+// Fees are collected only when the current time is within this many ms of the
+// epoch boundary (default 90 min). With a 30-min tick this guarantees at
+// least one sweep lands in-window, and the once-per-epoch guard below stops
+// it from re-sweeping. This is the entire fix for the gas drain: no more
+// per-tick collectFees() spam.
+const SWEEP_WINDOW_MS = parseInt(process.env.SWEEP_WINDOW_MS ?? '5400000')
 const GAS_LIMIT_PER_COLLECT = 600_000n
 const STATUS_FILE = fileURLToPath(new URL('status.json', import.meta.url))
+
+// Which epoch we last collected fees for. Persisted to status.json so a
+// restart inside the sweep window doesn't re-run the whole 67-gauge sweep.
+let lastSweptEpoch = 0n
+try {
+  const s = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'))
+  if (s.lastSweptEpoch) lastSweptEpoch = BigInt(s.lastSweptEpoch)
+} catch { /* no status file yet */ }
 
 // Overridable post-cutover via .env -- default to the currently-live
 // contracts.
@@ -116,8 +136,29 @@ function log(msg: string) {
 
 function writeStatus(extra: Record<string, unknown>) {
   try {
-    fs.writeFileSync(STATUS_FILE, JSON.stringify({ updatedAt: Date.now(), ...extra }, null, 2))
+    fs.writeFileSync(STATUS_FILE, JSON.stringify({ updatedAt: Date.now(), lastSweptEpoch: lastSweptEpoch.toString(), ...extra }, null, 2))
   } catch {}
+}
+
+// Collect fees exactly once per epoch, only inside the pre-boundary window.
+// Outside the window this is a pure no-op (a couple of free eth_calls, zero
+// gas). Inside the window, the first tick sweeps and records the epoch so
+// later ticks (and restarts) skip it.
+async function sweepFeesIfNearBoundary() {
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  const epochStart = (now / WEEK) * WEEK
+  const boundary = epochStart + WEEK
+  const secsToBoundary = boundary - now
+  if (secsToBoundary > BigInt(Math.floor(SWEEP_WINDOW_MS / 1000))) {
+    return // not near the boundary yet -- don't spend gas
+  }
+  if (lastSweptEpoch === epochStart) {
+    return // already collected this epoch's fees
+  }
+  log(`Pre-boundary window (T-${secsToBoundary}s) -- collecting this epoch's fees once.`)
+  const res = await sweepFees()
+  lastSweptEpoch = epochStart
+  writeStatus({ ok: true, lastRun: new Date().toISOString(), lastSweep: res })
 }
 
 async function sweepFees() {
@@ -288,7 +329,7 @@ async function snapshotLegacyFeeDistributorIfNeeded() {
 
 async function tick() {
   try {
-    await sweepFees()
+    await sweepFeesIfNearBoundary()
     await closeEpochIfNeeded()
     await snapshotLegacyFeeDistributorIfNeeded()
     writeStatus({ ok: true, lastRun: new Date().toISOString() })
