@@ -90,7 +90,12 @@ for (const p of [...CL_POOLS, ...DLMM_POOLS]) {
 const POOL_ADDRESSES = [...new Set(POOLS.map(p => p.address))] as `0x${string}`[]
 const CL_ADDRESSES = [...new Set(CL_POOLS.map(p => p.address))] as `0x${string}`[]
 const DLMM_ADDRESSES = [...new Set(DLMM_POOLS.map(p => p.address))] as `0x${string}`[]
-const ALL_ADDRESSES = [...new Set([...POOL_ADDRESSES, ...CL_ADDRESSES, ...DLMM_ADDRESSES])] as `0x${string}`[]
+const LOG_ADDRESS_CHUNK = 20
+const VENUE_LOG_GROUPS = [
+  { addresses: POOL_ADDRESSES, topic: SWAP_TOPIC },
+  { addresses: CL_ADDRESSES, topic: CL_SWAP_TOPIC },
+  { addresses: DLMM_ADDRESSES, topic: LB_SWAP_TOPIC },
+] as const
 
 // The factory sorts a pool's real on-chain token0/token1 by address, which
 // does NOT always match the token0/token1 declared in POOLS above (e.g.
@@ -154,6 +159,34 @@ export interface VolumeResult {
   weekWindowComplete: boolean
 }
 
+const EMPTY_VOLUME_RESULT: VolumeResult = {
+  total: null,
+  byPool: {},
+  byPoolWeek: {},
+  priceHistory: {},
+  dayWindowComplete: false,
+  weekWindowComplete: false,
+}
+
+// Several pages (and four panels on /liquidity alone) consume this hook.
+// Without a shared cache, every mounted instance independently downloaded
+// the same seven days of logs. Keep one in-flight request and one result per
+// browser session, then fan it out to all consumers.
+const SHARED_DAY_TTL_MS = 60_000
+const SHARED_WEEK_TTL_MS = 10 * 60_000
+let sharedVolumeResult: VolumeResult = EMPTY_VOLUME_RESULT
+let sharedDayFetchedAt = 0
+let sharedWeekFetchedAt = 0
+let sharedVolumeFetch: Promise<void> | null = null
+const sharedVolumeListeners = new Set<(result: VolumeResult) => void>()
+
+function publishSharedVolume(result: VolumeResult, freshness: 'day' | 'week') {
+  sharedVolumeResult = result
+  if (freshness === 'day') sharedDayFetchedAt = Date.now()
+  if (freshness === 'week') sharedWeekFetchedAt = Date.now()
+  for (const listener of sharedVolumeListeners) listener(result)
+}
+
 export function useVolume24h(prices: PriceMap): VolumeResult {
   const client     = usePublicClient()
   const pricesRef  = useRef(prices)
@@ -176,11 +209,36 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
   })
   onChainToken0Ref.current = token0Map
 
-  const [result, setResult] = useState<VolumeResult>({ total: null, byPool: {}, byPoolWeek: {}, priceHistory: {}, dayWindowComplete: false, weekWindowComplete: false })
+  const [result, setResult] = useState<VolumeResult>(sharedVolumeResult)
 
   useEffect(() => {
     if (!client) return
-    let cancelled = false
+    sharedVolumeListeners.add(setResult)
+
+    // Robinhood's public RPC accepts a long block range for a small address
+    // set, but rejects the same range when all vAMM/CL/DLMM addresses are
+    // supplied in one eth_getLogs request. The old all-address request then
+    // degraded to a tiny block window and deliberately marked the result
+    // incomplete, making real CL/DLMM swaps display as zero/unknown. Query
+    // each venue with bounded address batches so the complete time window is
+    // retained and every event signature is matched independently.
+    async function fetchVenueLogs(fromBlock: bigint, toBlock: bigint): Promise<any[]> {
+      const calls: Promise<any[]>[] = []
+      for (const group of VENUE_LOG_GROUPS) {
+        for (let i = 0; i < group.addresses.length; i += LOG_ADDRESS_CHUNK) {
+          const address = group.addresses.slice(i, i + LOG_ADDRESS_CHUNK)
+          if (address.length === 0) continue
+          calls.push((client as any).getLogs({
+            address,
+            topics: [[group.topic]],
+            fromBlock,
+            toBlock,
+          }))
+        }
+      }
+      const batches = await Promise.all(calls)
+      return batches.flat()
+    }
 
     // Shared candidate-range search: try the measured window first, degrade
     // to smaller windows only if the RPC itself rejects the range (e.g. a
@@ -192,12 +250,7 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
       for (const range of candidateRanges) {
         const fromBlock = currentBlock > range ? currentBlock - range : 0n
         try {
-          const logs = await (client as any).getLogs({
-            address: ALL_ADDRESSES,
-            topics:  [[SWAP_TOPIC, CL_SWAP_TOPIC, LB_SWAP_TOPIC]], // OR match on topic0
-            fromBlock,
-            toBlock: currentBlock,
-          })
+          const logs = await fetchVenueLogs(fromBlock, currentBlock)
           return { logs, complete: range >= primaryRange }
         } catch {
           // try next smaller range
@@ -206,41 +259,25 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
       throw new Error('all candidate ranges failed')
     }
 
-    // A single getLogs() spanning the full 7-day block range (~7x wider than
-    // 24h) reliably fails against this RPC -- confirmed: the 24h fetch above
-    // (a single one-shot call) succeeds every time, but weekWindowComplete
-    // was staying false essentially always, silently degrading every
-    // consumer of byPoolWeek (this dashboard's fee/emission projection, the
-    // vote page's vAPR) down to a frozen on-chain snapshot instead of real
-    // trailing volume. Rather than guess at a provider-side range cap, reuse
-    // the SAME block-range size already proven to succeed (range24h) and
-    // fetch 7 non-overlapping ~1-day windows in parallel, concatenating the
-    // results -- this covers the identical total span as one 7d call would,
-    // just shaped as 7 requests each sized exactly like the one that's
-    // already known to work.
-    async function fetchWeekInDayChunks(range24h: bigint, currentBlock: bigint): Promise<{ logs: any[]; complete: boolean }> {
+    // The current 24h window is already fetched for the dashboard. Only fetch
+    // the six older, non-overlapping day windows needed for the weekly view.
+    // They are intentionally sequential to avoid an RPC rate-limit burst.
+    async function fetchPreviousSixDays(range24h: bigint, currentBlock: bigint): Promise<{ logs: any[]; complete: boolean }> {
       const chunks: Array<{ fromBlock: bigint; toBlock: bigint }> = []
-      let toBlock = currentBlock
-      for (let i = 0; i < 7 && toBlock > 0n; i++) {
+      let toBlock = currentBlock > range24h ? currentBlock - range24h - 1n : 0n
+      for (let i = 0; i < 6 && toBlock > 0n; i++) {
         const fromBlock = toBlock > range24h ? toBlock - range24h : 0n
         chunks.push({ fromBlock, toBlock })
         toBlock = fromBlock > 0n ? fromBlock - 1n : 0n
       }
       try {
-        const results = await Promise.all(chunks.map(({ fromBlock, toBlock: cToBlock }) =>
-          (client as any).getLogs({
-            address: ALL_ADDRESSES,
-            topics:  [[SWAP_TOPIC, CL_SWAP_TOPIC, LB_SWAP_TOPIC]],
-            fromBlock,
-            toBlock: cToBlock,
-          })
-        ))
+        const results: any[][] = []
+        for (const { fromBlock, toBlock: cToBlock } of chunks) {
+          results.push(await fetchVenueLogs(fromBlock, cToBlock))
+        }
         return { logs: results.flat(), complete: true }
       } catch {
-        // A day-chunk itself failed (real network hiccup, not a range-size
-        // issue) -- fall back to the old degrading single-shot search rather
-        // than silently claim a complete window that isn't.
-        return fetchLogsForRange(range24h * 7n, currentBlock)
+        return { logs: [], complete: false }
       }
     }
 
@@ -350,37 +387,58 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
     }
 
     async function fetchVolume() {
-      const currentBlock = await client!.getBlockNumber().catch(() => undefined)
-      if (currentBlock === undefined || cancelled) return
+      if (Date.now() - sharedDayFetchedAt < SHARED_DAY_TTL_MS) {
+        setResult(sharedVolumeResult)
+        return
+      }
+      if (sharedVolumeFetch) {
+        await sharedVolumeFetch
+        return
+      }
 
-      const range24h = await blocksFor24h(client!)
+      sharedVolumeFetch = (async () => {
+        const currentBlock = await client!.getBlockNumber().catch(() => undefined)
+        if (currentBlock === undefined) return
 
-      const [logs24h, logs7d] = await Promise.all([
-        fetchLogsForRange(range24h, currentBlock).catch(e => { console.warn('useVolume24h: 24h getLogs failed', e); return null }),
-        fetchWeekInDayChunks(range24h, currentBlock).catch(e => { console.warn('useVolume24h: 7d getLogs failed', e);  return null }),
-      ])
+        const range24h = await blocksFor24h(client!)
 
-      if (cancelled) return
+        const logs24h = await fetchLogsForRange(range24h, currentBlock)
+          .catch(e => { console.warn('useVolume24h: 24h getLogs failed', e); return null })
+        const p = pricesRef.current
+        const day = logs24h ? processLogs(logs24h.logs, p) : null
+        if (!day || !logs24h?.complete) return
 
-      const p = pricesRef.current
-      const day  = logs24h ? processLogs(logs24h.logs, p) : null
-      const week = logs7d  ? processLogs(logs7d.logs,  p) : null
+        // Publish the dashboard's 24h result immediately. Weekly APR history
+        // continues in the background and no longer blocks first paint.
+        publishSharedVolume({
+          total:      logs24h?.complete ? (day?.totalUsd ?? 0) : null,
+          byPool:     logs24h?.complete ? (day?.byPool ?? {}) : {},
+          byPoolWeek: sharedVolumeResult.byPoolWeek,
+          priceHistory: day.priceHistory,
+          dayWindowComplete: logs24h?.complete ?? false,
+          weekWindowComplete: sharedVolumeResult.weekWindowComplete,
+        }, 'day')
 
-      if (!day && !week) return
+        if (Date.now() - sharedWeekFetchedAt < SHARED_WEEK_TTL_MS) return
 
-      setResult({
-        total:      logs24h?.complete ? (day?.totalUsd ?? 0) : null,
-        byPool:     logs24h?.complete ? (day?.byPool ?? {}) : {},
-        byPoolWeek: logs7d?.complete ? (week?.byPool ?? {}) : {},
-        priceHistory: day?.priceHistory ?? week?.priceHistory ?? {},
-        dayWindowComplete: logs24h?.complete ?? false,
-        weekWindowComplete: logs7d?.complete ?? false,
-      })
+        const older = await fetchPreviousSixDays(range24h, currentBlock)
+          .catch(e => { console.warn('useVolume24h: 7d getLogs failed', e); return null })
+        if (!older?.complete) return
+
+        const week = processLogs([...logs24h.logs, ...older.logs], p)
+        publishSharedVolume({
+          ...sharedVolumeResult,
+          byPoolWeek: week.byPool,
+          weekWindowComplete: true,
+        }, 'week')
+      })().finally(() => { sharedVolumeFetch = null })
+
+      await sharedVolumeFetch
     }
 
     fetchVolume()
     const id = setInterval(fetchVolume, 60_000)
-    return () => { cancelled = true; clearInterval(id) }
+    return () => { clearInterval(id); sharedVolumeListeners.delete(setResult) }
   }, [client])  // prices excluded — accessed via ref to avoid infinite loop
 
   return result

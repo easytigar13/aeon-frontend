@@ -1,6 +1,6 @@
 ﻿'use client'
 import { useState } from 'react'
-import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins, Sparkles } from 'lucide-react'
+import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins, Sparkles, AlertTriangle } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
@@ -374,6 +374,18 @@ export default function DashboardPage() {
           <KpiCard label="AEON Burned"        value={`${fmt18(totalBurned)} AEON`}    accent="red"     icon={<Flame      size={16} className="text-red-400" />}     delta={`${burnedPct}% of supply`} />
         </div>
 
+        <div className="mb-8 rounded-2xl border border-red-400/30 bg-red-400/5 p-5">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={20} className="mt-0.5 shrink-0 text-red-400" />
+            <div>
+              <h2 className="font-display font-semibold text-red-300">Protocol voting disclosure</h2>
+              <p className="mt-1 text-sm leading-relaxed text-text-secondary">
+                The developer made a mistake and accidentally burned 50,000 AEON. The AEON is permanently burned and cannot be recovered.
+              </p>
+            </div>
+          </div>
+        </div>
+
         <div className="card p-6 mb-8 relative" style={{ boxShadow: `0 0 40px -20px ${chartTab === 'tvl' ? ACCENT.aeon.glow : ACCENT.violet.glow}` }}>
           <div className="flex items-center justify-between mb-6">
             <div className="flex gap-1 p-1 bg-bg-raised rounded-xl border border-bg-border">
@@ -635,7 +647,7 @@ export default function DashboardPage() {
       <div className="card overflow-hidden">
         <div className="px-6 py-4 border-b border-bg-border flex items-center justify-between">
           <h2 className="font-display font-semibold text-text-primary">All Pools</h2>
-          <span className="text-xs font-mono text-text-muted">{uniquePools.length} pools</span>
+          <span className="text-xs font-mono text-text-muted">{liquidPools.length} non-empty pools</span>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full">
@@ -647,8 +659,8 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-bg-border">
-              {uniquePools.map(pool => {
-                const stat    = statByAddr[pool.address]
+              {liquidPools.map(pool => {
+                const stat    = statByAddr[pool.address.toLowerCase()]
                 const vol     = volByAddr[pool.address.toLowerCase()] ?? null
                 const volWeek = volByAddrWeek[pool.address.toLowerCase()] ?? null
                 const tvl     = stat?.tvlUsd ?? null
