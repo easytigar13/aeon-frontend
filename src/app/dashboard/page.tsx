@@ -542,18 +542,19 @@ export default function DashboardPage() {
           return (
             <div className="card p-6" style={{ boxShadow: `0 0 40px -22px ${ACCENT.aeon.glow}` }}>
               <div className="flex items-center gap-2 mb-4">
-                <Lock size={16} className="text-aeon-400" />
+                <Coins size={16} className="text-emerald-400" />
                 <span className="font-display font-semibold text-text-primary">Pre-Migration Rewards</span>
-                <span className="ml-auto text-2xs font-mono text-text-muted uppercase tracking-wider">Real, on-chain balances</span>
+                <span className="ml-auto text-2xs font-mono text-emerald-400 uppercase tracking-wider">Live · Claimable now</span>
               </div>
               <div className="flex items-center gap-6 mb-4">
-                <IconOrb accent="aeon" size={88} icon={<Lock size={32} className="text-aeon-400" />} />
+                <IconOrb accent="emerald" size={88} icon={<Coins size={32} className="text-emerald-400" />} />
                 <div className="flex-1 space-y-1">
-                  <div className="text-2xl font-mono font-bold text-aeon-400">{totalUsd !== null ? fmtUsd(totalUsd, true) : `${rows.length} tokens`}</div>
+                  <div className="text-2xl font-mono font-bold text-emerald-400">{totalUsd !== null ? fmtUsd(totalUsd, true) : `${rows.length} tokens`}</div>
                   <p className="text-2xs text-text-muted leading-relaxed">
                     Collected before the AeonVoterV3 cutover, sitting in the old FeeDistributor — every fee token
-                    that actually came in, not just AEON. Locked until that epoch closes, then claimable on the
-                    Vote page for whoever voted before the switch.
+                    that actually came in, not just AEON. The holding epoch has now closed, so these are
+                    <span className="text-emerald-400"> claimable now</span> by anyone who voted before the switch —{' '}
+                    <a href="/vote" className="text-emerald-400 underline hover:no-underline">claim on the Vote page →</a>
                   </p>
                 </div>
               </div>

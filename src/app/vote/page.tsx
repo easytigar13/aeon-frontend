@@ -872,11 +872,14 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
 // so it doesn't just sit unclaimed once the new Claim Fees button (which
 // only knows about the new, empty-so-far FeeDistributor) can't see it.
 function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
-  const WEEK_S = 604800n
-  const nowSec = BigInt(Math.floor(Date.now() / 1000))
-  const currentEpoch = (nowSec / WEEK_S) * WEEK_S
-  const isClosed = nowSec >= currentEpoch + WEEK_S
-  const closesAt = new Date(Number(currentEpoch + WEEK_S) * 1000)
+  // Pre-migration fees sit in TWO now-closed epochs (verified on-chain:
+  // 1783555200 + 1784160000 both hold real fees AND votes). This USED to
+  // compute the CURRENT week and broke the instant the epoch rolled over --
+  // it queried the new, empty epoch, found zero weight, and rendered nothing
+  // (people thought their money vanished). These epochs are historical/fixed.
+  const LEGACY_EPOCHS = [1783555200n, 1784160000n] as const
+  const PAIRS = UNIQUE_VOTE_POOLS.flatMap(pool => LEGACY_EPOCHS.map(epoch => ({ pool, epoch })))
+  const keyOf = (poolAddr: string, epoch: bigint) => `${poolAddr}-${epoch}`
 
   // The claiming contract (LEGACY_FEE_DISTRIBUTOR, immutable, pre-cutover)
   // hardcodes msg.sender -> voter.lastVotedTokenId(msg.sender) -- it can
@@ -899,9 +902,9 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
   // timestamp -- caused a real bug here: pointed at an old, already-fully-
   // processed epoch instead of the one actually holding the pre-cutover fees).
   const { data: activeWeightData } = useReadContracts({
-    contracts: UNIQUE_VOTE_POOLS.map(p => ({
+    contracts: PAIRS.map(q => ({
       address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'poolVoteWeight' as const,
-      args: activeTokenId !== undefined ? [activeTokenId, p.address, currentEpoch] as const : undefined,
+      args: activeTokenId !== undefined ? [activeTokenId, q.pool.address, q.epoch] as const : undefined,
     })),
     query: { enabled: activeTokenId !== undefined && activeTokenId > 0n, refetchInterval: 15000 },
   })
@@ -911,9 +914,9 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
   const otherTokenIds = ownedTokenIds.filter(id => id !== activeTokenId)
   const { data: otherWeightData } = useReadContracts({
     contracts: otherTokenIds.flatMap(id =>
-      UNIQUE_VOTE_POOLS.map(p => ({
+      PAIRS.map(q => ({
         address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'poolVoteWeight' as const,
-        args: [id, p.address, currentEpoch] as const,
+        args: [id, q.pool.address, q.epoch] as const,
       }))
     ),
     query: { enabled: otherTokenIds.length > 0, refetchInterval: 15000 },
@@ -921,23 +924,23 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
 
   const publicClient = usePublicClient()
   const { writeContractAsync } = useWriteContract()
-  const [claimedPools, setClaimedPools] = useState<Set<string>>(new Set())
+  const [claimedKeys, setClaimedKeys] = useState<Set<string>>(new Set())
   const [claimingIndex, setClaimingIndex] = useState<number | null>(null)
   const [claimError, setClaimError] = useState('')
 
   if (!activeTokenId || activeTokenId === 0n) return null
-  const rows = UNIQUE_VOTE_POOLS
-    .map((pool, i) => ({ pool, weight: activeWeightData?.[i]?.status === 'success' ? activeWeightData[i].result as bigint : 0n }))
+  const rows = PAIRS
+    .map((q, i) => ({ ...q, weight: activeWeightData?.[i]?.status === 'success' ? activeWeightData[i].result as bigint : 0n }))
     .filter(r => r.weight > 0n)
 
   const otherIdsWithWeight = otherTokenIds.filter((id, idx) => {
-    const start = idx * UNIQUE_VOTE_POOLS.length
-    return UNIQUE_VOTE_POOLS.some((_, j) => otherWeightData?.[start + j]?.status === 'success' && (otherWeightData[start + j].result as bigint) > 0n)
+    const start = idx * PAIRS.length
+    return PAIRS.some((_, j) => otherWeightData?.[start + j]?.status === 'success' && (otherWeightData[start + j].result as bigint) > 0n)
   })
 
   if (rows.length === 0 && otherIdsWithWeight.length === 0) return null
 
-  const pending = rows.filter(r => !claimedPools.has(r.pool.address))
+  const pending = rows.filter(r => !claimedKeys.has(keyOf(r.pool.address, r.epoch)))
   const isClaiming = claimingIndex !== null
 
   async function handleClaimAll() {
@@ -947,10 +950,10 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
       try {
         const hash = await writeContractAsync({
           address: LEGACY_FEE_DISTRIBUTOR, abi: LEGACY_FEE_DISTRIBUTOR_ABI, functionName: 'claimAllFees',
-          args: [pending[i].pool.address, currentEpoch],
+          args: [pending[i].pool.address, pending[i].epoch],
         })
         await publicClient?.waitForTransactionReceipt({ hash })
-        setClaimedPools(prev => new Set(prev).add(pending[i].pool.address))
+        setClaimedKeys(prev => new Set(prev).add(keyOf(pending[i].pool.address, pending[i].epoch)))
       } catch (e: any) {
         setClaimError((e.shortMessage ?? e.message ?? 'Claim failed').slice(0, 150))
         break
@@ -962,30 +965,26 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
   return (
     <div className="space-y-1 pt-1 border-t border-amber-500/20 mt-1">
       <div className="text-2xs text-amber-400 uppercase tracking-wider pt-1">Pre-migration rewards (veNFT #{activeTokenId.toString()})</div>
-      {rows.map(({ pool }) => (
-        <div key={pool.address} className="flex justify-between items-center text-xs">
-          <span className="text-text-secondary">{pool.name}</span>
-          <span className={clsx('font-mono text-2xs', claimedPools.has(pool.address) ? 'text-emerald-400' : 'text-text-muted')}>
-            {claimedPools.has(pool.address) ? 'Claimed ✓' : 'Pending'}
+      {rows.map(({ pool, epoch }) => (
+        <div key={keyOf(pool.address, epoch)} className="flex justify-between items-center text-xs">
+          <span className="text-text-secondary">{pool.name} <span className="text-text-muted text-2xs">({epoch === 1783555200n ? 'wk1' : 'wk2'})</span></span>
+          <span className={clsx('font-mono text-2xs', claimedKeys.has(keyOf(pool.address, epoch)) ? 'text-emerald-400' : 'text-text-muted')}>
+            {claimedKeys.has(keyOf(pool.address, epoch)) ? 'Claimed ✓' : 'Pending'}
           </span>
         </div>
       ))}
       {rows.length === 0 && (
-        <p className="text-2xs text-text-muted">veNFT #{activeTokenId.toString()} has no weight this epoch.</p>
+        <p className="text-2xs text-text-muted">veNFT #{activeTokenId.toString()} has no pre-migration weight.</p>
       )}
-      {isClosed ? (
-        pending.length > 0 && (
-          <button
-            onClick={handleClaimAll}
-            disabled={isClaiming}
-            className="btn-primary w-full mt-2 flex items-center justify-center gap-2 text-sm py-2 disabled:opacity-60"
-          >
-            {isClaiming && <Loader2 size={14} className="animate-spin" />}
-            {isClaiming ? `Claiming ${claimingIndex! + 1}/${pending.length}…` : `Claim All (${pending.length})`}
-          </button>
-        )
-      ) : (
-        <p className="text-2xs text-text-muted pt-1">Claimable once this epoch closes (~{closesAt.toLocaleDateString()}).</p>
+      {pending.length > 0 && (
+        <button
+          onClick={handleClaimAll}
+          disabled={isClaiming}
+          className="btn-primary w-full mt-2 flex items-center justify-center gap-2 text-sm py-2 disabled:opacity-60"
+        >
+          {isClaiming && <Loader2 size={14} className="animate-spin" />}
+          {isClaiming ? `Claiming ${claimingIndex! + 1}/${pending.length}…` : `Claim All (${pending.length})`}
+        </button>
       )}
       {claimError && <p className="text-2xs text-red-400 pt-1 break-all">{claimError}</p>}
       {otherIdsWithWeight.length > 0 && (
