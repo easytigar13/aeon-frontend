@@ -1116,6 +1116,17 @@ export const VOTER_ABI = [
     outputs: [{ name: '', type: 'uint256' }],
   },
   {
+    name: 'poolVoteWeight',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [
+      { name: 'tokenId', type: 'uint256' },
+      { name: 'pool', type: 'address' },
+      { name: 'epoch', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'uint256' }],
+  },
+  {
     name: 'totalWeight',
     type: 'function',
     stateMutability: 'view',

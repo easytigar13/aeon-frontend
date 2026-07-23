@@ -1293,7 +1293,7 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
         )}
       </div>
 
-      <LegacyPositions />
+      <LegacyPositions wallet={wallet} />
 
       <div>
         <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Token Balances</div>
