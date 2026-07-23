@@ -871,6 +871,28 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
 // still-intact storage). This shows + claims that one legacy epoch's money
 // so it doesn't just sit unclaimed once the new Claim Fees button (which
 // only knows about the new, empty-so-far FeeDistributor) can't see it.
+// The ONLY vAMM pools that hold pre-migration fees (verified on-chain: these
+// 14 have non-zero legacy poolTotalWeight in epochs 1783555200/1784160000; the
+// other 40 vAMM pools -- all the stock pairs -- have zero). Querying only these
+// keeps the weight multicall small (14x2 instead of 54x2) so it doesn't blow
+// the RPC limit and silently return nothing (which hid the whole claim section).
+const LEGACY_FEE_POOLS = [
+  { address: '0xD215650cb628113A64D938164Ee5CD72293F9ea6' as `0x${string}`, name: 'AEON/ETH' },
+  { address: '0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288' as `0x${string}`, name: 'AEON/USDG' },
+  { address: '0x2732E1312e5Bba5729534E9d94D44c090b200F14' as `0x${string}`, name: 'ETH/USDG' },
+  { address: '0x67B2da1742187Aa09b427082b06ACDC5bBCA2D99' as `0x${string}`, name: 'VIRTUAL/AEON' },
+  { address: '0xeB638e1FA253E5526C2be76626dE26F02E4bdaba' as `0x${string}`, name: 'ROBINFUN/AEON' },
+  { address: '0x22d76bf4e8d2c1DfCca7de6c9dC46Ec2a8Ed7Eb7' as `0x${string}`, name: 'CASHCAT/AEON' },
+  { address: '0x3DC6b6c354fB1e9CFdaA8A36ff845728f7176f4e' as `0x${string}`, name: 'CASHCAT/ETH' },
+  { address: '0x82203a764428Fbf826DCd1CE48Fdd57655b604f2' as `0x${string}`, name: 'CASHCAT/USDG' },
+  { address: '0x625fcD4CA1cA34Eb8ac74883748419De037d78DF' as `0x${string}`, name: 'ROBINFUN/ETH' },
+  { address: '0xB60d3Dea956204c6731cA22622bE2b8bEFac4029' as `0x${string}`, name: 'ROBINFUN/USDG' },
+  { address: '0x8Ca7acDe0218B5A905dC29CC9d650fadC706Fd9E' as `0x${string}`, name: 'CASHCAT/ROBINFUN' },
+  { address: '0xB4692A778E33fBA0B97Feaa863377C6322c83AA4' as `0x${string}`, name: 'SHERWOOD/AEON' },
+  { address: '0x3C643F22F0b24795710638CdEf2296eA12896317' as `0x${string}`, name: 'HOODIE/AEON' },
+  { address: '0xbf5FCFF8e5604b3ba404a4Cb5Be49EF230e0dA76' as `0x${string}`, name: 'NASDAQ/AEON' },
+] as const
+
 function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
   // Pre-migration fees sit in TWO now-closed epochs (verified on-chain:
   // 1783555200 + 1784160000 both hold real fees AND votes). This USED to
@@ -878,7 +900,7 @@ function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
   // it queried the new, empty epoch, found zero weight, and rendered nothing
   // (people thought their money vanished). These epochs are historical/fixed.
   const LEGACY_EPOCHS = [1783555200n, 1784160000n] as const
-  const PAIRS = UNIQUE_VOTE_POOLS.flatMap(pool => LEGACY_EPOCHS.map(epoch => ({ pool, epoch })))
+  const PAIRS = LEGACY_FEE_POOLS.flatMap(pool => LEGACY_EPOCHS.map(epoch => ({ pool, epoch })))
   const keyOf = (poolAddr: string, epoch: bigint) => `${poolAddr}-${epoch}`
 
   // The claiming contract (LEGACY_FEE_DISTRIBUTOR, immutable, pre-cutover)
