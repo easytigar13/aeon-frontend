@@ -145,12 +145,18 @@ const BOT_ID = (process.env.BOT_ID ?? (KEEPER_ROLE === 'aeon-only' ? 'aeon' : ''
 const AGGREGATOR_SCAN_INTERVAL_MS = parseInt(process.env.AGGREGATOR_SCAN_INTERVAL_MS ?? '30000')
 const AGGREGATOR_SLIPPAGE_PCT = parseFloat(process.env.AGGREGATOR_SLIPPAGE_PCT ?? '0.5')
 const ENABLE_CROSS_VENUE = process.env.ENABLE_CROSS_VENUE === 'true'
-// Every executable arbitrage must close in exactly the asset it started in.
-// This makes the profit invariant exact: amountOut must exceed amountIn plus
-// the gas floor in that same token. Do not make this depend on deployment
-// configuration; a missing/stale environment variable must never silently
-// re-enable cross-settlement valuation.
-const SAME_TOKEN_ONLY = true
+// Same-token cycles keep the profit invariant exact: amountOut must exceed
+// amountIn plus the gas floor in that SAME token, no oracle needed. Cross-
+// settlement routes (start in one token, end in a different SETTLEMENT_TOKEN)
+// instead value profit through the USDG oracle -- which on this chain is one
+// thin, manipulation-prone USDG/AEON pool. That valuation is therefore gated
+// behind an EXPLICIT, positive opt-in: ALLOW_CROSS_SETTLEMENT=true. The
+// default -- and any missing/stale/mistyped value -- stays same-token-only,
+// so the oracle-valued path can never be re-enabled silently, only by intent.
+// Settlement still only ever closes in AEON/USDG/WETH (SETTLEMENT_TOKENS), and
+// WETH is auto-unwrapped to ETH, so enabling this never strands capital in a
+// junk token. ATOMIC_ONLY stays independent and on.
+const SAME_TOKEN_ONLY = process.env.ALLOW_CROSS_SETTLEMENT !== 'true'
 const ATOMIC_ONLY = process.env.ATOMIC_ONLY !== 'false'
 
 // Re-run idempotent venue discovery so newly created pools and pools that
