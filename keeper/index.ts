@@ -2292,6 +2292,44 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
     balances[sym] = formatUnits(bal, TOKENS[sym as keyof typeof TOKENS].decimals)
   }
 
+  // Full transparency: expose the ENTIRE pool universe the bot monitors, not
+  // just a count. For every pool the scanner actually priced this tick (i.e.
+  // it appears in the live route graph), attach the live reserves the bot
+  // saw -- that is literally what it uses to size and rank trades. Pools that
+  // are configured but weren't reachable this tick show live:false.
+  const liveByAddr = new Map<string, Record<string, string>>()
+  for (const hops of graph.values()) {
+    for (const h of hops) {
+      const addr = h.pool.pool.address.toLowerCase()
+      let res = liveByAddr.get(addr)
+      if (!res) { res = {}; liveByAddr.set(addr, res) }
+      const dIn = TOKENS[h.tokenInSym as keyof typeof TOKENS]?.decimals
+      const dOut = TOKENS[h.tokenOutSym as keyof typeof TOKENS]?.decimals
+      if (dIn !== undefined && h.reserveIn > 0n) res[h.tokenInSym] = formatUnits(h.reserveIn, dIn)
+      if (dOut !== undefined && h.reserveOut > 0n) res[h.tokenOutSym] = formatUnits(h.reserveOut, dOut)
+    }
+  }
+  const monitoredPools = ARB_POOLS.map(p => {
+    const reserves = liveByAddr.get(p.address.toLowerCase()) ?? null
+    return {
+      name: p.name,
+      address: p.address,
+      kind: p.kind,
+      token0: p.token0,
+      token1: p.token1,
+      feeBps: Number(p.feeBps),
+      live: reserves !== null,
+      reserves,
+    }
+  })
+  const venueBreakdown = monitoredPools.reduce<Record<string, { total: number; live: number }>>((acc, p) => {
+    const v = acc[p.kind] ?? { total: 0, live: 0 }
+    v.total += 1
+    if (p.live) v.live += 1
+    acc[p.kind] = v
+    return acc
+  }, {})
+
   const status = {
     updatedAt: new Date().toISOString(),
     keeperAddress: account.address,
@@ -2302,8 +2340,11 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
     tickMs,
     scanTelemetry: { ...scanTelemetry },
     poolsMonitored: ARB_POOLS.length,
+    poolsLiveThisTick: monitoredPools.filter(p => p.live).length,
     aeonPoolsMonitored: ARB_POOLS.filter(pool => isAeonPoolKind(pool.kind)).length,
     externalPoolsMonitored: ARB_POOLS.filter(pool => !isAeonPoolKind(pool.kind)).length,
+    venueBreakdown,
+    monitoredPools,
     rpcEndpointCount: RPC_URLS.length,
     directSequencerSubmission: SUBMIT_RPC.includes('sequencer.'),
     gasReserve: {

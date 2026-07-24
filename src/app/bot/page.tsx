@@ -47,6 +47,17 @@ function isClosedTrade(pair: string) {
   return tokens.length > 1 && tokens[0] === tokens[tokens.length - 1]
 }
 
+interface MonitoredPool {
+  name: string
+  address: string
+  kind: string
+  token0: string
+  token1: string
+  feeBps: number
+  live: boolean
+  reserves: Record<string, string> | null
+}
+
 interface BotStatus {
   online?: false
   reason?: string
@@ -55,6 +66,9 @@ interface BotStatus {
   dryRun?: boolean
   intervalMs?: number
   poolsMonitored?: number
+  poolsLiveThisTick?: number
+  venueBreakdown?: Record<string, { total: number; live: number }>
+  monitoredPools?: MonitoredPool[]
   balances?: Record<string, string>
   lastOpportunities?: Opportunity[]
   recentArbs?: ExecutedArb[]
@@ -370,6 +384,49 @@ export default function BotPage() {
                 </div>
               ) : <div className="text-text-muted text-sm">No activity yet.</div>}
             </GlowPanel>
+
+            {/* Full transparency: every pool the bot monitors, with the live
+                reserves it actually priced this tick. */}
+            {status.monitoredPools && status.monitoredPools.length > 0 && (
+              <GlowPanel accent="blue" className="p-6 mt-6">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="text-text-secondary text-sm font-mono uppercase tracking-wider flex items-center gap-2">
+                    <Layers size={14} /> What the bot sees — Monitored Pools
+                  </div>
+                  <span className="text-xs font-mono text-text-muted">
+                    <span className="text-emerald-400">{status.poolsLiveThisTick ?? status.monitoredPools.filter(p => p.live).length}</span> live / {status.monitoredPools.length} total
+                  </span>
+                </div>
+                {status.venueBreakdown && (
+                  <div className="flex flex-wrap gap-1.5 mb-4">
+                    {Object.entries(status.venueBreakdown).map(([venue, v]) => (
+                      <span key={venue} className="px-2 py-0.5 rounded text-2xs font-mono text-violet-400 bg-violet-500/10 border border-violet-500/20">
+                        {venue}: <span className="text-emerald-400">{v.live}</span>/{v.total}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="space-y-1.5 max-h-[28rem] overflow-y-auto">
+                  {[...status.monitoredPools]
+                    .sort((a, b) => Number(b.live) - Number(a.live) || a.kind.localeCompare(b.kind))
+                    .map((p) => (
+                    <div key={p.address} className="grid grid-cols-1 sm:grid-cols-[auto_1fr_auto] gap-2 items-center text-sm py-1.5 border-b border-bg-border last:border-0">
+                      <div className="flex items-center gap-2">
+                        <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', p.live ? 'bg-emerald-400' : 'bg-text-muted/40')} title={p.live ? 'priced live this tick' : 'not reachable this tick'} />
+                        <span className="px-1.5 py-0.5 rounded text-2xs font-mono uppercase text-violet-400 bg-violet-500/10 border border-violet-500/20 shrink-0">{p.kind}</span>
+                        <span className="font-mono text-text-primary">{p.name}</span>
+                      </div>
+                      <span className="font-mono text-xs text-text-muted truncate">
+                        {p.reserves
+                          ? Object.entries(p.reserves).map(([sym, amt]) => `${parseFloat(amt).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${sym}`).join('  ·  ')
+                          : <span className="italic">no live reserves this tick</span>}
+                      </span>
+                      <span className="text-2xs font-mono text-text-muted text-right">{(p.feeBps / 100).toFixed(2)}% fee</span>
+                    </div>
+                  ))}
+                </div>
+              </GlowPanel>
+            )}
           </>
         )}
       </div>
