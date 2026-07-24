@@ -1,10 +1,11 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
 import { Activity, Copy, Check, TrendingUp, AlertTriangle, Wallet, ArrowRight, Layers, CheckCircle, XCircle, Clock, Zap } from 'lucide-react'
 import { clsx } from 'clsx'
 import { GlowPanel, MetricCard, ProtocolBackdrop, type ProtocolAccent } from '@/components/ProtocolVisuals'
-import { BOTS, DEFAULT_BOT } from '@/config/bots'
+import { BOTS, getBotBySlug } from '@/config/bots'
 
 interface Opportunity {
   pair: string
@@ -90,7 +91,16 @@ type ProfitRange = 'today' | 'sevenDays' | 'month' | 'all'
 const STALE_AFTER_MS = 60_000
 
 export default function BotPage() {
-  const [selectedBot, setSelectedBot] = useState(DEFAULT_BOT)
+  return (
+    <Suspense fallback={null}>
+      <BotPageInner />
+    </Suspense>
+  )
+}
+
+function BotPageInner() {
+  const searchParams = useSearchParams()
+  const [selectedBot, setSelectedBot] = useState(() => getBotBySlug(searchParams.get('bot')))
   const [status, setStatus] = useState<BotStatus | null>(null)
   const [copied, setCopied] = useState(false)
   const [profitRange, setProfitRange] = useState<ProfitRange>('today')
