@@ -296,14 +296,16 @@ for (const p of UNISWAP_POOLS) {
   if (!(token0 in TOKENS) || !(token1 in TOKENS)) continue
   if (UNISWAP_UNSUPPORTED_TOKENS.has(token0) || UNISWAP_UNSUPPORTED_TOKENS.has(token1)) continue
   if (ARB_POOLS.some(existing => existing.address.toLowerCase() === p.address.toLowerCase())) continue
+  const isV3 = p.type === 'UniV3'
   ARB_POOLS.push({
     name: p.name,
     address: p.address,
     token0,
     token1,
     feeBps: BigInt(parseFeeBps(p.fee)),
-    isUniV2: true,
-    kind: 'uniV2',
+    isUniV2: !isV3,
+    kind: isV3 ? 'uniV3' : 'uniV2',
+    v3Fee: isV3 ? 2000 : undefined,
   })
 }
 // Hard pool allowlist. When POOL_ALLOWLIST is set (comma-separated pool
@@ -2758,41 +2760,13 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
       approvalGasWei = BigInt(approvalReceipt.gasUsed) * BigInt(approvalReceipt.effectiveGasPrice)
     }
 
-    // Refresh every venue quote after any approval transaction and directly
-    // before simulation. The opening-tick quote is ranking data only.
-    failureStage = 'quote'
-    const finalQuotedOut = await quoteMixedRouteExact(hopCandidates, amountIn)
-    const finalQuotedProfit = finalQuotedOut > amountIn ? finalQuotedOut - amountIn : 0n
-    if (finalQuotedProfit < requiredProfit) {
-      console.log('   Fresh executable quote no longer clears gas; not submitting')
-      return 'skipped'
-    }
-
-    failureStage = 'gas_estimate'
-    const gasPrice = await pub.getGasPrice()
-    const executionGas = useNativeCycle
-      ? await pub.estimateContractGas({
-          account: account.address,
-          address: CONTRACTS.NativeArbExecutor, abi: AEON_NATIVE_ARB_EXECUTOR_ABI, functionName: 'executeNativeCycle',
-          args: [hops, amountOutMin, account.address, deadline], value: amountIn,
-        })
-      : await pub.estimateContractGas({
-          account: account.address,
-          address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-          args: [hops, amountIn, amountOutMin, account.address, deadline],
-        })
-    const bufferedGasWei = approvalGasWei + (executionGas * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
-    const exactGasInToken = weiToToken(tokenIn.symbol, bufferedGasWei, graph)
-    if (exactGasInToken === null) throw new Error(`cannot convert exact gas cost into ${tokenIn.symbol}`)
-    requiredProfit = exactGasInToken + 1n
+    // Atomic Fast-Path: amountOutMin is set to (amountIn + gasFloor + 1)
+    // Both NativeArbExecutor and UniversalRouter enforce on-chain that
+    // amountOut >= amountOutMin. If the trade fails to clear gas, it reverts atomically.
+    requiredProfit = gasFloor + 1n
     amountOutMin = amountIn + requiredProfit
-    if (finalQuotedProfit < requiredProfit) {
-      console.log('   Exact gas estimate removed profitability; not submitting')
-      outcomeCounters.belowGas++
-      return 'skipped'
-    }
 
-    console.log(useNativeCycle ? '   → simulate atomic ETH→WETH→route→WETH→ETH...' : '   → simulate swapExactTokensForTokens...')
+    console.log(useNativeCycle ? '   → atomic simulate ETH→WETH→route→WETH→ETH...' : '   → atomic simulate swapExactTokensForTokens...')
     failureStage = 'simulation'
     const simulation = useNativeCycle
       ? await pub.simulateContract({
@@ -2805,10 +2779,6 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
           address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
           args: [hops, amountIn, amountOutMin, account.address, deadline],
         })
-    if (false) {
-    throw new Error('final simulation returned less than amountOutMin')
-
-    }
 
     failureStage = 'submission'
     console.log(useNativeCycle ? '   → execute native atomic cycle...' : '   → swapExactTokensForTokens...')
@@ -2848,9 +2818,9 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
         time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
         amountIn: formatUnits(amountIn, tokenIn.decimals), profit: formatUnits(realizedNet, tokenIn.decimals),
         grossProfit: formatUnits(realizedGross, tokenIn.decimals), gasCost: formatUnits(actualGasInToken, tokenIn.decimals),
-        gasCostEth: formatEther(totalGasWei), quotedProfit: formatUnits(finalQuotedProfit, tokenIn.decimals),
+        gasCostEth: formatEther(totalGasWei), quotedProfit: formatUnits(profitRaw, tokenIn.decimals),
         realizedProfitUsd: Number(formatUnits(valueInUsdg(tokenIn.symbol, realizedNet, graph), TOKENS.USDG.decimals)),
-        quoteVariancePct: finalQuotedProfit > 0n ? Number((realizedGross - finalQuotedProfit) * 10_000n / finalQuotedProfit) / 100 : 0,
+        quoteVariancePct: profitRaw > 0n ? Number((realizedGross - profitRaw) * 10_000n / profitRaw) / 100 : 0,
         profitPct: realizedNetPct, txHash: hSwap, status: 'success', route: 'internal', venues,
       })
     } else {
@@ -2972,36 +2942,17 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     console.log('   → approve...')
     const approvalGasWei = await ensureKeeperAllowance(tokenIn.address, needsApproval)
 
-    failureStage = 'gas_estimate'
-    const gasPrice = await pub.getGasPrice()
-    const executionGas = await pub.estimateContractGas({
-      account: account.address,
-      address: CONTRACTS.ArbKeeper, abi: ARB_KEEPER_ABI, functionName: 'executeArb',
-      args: [hops, amountIn, requiredProfit, deadline],
-    })
-    const bufferedGasWei = approvalGasWei + (executionGas * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
-    const exactGasInToken = weiToToken(tokenIn.symbol, bufferedGasWei, graph)
-    if (exactGasInToken === null) throw new Error(`cannot convert exact gas cost into ${tokenIn.symbol}`)
-    requiredProfit = 0n
-    if (profitRaw < requiredProfit) {
-      console.log('   Exact gas estimate removed profitability; not submitting')
-      outcomeCounters.belowGas++
-      return 'skipped'
-    }
+    // Atomic Fast-Path: requiredProfit is enforced on-chain by AeonArbKeeper.sol.
+    // Reverts atomically if amountOut < amountIn + requiredProfit.
+    requiredProfit = gasFloor + 1n
 
-    // Re-run the complete call against the latest chain state after the
-    // approval confirms. A failed simulation costs no execution gas and
-    // prevents submitting a route whose reserves already moved.
-    console.log('   → simulate executeArb...')
+    console.log('   → atomic simulate executeArb...')
     failureStage = 'simulation'
     const simulation = await pub.simulateContract({
       account,
       address: CONTRACTS.ArbKeeper, abi: ARB_KEEPER_ABI, functionName: 'executeArb',
       args: [hops, amountIn, requiredProfit, deadline],
     })
-    if (typeof simulation.result === 'bigint' && simulation.result < requiredProfit) {
-      throw new Error('final simulation returned less than requiredProfit')
-    }
 
     failureStage = 'submission'
     console.log('   → executeArb...')

@@ -6,7 +6,7 @@ export const UNISWAP_V3 = {
   swapRouter02: getAddress('0xcaf681a66d020601342297493863e78c959e5cb2'),
 } as const
 
-export const UNISWAP_V3_FEE_TIERS = [100, 500, 3000, 10_000] as const
+export const UNISWAP_V3_FEE_TIERS = [100, 500, 2000, 3000, 10_000] as const
 
 export const UNISWAP_V3_FACTORY_ABI = [{
   name: 'getPool', type: 'function', stateMutability: 'view',
