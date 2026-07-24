@@ -210,7 +210,7 @@ export default function DocsPage() {
             When you burn AEON in The Furnace, you receive a soulbound NFT that cannot be transferred or sold. Voting power from burned tokens never decays. Ongoing rewards come from the Buyback Engine's redistribution share (a fixed cut of raw trading fees, swapped to AEON and paid out to burners) — unrelated to and unaffected by the AEON emission mint, which since 2026-07-13 sends 100% of every mint straight to vote-directed LP gauges instead.
           </P>
           <Note>
-            The protocol's 50,000 AEON genesis burn remains permanently burned and continues to provide its legacy vAMM voting weight. Rewards already recorded before 2026-07-13 remain claimable through the original Furnace, and the Buyback Engine's redistribution route to burners is unchanged.
+            Disclosure: the developer made a mistake and accidentally burned 50,000 AEON. The AEON is permanently burned and cannot be recovered.
           </Note>
 
           <div className="my-6 grid grid-cols-2 gap-4">
@@ -248,8 +248,7 @@ export default function DocsPage() {
               ['Total minted',      '90,000 AEON — once, at genesis'],
               ['AEON/ETH liquidity', '20,000 AEON seeded, paired against ETH'],
               ['AEON/USDG liquidity','20,000 AEON seeded, paired against USDG'],
-              ['Burned at genesis', '50,000 AEON — permanently burned via the Furnace, then voted 25,000/25,000 across both AEON pools'],
-              ['Protocol burn rewards', 'Earns via Buyback Engine redistribution only, same as any other Furnace burner; the original burn never moves'],
+              ['Developer mistake', '50,000 AEON — accidentally and permanently burned; the tokens cannot be recovered'],
               ['Team allocation',   '0 AEON'],
             ].map(([k, v]) => (
               <li key={k} className="flex items-start gap-2 text-sm">

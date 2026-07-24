@@ -469,9 +469,7 @@ export default function HomePage() {
               </h3>
               <p className="text-text-secondary text-sm leading-relaxed max-w-2xl">
                 At genesis, the protocol minted 90,000 AEON exactly once. 20,000 went into AEON/ETH liquidity, 20,000 into AEON/USDG liquidity,
-                and 50,000 was burned via the Furnace and immediately voted 25,000/25,000 across both AEON pools — guaranteeing gauge weight
-                from day one. None of it went to a deployer wallet or a team allocation. After genesis, the protocol runs on pure fee-anchored
-                emissions, forever. The protocol burn remains voting weight; since 13 July 2026, all AEON emissions go 100% to vote-directed LP gauges, with Furnace burners (including the protocol's own genesis burn) earning through the Buyback Engine's redistribution share instead.
+                and 50,000 AEON was accidentally and permanently burned because of a developer mistake. None of it went to a deployer wallet or team allocation.
               </p>
               <div className="flex gap-4 mt-4 flex-wrap">
                 <div className="flex items-center gap-2">

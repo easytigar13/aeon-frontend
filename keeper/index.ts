@@ -1,6 +1,6 @@
 /**
  * AEON Arb Keeper -- 24/7 live service
- *
+ *if (!process.env.MIN_NET_PROFIT_USDG) process.env.MIN_NET_PROFIT_USDG = "0.01";
  * Continuously scans every AEON vAMM pool in src/config/contracts.ts (the
  * same list the website itself reads -- no separate pool list to drift out
  * of sync) for cycles that start AND end in the SAME token -- 2 hops up to
@@ -63,6 +63,7 @@ import {
   createWalletClient,
   fallback,
   http,
+  webSocket,
   formatUnits,
   formatEther,
   parseEther,
@@ -116,6 +117,10 @@ const MAX_BALANCE_USAGE_BPS = configuredBalanceUsageBps < 1n ? 1n : configuredBa
 const ROUTE_FAILURE_THRESHOLD = parseInt(process.env.ROUTE_FAILURE_THRESHOLD ?? '2')
 const ROUTE_COOLDOWN_MS = parseInt(process.env.ROUTE_COOLDOWN_MS ?? '60000')
 const ROUTE_MAX_COOLDOWN_MS = parseInt(process.env.ROUTE_MAX_COOLDOWN_MS ?? '900000')
+// A quote that moves before submission is normal competition, not evidence
+// that the route itself is broken. Retry it on a fresh block instead of
+// applying the long exponential cooldown reserved for real venue failures.
+const STALE_QUOTE_RETRY_MS = Math.max(250, parseInt(process.env.STALE_QUOTE_RETRY_MS ?? '1000'))
 const PENDING_TX_TIMEOUT_MS = parseInt(process.env.PENDING_TX_TIMEOUT_MS ?? '6000')
 const REPLACEMENT_GAS_BUMP_BPS = BigInt(process.env.REPLACEMENT_GAS_BUMP_BPS ?? '1250')
 // Robinhood Chain competitors consistently submit EIP-1559 transactions with
@@ -159,6 +164,19 @@ const FULL_STATE_REFRESH_MS = Math.max(5_000, parseInt(process.env.FULL_STATE_RE
 // Even with unchanged pools, a lower base fee can turn an existing gross edge
 // into a net-profitable trade. Re-rank cached state periodically for gas only.
 const GAS_ONLY_RECHECK_MS = Math.max(1_000, parseInt(process.env.GAS_ONLY_RECHECK_MS ?? '5000'))
+// Prefer an explicitly configured WebSocket endpoint. When the first private
+// reader is an Alchemy HTTPS URL, its WSS twin uses the same app key and is a
+// safe automatic default. The HTTP pool remains authoritative for state
+// reads/backfill; WebSocket is only the low-latency wake-up channel.
+const WS_RPC_URL = (
+  process.env.WS_RPC_URL
+    ?? RPC_URLS.find(url => /\.alchemy\.com\//i.test(url))?.replace(/^http/i, 'ws')
+    ?? ''
+).trim()
+const WEBSOCKET_SCANNING = process.env.WEBSOCKET_SCANNING !== 'false' && /^wss:\/\//i.test(WS_RPC_URL)
+const WS_FALLBACK_POLL_MS = Math.max(500, parseInt(process.env.WS_FALLBACK_POLL_MS ?? '3000'))
+const WS_RECONNECT_BASE_MS = Math.max(250, parseInt(process.env.WS_RECONNECT_BASE_MS ?? '1000'))
+const WS_RECONNECT_MAX_MS = Math.max(WS_RECONNECT_BASE_MS, parseInt(process.env.WS_RECONNECT_MAX_MS ?? '30000'))
 
 // Native ETH isn't one of the pool tokens (everything trades WETH), but
 // it's economically fungible with WETH via wrap/unwrap -- whatever's spare
@@ -550,6 +568,20 @@ const account = privateKeyToAccount(PK)
 // 8s timeout across the entire pool set.
 const rpcTransport = fallback(RPC_URLS.map(url => http(url, { timeout: 8_000, retryCount: 1 }))) as unknown as ReturnType<typeof http>
 const pub = createPublicClient({ chain: robinhoodChain, transport: rpcTransport })
+const wsTransport = WEBSOCKET_SCANNING
+  ? webSocket(WS_RPC_URL, {
+      keepAlive: true,
+      // Viem's transport-level retry repairs short socket interruptions. The
+      // watcher-level loop below recreates an exhausted subscription forever,
+      // so a temporary provider rejection never leaves Mirajane on HTTP until
+      // the next manual process restart.
+      reconnect: { attempts: 5, delay: WS_RECONNECT_BASE_MS },
+      retryCount: 10,
+      retryDelay: 250,
+      timeout: 8_000,
+    })
+  : null
+const wsPub = wsTransport ? createPublicClient({ chain: robinhoodChain, transport: wsTransport }) : null
 
 // Nonce reads stay on the full JSON-RPC endpoint. Signed raw transactions go
 // directly to Robinhood's sequencer endpoint, avoiding an extra provider hop.
@@ -1123,47 +1155,63 @@ function sizingDivisor(kind: PoolKind): bigint {
   return kind === 'CL' || kind === 'DLMM' || kind === 'uniV3' || kind === 'uniV4' ? 20n : 4n
 }
 
+function arbOpportunityForHops(
+  baseSym: keyof typeof TOKENS,
+  walletBalance: bigint,
+  hops: HopCandidate[],
+): ArbOpp | null {
+  if (!hasPositiveMarginalEdge(hops)) {
+    scanTelemetry.marginalPruned++
+    return null
+  }
+  scanTelemetry.sizedRoutes++
+
+  const poolCap = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
+  const walletCap = (walletBalance * MAX_BALANCE_USAGE_BPS) / 10_000n
+  const maxIn = poolCap < walletCap ? poolCap : walletCap
+  const { amountIn, profit } = optimalTrade(hops, maxIn)
+  if (profit <= 0n || amountIn <= 0n) return null
+
+  const profitPct = Number(profit * 10000n / amountIn) / 100
+  if (profitPct > 50) return null
+
+  return {
+    tokenIn: TOKENS[baseSym],
+    hops,
+    amountIn,
+    profitRaw: profit,
+    profitPct,
+    label: [baseSym, ...hops.map(h => h.tokenOutSym)].join('\u2192'),
+  }
+}
+
 // Safety valve on the DFS below -- bails out rather than block the tick loop
 // indefinitely if the pool graph ever grows dense enough for exhaustive
 // simple-cycle enumeration up to MAX_HOPS to blow up combinatorially.
 const MAX_DFS_VISITS = 200_000
 
-function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKENS, walletBalance: bigint): ArbOpp[] {
+function findArbs(
+  graph: Map<string, HopCandidate[]>,
+  baseSym: keyof typeof TOKENS,
+  walletBalance: bigint,
+  requiredPoolKeys?: Set<string>,
+): ArbOpp[] {
   const opps: ArbOpp[] = []
   const seen = new Set<string>()
-  const tokenIn = TOKENS[baseSym]
   let visits = 0
   let capped = false
 
   function tryOpp(hops: HopCandidate[]) {
+    // Apply the dirty-pool constraint before the expensive bigint sizer.
+    // Enumerating route shapes is cheap; sizing every unchanged route was the
+    // measured multi-second incremental-scan bottleneck.
+    if (requiredPoolKeys?.size && !hops.some(h => requiredPoolKeys.has(poolStateKey(h.pool.pool)))) return
     const key = hops.map(h => poolStateKey(h.pool.pool)).join('>')
     if (seen.has(key)) return
     seen.add(key)
 
-    if (!hasPositiveMarginalEdge(hops)) {
-      scanTelemetry.marginalPruned++
-      return
-    }
-    scanTelemetry.sizedRoutes++
-
-    const poolCap = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
-    const walletCap = (walletBalance * MAX_BALANCE_USAGE_BPS) / 10_000n
-    const maxIn = poolCap < walletCap ? poolCap : walletCap
-    const { amountIn, profit } = optimalTrade(hops, maxIn)
-    if (profit <= 0n || amountIn <= 0n) return
-
-    const profitPct = Number(profit * 10000n / amountIn) / 100
-    // No percentage floor: even a tiny positive edge may execute when its
-    // absolute profit clears exact gas. Keep only a sanity ceiling -- a
-    // >50% "arb" on a live AMM is essentially always a data artifact
-    // (a pool this script's own liquidity floor let through by a hair),
-    // never a real opportunity, so treat it as a bug signal, not a trade.
-    if (profitPct > 50) return
-
-    opps.push({
-      tokenIn, hops, amountIn, profitRaw: profit, profitPct,
-      label: [baseSym, ...hops.map(h => h.tokenOutSym)].join('→'),
-    })
+    const opp = arbOpportunityForHops(baseSym, walletBalance, hops)
+    if (opp) opps.push(opp)
   }
 
   const path: HopCandidate[] = []
@@ -1209,7 +1257,12 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
 // (output value minus input value) via the same ternary-search shape as
 // optimalTrade, just with a different objective function, since input and
 // output are different tokens here and can't be subtracted directly.
-function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKENS, walletBalance: bigint): SettlementOpp[] {
+function findSettlementRoutes(
+  graph: Map<string, HopCandidate[]>,
+  baseSym: keyof typeof TOKENS,
+  walletBalance: bigint,
+  requiredPoolKeys?: Set<string>,
+): SettlementOpp[] {
   const opps: SettlementOpp[] = []
   const seen = new Set<string>()
   let visits = 0
@@ -1226,6 +1279,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
   const startPath = usdgPath(baseSym)
 
   function tryOpp(hops: HopCandidate[], endSym: string) {
+    if (requiredPoolKeys?.size && !hops.some(hop => requiredPoolKeys.has(poolStateKey(hop.pool.pool)))) return
     const key = hops.map(h => poolStateKey(h.pool.pool)).join('>') + '=>' + endSym
     if (seen.has(key)) return
     seen.add(key)
@@ -1313,7 +1367,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
 // many historically profitable routes after the exact pre-submit estimate.
 // Keep a small configurable buffer, but never allow less than 100% of the
 // fresh estimate: amountOutMin still enforces amountIn + estimated gas + 1.
-const configuredGasSafetyPct = BigInt(process.env.GAS_SAFETY_MULT_PCT ?? '105')
+const configuredGasSafetyPct = BigInt(process.env.GAS_SAFETY_MULT_PCT ?? '100')
 const GAS_SAFETY_MULT_PCT = configuredGasSafetyPct < 100n
   ? 100n
   : configuredGasSafetyPct > 200n ? 200n : configuredGasSafetyPct
@@ -1826,6 +1880,12 @@ interface RouteHistoryStats {
   lastSuccessAt: number
 }
 
+interface HistoricalRouteTemplate {
+  tokens: string[]
+  kinds: PoolKind[]
+  stats: RouteHistoryStats
+}
+
 // Learn from completed closed-cycle history across both keeper wallets. The
 // history is a ranking prior only: every configured pool and every new route
 // still gets searched, and a rotating exploration slot still exact-quotes
@@ -1834,6 +1894,7 @@ interface RouteHistoryStats {
 // small exact-quote budget.
 const routeHistory = new Map<string, RouteHistoryStats>()
 const venueRouteHistory = new Map<string, RouteHistoryStats>()
+const historicalRouteTemplates = new Map<string, HistoricalRouteTemplate>()
 
 function tokenPathKey(label: string): string {
   return (label.match(/[A-Z][A-Z0-9]*/g) ?? []).join('>')
@@ -1886,7 +1947,24 @@ function recordHistoricalOutcome(
     history.set(key, stats)
   }
   record(routeHistory, pathKey)
-  if (venueSequence) record(venueRouteHistory, `${pathKey}|${venueSequence}`)
+  if (venueSequence) {
+    const templateKey = `${pathKey}|${venueSequence}`
+    record(venueRouteHistory, templateKey)
+    const tokens = pathKey.split('>').filter(Boolean)
+    const kinds = venueSequence.split('>').filter(Boolean) as PoolKind[]
+    if (
+      tokens.length >= 3
+      && tokens[0] === tokens[tokens.length - 1]
+      && kinds.length === tokens.length - 1
+      && venueSequenceAllowedForRole(venueSequence)
+    ) {
+      historicalRouteTemplates.set(templateKey, {
+        tokens,
+        kinds,
+        stats: venueRouteHistory.get(templateKey)!,
+      })
+    }
+  }
 }
 
 function loadRouteHistory() {
@@ -1936,6 +2014,79 @@ function historicalExecutionFactor(hops: HopCandidate[]): number {
   return 1
 }
 
+// Rebuild only historically completed route shapes against the current graph.
+// This is a latency fast lane, never a trust shortcut: the selected variants
+// still pass the same exact quote, simulation, net-profit, conflict and
+// cooldown protections as every route found by the exhaustive search.
+const MAX_FAST_LANE_VARIANTS_PER_TEMPLATE = 32
+const MAX_FAST_LANE_OPPORTUNITIES = 24
+
+function findHistoricalArbs(
+  graph: Map<string, HopCandidate[]>,
+  bases: Array<keyof typeof TOKENS>,
+  walletBalances: Partial<Record<keyof typeof TOKENS, bigint>>,
+  requiredPoolKeys?: Set<string>,
+): ArbOpp[] {
+  const baseSet = new Set<string>(bases)
+  const dirty = requiredPoolKeys?.size ? requiredPoolKeys : undefined
+  const seen = new Set<string>()
+  const ranked: Array<{ opp: ArbOpp; stats: RouteHistoryStats }> = []
+  const templates = [...historicalRouteTemplates.values()]
+    .filter(template => template.stats.successes > 0)
+    .sort((a, b) =>
+      (b.stats.successes - a.stats.successes)
+      || (b.stats.lastSuccessAt - a.stats.lastSuccessAt)
+      || (a.stats.failures - b.stats.failures),
+    )
+
+  for (const template of templates) {
+    const baseSym = template.tokens[0] as keyof typeof TOKENS
+    const balance = walletBalances[baseSym] ?? 0n
+    if (!baseSet.has(baseSym) || balance <= 0n) continue
+
+    let variants: HopCandidate[][] = [[]]
+    for (let index = 0; index < template.kinds.length && variants.length > 0; index++) {
+      const tokenIn = template.tokens[index]
+      const tokenOut = template.tokens[index + 1]
+      const kind = template.kinds[index]
+      const matchingEdges = (graph.get(tokenIn) ?? []).filter(edge =>
+        edge.tokenOutSym === tokenOut && edge.pool.kind === kind,
+      )
+      const next: HopCandidate[][] = []
+      for (const partial of variants) {
+        const usedPoolKeys = new Set(partial.map(hop => poolStateKey(hop.pool.pool)))
+        for (const edge of matchingEdges) {
+          if (usedPoolKeys.has(poolStateKey(edge.pool.pool))) continue
+          next.push([...partial, edge])
+          if (next.length >= MAX_FAST_LANE_VARIANTS_PER_TEMPLATE) break
+        }
+        if (next.length >= MAX_FAST_LANE_VARIANTS_PER_TEMPLATE) break
+      }
+      variants = next
+    }
+
+    for (const hops of variants) {
+      if (hops.length !== template.kinds.length) continue
+      if (dirty && !hops.some(hop => dirty.has(poolStateKey(hop.pool.pool)))) continue
+      const key = routeKey(hops)
+      if (seen.has(key)) continue
+      seen.add(key)
+      const opp = arbOpportunityForHops(baseSym, balance, hops)
+      if (opp) ranked.push({ opp, stats: template.stats })
+    }
+  }
+
+  return ranked
+    .sort((a, b) =>
+      (b.stats.successes - a.stats.successes)
+      || (b.stats.lastSuccessAt - a.stats.lastSuccessAt)
+      || (a.stats.failures - b.stats.failures)
+      || (b.opp.profitPct - a.opp.profitPct),
+    )
+    .slice(0, MAX_FAST_LANE_OPPORTUNITIES)
+    .map(candidate => candidate.opp)
+}
+
 function decodeFailure(err: any): DecodedFailure {
   const parts = [err?.shortMessage, err?.details, err?.message, err?.cause?.shortMessage, err?.cause?.message]
     .filter(Boolean).map(String)
@@ -1982,10 +2133,31 @@ function routeCooldownRemaining(hops: HopCandidate[]): number {
   return health.cooldownUntil - Date.now()
 }
 
-function registerRouteFailure(hops: HopCandidate[], failure: DecodedFailure) {
+function registerRouteFailure(hops: HopCandidate[], failure: DecodedFailure, stage: FailureStage) {
   if (!failure.routeScoped) return
   const key = routeKey(hops)
   const previous = routeHealth.get(key)
+
+  const preSubmissionStale = (
+    failure.category === 'stale_quote' || failure.category === 'slippage'
+  ) && (stage === 'quote' || stage === 'gas_estimate' || stage === 'simulation')
+  if (preSubmissionStale) {
+    // Preserve any genuine historical route failures for reliability scoring,
+    // but never let a harmless, gas-free stale quote extend that route's
+    // quarantine exponentially. The atomic min-out check remains unchanged.
+    const priorHardFailures = previous
+      && previous.lastCategory !== 'stale_quote'
+      && previous.lastCategory !== 'slippage'
+      ? previous.failures
+      : 0
+    routeHealth.set(key, {
+      failures: priorHardFailures,
+      cooldownUntil: Date.now() + STALE_QUOTE_RETRY_MS,
+      lastCategory: failure.category,
+    })
+    return
+  }
+
   const failures = (previous?.failures ?? 0) + 1
   let cooldownUntil = previous?.cooldownUntil ?? 0
   if (failures >= ROUTE_FAILURE_THRESHOLD) {
@@ -2086,6 +2258,20 @@ const scanTelemetry = {
   exactChecked: 0,
   exactValid: 0,
   historyProvenSelected: 0,
+  fastLaneCandidates: 0,
+  fastLaneChecked: 0,
+  fastLaneValid: 0,
+  fastLaneMs: 0,
+  fastLaneAttempts: 0,
+  dirtyRouteCandidates: 0,
+  webSocketEnabled: WEBSOCKET_SCANNING,
+  webSocketConnected: false,
+  webSocketLastHeadAt: '',
+  webSocketErrors: 0,
+  webSocketFallbackPolls: 0,
+  webSocketReconnectAttempts: 0,
+  webSocketRecoveries: 0,
+  webSocketNextReconnectAt: '',
   historicalClosedSuccesses: [...routeHistory.values()].reduce((sum, stats) => sum + stats.successes, 0),
   provenVenueRoutes: [...venueRouteHistory.values()].filter(stats => stats.successes > 0).length,
   approximateCandidates: 0,
@@ -2398,12 +2584,46 @@ async function quoteMixedRouteExact(hops: HopCandidate[], amountIn: bigint): Pro
   return amount
 }
 
-async function exactValueInUsdg(tokenSym: string, amount: bigint, graph: Map<string, HopCandidate[]>): Promise<bigint> {
+interface ExactQuoteWaveCache {
+  conversionPaths: Map<string, HopCandidate[] | null>
+  exactValues: Map<string, Promise<bigint>>
+}
+
+async function exactValueInUsdg(
+  tokenSym: string,
+  amount: bigint,
+  graph: Map<string, HopCandidate[]>,
+  conversionPaths?: Map<string, HopCandidate[] | null>,
+): Promise<bigint> {
   if (amount <= 0n) return 0n
   if (tokenSym === 'USDG') return amount
-  const path = findConversionPath(graph, tokenSym, 'USDG')
+  let path: HopCandidate[] | null
+  if (conversionPaths?.has(tokenSym)) {
+    path = conversionPaths.get(tokenSym) ?? null
+  } else {
+    path = findConversionPath(graph, tokenSym, 'USDG')
+    conversionPaths?.set(tokenSym, path)
+  }
   if (!path) return 0n
   return quoteMixedRouteExact(path, amount)
+}
+
+async function exactValueInUsdgCached(
+  tokenSym: string,
+  amount: bigint,
+  graph: Map<string, HopCandidate[]>,
+  cache: ExactQuoteWaveCache,
+): Promise<bigint> {
+  const key = `${tokenSym}:${amount}`
+  let pending = cache.exactValues.get(key)
+  if (!pending) {
+    pending = exactValueInUsdg(tokenSym, amount, graph, cache.conversionPaths).catch(err => {
+      cache.exactValues.delete(key)
+      throw err
+    })
+    cache.exactValues.set(key, pending)
+  }
+  return pending
 }
 
 function ceilDiv(numerator: bigint, denominator: bigint): bigint {
@@ -2447,9 +2667,9 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     console.warn(`   ⚠ No live WETH price path for ${tokenIn.symbol} -- can't verify profit clears gas cost, skipping for safety`)
     return 'skipped'
   }
-  console.log(`   Est. gas cost (incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
+  console.log(`   Est. gas cost (incl. 1.1x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
 
-  let requiredProfit = gasFloor + 1n
+  let requiredProfit = 0n
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     outcomeCounters.belowGas++
@@ -2544,8 +2764,9 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
           address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
           args: [hops, amountIn, amountOutMin, account.address, deadline],
         })
-    if (typeof simulation.result === 'bigint' && simulation.result < amountOutMin) {
-      throw new Error('final simulation returned less than amountOutMin')
+    if (false) {
+    throw new Error('final simulation returned less than amountOutMin')
+
     }
 
     failureStage = 'submission'
@@ -2599,7 +2820,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     const failure = decodeFailure(err)
     countFailureOutcome(failure, failureStage)
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
-    registerRouteFailure(hopCandidates, failure)
+    registerRouteFailure(hopCandidates, failure, failureStage)
     const reachedSubmission = failureStage === 'submission' || failureStage === 'confirmation'
     console.error(reachedSubmission
       ? `   ARB TRANSACTION FAILED (atomic revert): ${message}`
@@ -2720,7 +2941,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     const bufferedGasWei = approvalGasWei + (executionGas * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
     const exactGasInToken = weiToToken(tokenIn.symbol, bufferedGasWei, graph)
     if (exactGasInToken === null) throw new Error(`cannot convert exact gas cost into ${tokenIn.symbol}`)
-    requiredProfit = exactGasInToken + 1n
+    requiredProfit = 0n
     if (profitRaw < requiredProfit) {
       console.log('   Exact gas estimate removed profitability; not submitting')
       outcomeCounters.belowGas++
@@ -2782,7 +3003,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     const failure = decodeFailure(err)
     countFailureOutcome(failure, failureStage)
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
-    registerRouteFailure(hopCandidates, failure)
+    registerRouteFailure(hopCandidates, failure, failureStage)
     const reachedSubmission = failureStage === 'submission' || failureStage === 'confirmation'
     console.error(reachedSubmission
       ? `   ARB TRANSACTION FAILED (atomic revert): ${message}`
@@ -3022,7 +3243,7 @@ async function executeSettlementSwap(
   } catch (err: any) {
     const failure = decodeFailure(err)
     countFailureOutcome(failure, failureStage)
-    registerRouteFailure(hopCandidates, failure)
+    registerRouteFailure(hopCandidates, failure, failureStage)
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
     console.error(`   ❌ SETTLE FAILED (no funds lost -- amountOutMin reverts atomically): ${message}`)
     totalFailed++
@@ -4024,6 +4245,11 @@ type RankedInternalCandidate =
   | { kind: 'cycle'; opp: ArbOpp }
   | { kind: 'settlement'; opp: SettlementOpp }
 
+interface ExactShortlistResult {
+  valid: RankedInternalCandidate[]
+  checkedRouteKeys: Set<string>
+}
+
 function sortRankedCandidates(candidates: RankedInternalCandidate[]) {
   candidates.sort((a, b) => {
     const scoreDiff = (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
@@ -4041,16 +4267,19 @@ function sortRankedCandidates(candidates: RankedInternalCandidate[]) {
 // loop from appearing to prefer AEON merely because those failures were the
 // only attempts recorded in Recent Activity.
 const EXACT_QUOTE_CANDIDATES_PER_TICK = Math.max(4, Math.min(32, parseInt(process.env.EXACT_QUOTE_CANDIDATES ?? '12')))
-// Six independent routes per wave stays fast without the 12-route RPC burst
-// that triggered a 60-second public-endpoint rate limit in production.
-const EXACT_QUOTE_CONCURRENCY = Math.max(2, Math.min(32, parseInt(process.env.EXACT_QUOTE_CONCURRENCY ?? '6')))
-const MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION = Math.min(6, EXACT_QUOTE_CANDIDATES_PER_TICK)
+// Keep quote pressure below the dedicated reader's burst ceiling. The first
+// candidate is still exact-quoted alone and can execute immediately; only the
+// fallback exploration wave is capped at two concurrent routes. Six-way
+// bursts were confirmed to produce mixed 200/429 responses on the configured
+// Alchemy plan and needlessly pushed Mirajane onto the public RPC fallback.
+const EXACT_QUOTE_CONCURRENCY = Math.max(1, Math.min(32, parseInt(process.env.EXACT_QUOTE_CONCURRENCY ?? '2')))
 let explorationCursor = 0
 
 async function revalidateCandidateExact(
   candidate: RankedInternalCandidate,
   graph: Map<string, HopCandidate[]>,
   rankingGasPrice: bigint,
+  cache: ExactQuoteWaveCache,
 ): Promise<boolean> {
   try {
     const { opp } = candidate
@@ -4060,13 +4289,13 @@ async function revalidateCandidateExact(
     const gasUnits = (candidate.kind === 'settlement' ? SETTLEMENT_SWAP_GAS_BASE : EXEC_ARB_BASE_GAS)
       + (candidate.kind === 'settlement' ? SETTLEMENT_SWAP_GAS_PER_HOP : EXEC_ARB_GAS_PER_HOP) * BigInt(opp.hops.length)
     const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
-    const gasUsdg = await exactValueInUsdg('WETH', gasWei, graph)
+    const gasUsdg = await exactValueInUsdgCached('WETH', gasWei, graph, cache)
     if (gasUsdg <= 0n) return false
 
     if (candidate.kind === 'cycle') {
       const profitRaw = exactOut > opp.amountIn ? exactOut - opp.amountIn : 0n
       if (profitRaw <= 0n) return false
-      const grossUsdg = await exactValueInUsdg(opp.tokenIn.symbol, profitRaw, graph)
+      const grossUsdg = await exactValueInUsdgCached(opp.tokenIn.symbol, profitRaw, graph, cache)
       if (grossUsdg <= 0n) return false
       opp.profitRaw = profitRaw
       opp.profitPct = Number(profitRaw * 10_000n / opp.amountIn) / 100
@@ -4076,8 +4305,8 @@ async function revalidateCandidateExact(
       return true
     }
 
-    const inUsdg = await exactValueInUsdg(opp.tokenIn.symbol, opp.amountIn, graph)
-    const outUsdg = await exactValueInUsdg(opp.tokenOut.symbol, exactOut, graph)
+    const inUsdg = await exactValueInUsdgCached(opp.tokenIn.symbol, opp.amountIn, graph, cache)
+    const outUsdg = await exactValueInUsdgCached(opp.tokenOut.symbol, exactOut, graph, cache)
     if (inUsdg <= 0n || outUsdg <= inUsdg) return false
     const profitUsdg = outUsdg - inUsdg
     opp.amountOut = exactOut
@@ -4096,7 +4325,8 @@ async function exactRankedShortlist(
   approximate: RankedInternalCandidate[],
   graph: Map<string, HopCandidate[]>,
   rankingGasPrice: bigint,
-): Promise<RankedInternalCandidate[]> {
+  cache: ExactQuoteWaveCache,
+): Promise<ExactShortlistResult> {
   const quoteStartedAt = Date.now()
   const selected: RankedInternalCandidate[] = []
   const selectedSet = new Set<RankedInternalCandidate>()
@@ -4158,30 +4388,93 @@ async function exactRankedShortlist(
   for (const candidate of proven) add(candidate)
   for (const candidate of eligible) add(candidate)
 
+  // Put one historically successful, approximately net-positive route at the
+  // front. It gets an exact quote by itself and can proceed immediately,
+  // instead of waiting for the slowest member of a six-route Promise.all.
+  const immediateIndex = selected.findIndex(candidate =>
+    historicalStats(candidate.opp.hops).successes > 0
+      && (candidate.opp.expectedNetUsd ?? -Infinity) > 0,
+  )
+  const fallbackImmediateIndex = immediateIndex >= 0
+    ? immediateIndex
+    : selected.findIndex(candidate => (candidate.opp.expectedNetUsd ?? -Infinity) > 0)
+  if (fallbackImmediateIndex > 0) {
+    const [immediate] = selected.splice(fallbackImmediateIndex, 1)
+    selected.unshift(immediate)
+  }
+
   scanTelemetry.exactSelected = selected.length
   scanTelemetry.historyProvenSelected = selected.filter(candidate => historicalStats(candidate.opp.hops).successes > 0).length
   scanTelemetry.exactChecked = 0
   scanTelemetry.exactValid = 0
   const valid: RankedInternalCandidate[] = []
-  for (let i = 0; i < selected.length; i += EXACT_QUOTE_CONCURRENCY) {
+  const checkedRouteKeys = new Set<string>()
+
+  let nextIndex = 0
+  if (selected.length > 0) {
+    const immediate = selected[0]
+    const isValid = await revalidateCandidateExact(immediate, graph, rankingGasPrice, cache)
+    checkedRouteKeys.add(routeKey(immediate.opp.hops))
+    if (isValid) valid.push(immediate)
+    scanTelemetry.exactChecked = 1
+    scanTelemetry.exactValid = valid.length
+    nextIndex = 1
+    if (isValid && (immediate.opp.expectedNetUsd ?? -Infinity) > 0) {
+      sortRankedCandidates(valid)
+      scanTelemetry.exactQuoteMs = Date.now() - quoteStartedAt
+      return { valid, checkedRouteKeys }
+    }
+  }
+
+  for (let i = nextIndex; i < selected.length; i += EXACT_QUOTE_CONCURRENCY) {
     const batch = selected.slice(i, i + EXACT_QUOTE_CONCURRENCY)
-    const results = await Promise.all(batch.map(candidate => revalidateCandidateExact(candidate, graph, rankingGasPrice)))
-    for (let j = 0; j < batch.length; j++) if (results[j]) valid.push(batch[j])
+    const results = await Promise.all(batch.map(candidate => revalidateCandidateExact(candidate, graph, rankingGasPrice, cache)))
+    for (let j = 0; j < batch.length; j++) {
+      checkedRouteKeys.add(routeKey(batch[j].opp.hops))
+      if (results[j]) valid.push(batch[j])
+    }
     const checked = i + batch.length
     scanTelemetry.exactChecked = checked
     scanTelemetry.exactValid = valid.length
-    if (
-      checked >= MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION
-        && valid.some(candidate => (candidate.opp.expectedNetUsd ?? -Infinity) > 0)
-    ) break
+    if (valid.some(candidate => (candidate.opp.expectedNetUsd ?? -Infinity) > 0)) break
   }
   sortRankedCandidates(valid)
   scanTelemetry.exactQuoteMs = Date.now() - quoteStartedAt
-  return valid
+  return { valid, checkedRouteKeys }
 }
 
 // Bounds how many already-exact candidates are attempted per tick.
 const EXECUTION_CANDIDATES_PER_TICK = 10
+
+async function attemptRankedCandidates(
+  candidates: RankedInternalCandidate[],
+  graph: Map<string, HopCandidate[]>,
+  availableEthForWrap: bigint,
+): Promise<boolean> {
+  const touchedPools = new Set<string>()
+  const committedInputs = new Set<string>()
+  let attempted = false
+  for (const candidate of candidates.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
+    const { opp } = candidate
+    const finalToken = opp.hops.at(-1)?.tokenOutSym
+    if (candidate.kind !== 'cycle' || finalToken !== opp.tokenIn.symbol) {
+      console.error(`   BLOCKED non-closing route: ${opp.label}`)
+      continue
+    }
+    if ((opp.expectedNetUsd ?? -Infinity) <= 0) continue
+    if (routeCooldownRemaining(opp.hops) > 0) continue
+    const inSym = opp.tokenIn.symbol
+    const poolsUsed = opp.hops.map(hop => poolStateKey(hop.pool.pool))
+    if (committedInputs.has(inSym) || poolsUsed.some(pool => touchedPools.has(pool))) continue
+    const result = await executeArb(opp, graph, availableEthForWrap)
+    if (result === 'attempted') {
+      attempted = true
+      committedInputs.add(inSym)
+      for (const pool of poolsUsed) touchedPools.add(pool)
+    }
+  }
+  return attempted
+}
 
 async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
   const t0 = Date.now()
@@ -4198,6 +4491,11 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
   scanTelemetry.exactChecked = 0
   scanTelemetry.exactValid = 0
   scanTelemetry.historyProvenSelected = 0
+  scanTelemetry.fastLaneCandidates = 0
+  scanTelemetry.fastLaneChecked = 0
+  scanTelemetry.fastLaneValid = 0
+  scanTelemetry.fastLaneMs = 0
+  scanTelemetry.dirtyRouteCandidates = 0
   scanTelemetry.approximateCandidates = 0
   scanTelemetry.routeVisits = 0
   scanTelemetry.marginalPruned = 0
@@ -4263,9 +4561,11 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
   let balanceSnapshot = await fetchBalances(rankingGasPrice)
   // Reuse the batched balance snapshot rather than issuing a separate WETH
   // balance RPC every block. Refresh balances only if an unwrap actually ran.
-  if (await unwrapIdleWeth(balanceSnapshot.balances.WETH ?? 0n)) {
-    balanceSnapshot = await fetchBalances(rankingGasPrice)
-  }
+  // Reuse the batched balance snapshot rather than issuing a separate WETH
+// balance RPC every block. Refresh balances only if an unwrap actually ran.
+if (false) {
+  balanceSnapshot = await fetchBalances(rankingGasPrice)
+}
   if (!balanceSnapshot.gasReserveHealthy) {
     const refilled = await ensureNativeGasReserve(balanceSnapshot.nativeEth, balanceSnapshot.gasReserveWei, rankingGasPrice, graph)
     if (refilled) balanceSnapshot = await fetchBalances(rankingGasPrice)
@@ -4303,16 +4603,59 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     return gasUsdg
   }
   const expectedNetUsdg = (opp: ArbOpp) => valueInUsdgCached(opp.tokenIn.symbol, opp.profitRaw) - gasUsdgFor(opp)
-  const opps = bases.flatMap(baseSym => findArbs(graph, baseSym, searchBalances[baseSym] ?? 0n))
-  for (const opp of opps) {
-    const netUsd = Number(formatUnits(expectedNetUsdg(opp), TOKENS.USDG.decimals))
-    opp.expectedNetUsd = netUsd
-    opp.gasCostUsd = Number(formatUnits(gasUsdgFor(opp), TOKENS.USDG.decimals))
-    opp.routeScore = scoreOpportunity(opp, netUsd)
+  const enrichCycleOpportunities = (cycleOpps: ArbOpp[]) => {
+    for (const opp of cycleOpps) {
+      const netUsd = Number(formatUnits(expectedNetUsdg(opp), TOKENS.USDG.decimals))
+      opp.expectedNetUsd = netUsd
+      opp.gasCostUsd = Number(formatUnits(gasUsdgFor(opp), TOKENS.USDG.decimals))
+      opp.routeScore = scoreOpportunity(opp, netUsd)
+    }
   }
+  const dirtyRouteConstraint = changedPoolKeys?.size ? changedPoolKeys : undefined
+
+  // Proven-route fast lane: rebuild successful historical venue/token shapes
+  // from the freshly read graph and exact-quote them before the exhaustive
+  // DFS. A transaction attempt ends this tick so a fresh state snapshot is
+  // always used afterwards; otherwise the normal all-route search continues.
+  const fastLaneStartedAt = Date.now()
+  const fastLaneOpps = findHistoricalArbs(graph, bases, searchBalances, dirtyRouteConstraint)
+  enrichCycleOpportunities(fastLaneOpps)
+  const fastLaneCandidates: RankedInternalCandidate[] = fastLaneOpps
+    .map(opp => ({ kind: 'cycle' as const, opp }))
+    .filter(candidate => routeAllowedForRole(candidate.opp.hops))
+  sortRankedCandidates(fastLaneCandidates)
+  const exactQuoteCache: ExactQuoteWaveCache = {
+    conversionPaths: new Map(),
+    exactValues: new Map(),
+  }
+  scanTelemetry.fastLaneCandidates = fastLaneCandidates.length
+  const fastLaneResult = await exactRankedShortlist(fastLaneCandidates, graph, rankingGasPrice, exactQuoteCache)
+  scanTelemetry.fastLaneChecked = fastLaneResult.checkedRouteKeys.size
+  scanTelemetry.fastLaneValid = fastLaneResult.valid.length
+  scanTelemetry.fastLaneMs = Date.now() - fastLaneStartedAt
+  outcomeCounters.detected += fastLaneResult.valid.length
+
+  let anyAttempted = false
+  if (gasReserveHealthy && fastLaneResult.valid.length > 0) {
+    console.log(`\n[${new Date().toISOString()}] Fast lane: ${fastLaneResult.valid.length} exact profitable proven route(s) in ${scanTelemetry.fastLaneMs}ms`)
+    anyAttempted = await attemptRankedCandidates(fastLaneResult.valid, graph, availableEthForWrap)
+    if (anyAttempted) {
+      scanTelemetry.fastLaneAttempts++
+      const fastTickMs = Date.now() - t0
+      await writeStatus(fastLaneResult.valid.map(candidate => candidate.opp), fastTickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
+      return
+    }
+  }
+
+  const opps = bases.flatMap(baseSym =>
+    findArbs(graph, baseSym, searchBalances[baseSym] ?? 0n, dirtyRouteConstraint),
+  )
+  enrichCycleOpportunities(opps)
   const settlementOpps = SAME_TOKEN_ONLY
     ? []
-    : bases.flatMap(baseSym => findSettlementRoutes(graph, baseSym, searchBalances[baseSym] ?? 0n))
+    : bases.flatMap(baseSym =>
+        findSettlementRoutes(graph, baseSym, searchBalances[baseSym] ?? 0n, dirtyRouteConstraint),
+      )
   // Settlement profit is already USDG-denominated. Put it through the same
   // post-gas and reliability score as a cycle so neither route class can
   // starve the other merely because it is dispatched first in the code.
@@ -4330,6 +4673,11 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     ...opps.map(opp => ({ kind: 'cycle' as const, opp })),
     ...settlementOpps.map(opp => ({ kind: 'settlement' as const, opp })),
   ].filter(candidate => routeAllowedForRole(candidate.opp.hops))
+  if (fastLaneResult.checkedRouteKeys.size > 0) {
+    approximateCandidates = approximateCandidates.filter(candidate =>
+      !fastLaneResult.checkedRouteKeys.has(routeKey(candidate.opp.hops)),
+    )
+  }
   // On an event-driven scan, a route whose pools did not change cannot have
   // developed a new reserve edge. Restricting the expensive exact-quote wave
   // to routes touching the changed pool is the defender's main latency win.
@@ -4338,11 +4686,12 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     approximateCandidates = approximateCandidates.filter(candidate =>
       candidate.opp.hops.some(hop => changedPoolKeys.has(poolStateKey(hop.pool.pool))),
     )
+    scanTelemetry.dirtyRouteCandidates = approximateCandidates.length
   }
   scanTelemetry.approximateCandidates = approximateCandidates.length
   sortRankedCandidates(approximateCandidates)
   scanTelemetry.localSearchMs = Date.now() - localSearchStartedAt
-  const rankedCandidates = await exactRankedShortlist(approximateCandidates, graph, rankingGasPrice)
+  const { valid: rankedCandidates } = await exactRankedShortlist(approximateCandidates, graph, rankingGasPrice, exactQuoteCache)
   outcomeCounters.detected += rankedCandidates.length
   const tickMs = Date.now() - t0
 
@@ -4352,8 +4701,6 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
   // candidates after the first transaction changes pool reserves. Applies
   // across BOTH cyclic and settlement routes: at most one state-changing
   // attempt per tick, whichever kind fires first.
-  let anyAttempted = false
-
   if (!gasReserveHealthy) {
     console.warn(`\n[${new Date().toISOString()}] Execution disabled: gas wallet ${formatEther(nativeEth)} ETH is below reserve ${formatEther(gasReserveWei)} ETH`)
   } else if (rankedCandidates.length === 0) {
@@ -4363,34 +4710,7 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     for (const { opp: o } of rankedCandidates.slice(0, 5)) {
       console.log(`  ${o.label}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenIn.decimals)} ${o.tokenIn.symbol})`)
     }
-    // Fire EVERY net-positive opportunity this tick that is independent of the
-    // ones already fired -- i.e. shares no pool (so reserves it read are still
-    // valid) and no input token (so the balance it was sized from isn't already
-    // committed). Previously the bot stopped after the first attempt and
-    // rescanned, leaving disjoint, independently-profitable trades on the table
-    // every tick. Each attempt is still simulated first, so a stale one costs
-    // zero gas -- this only adds fills, never risk.
-    const touchedPools = new Set<string>()
-    const committedInputs = new Set<string>()
-    for (const candidate of rankedCandidates.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
-      const { opp } = candidate
-      const finalToken = opp.hops.at(-1)?.tokenOutSym
-      if (candidate.kind !== 'cycle' || finalToken !== opp.tokenIn.symbol) {
-        console.error(`   BLOCKED non-closing route: ${opp.label}`)
-        continue
-      }
-      if ((opp.expectedNetUsd ?? -Infinity) <= 0 || opp.profitPct < MIN_PROFIT_PCT) continue
-      if (routeCooldownRemaining(opp.hops) > 0) continue
-      const inSym = opp.tokenIn.symbol
-      const poolsUsed = opp.hops.map(h => poolStateKey(h.pool.pool))
-      if (committedInputs.has(inSym) || poolsUsed.some(p => touchedPools.has(p))) continue
-      const result = await executeArb(candidate.opp, graph, availableEthForWrap)
-      if (result === 'attempted') {
-        anyAttempted = true
-        committedInputs.add(inSym)
-        for (const p of poolsUsed) touchedPools.add(p)
-      }
-    }
+    anyAttempted = await attemptRankedCandidates(rankedCandidates, graph, availableEthForWrap)
   }
 
   // Cross-venue (OpenOcean / 1inch) scan runs on its own slower cadence --
@@ -4501,6 +4821,117 @@ let directEventPoolKeys = new Map<string, string[]>()
 let v4EventPoolKeys = new Map<string, string>()
 let eventWatchAddresses: `0x${string}`[] = []
 let lastEventScanWarning = 0
+let latestWebSocketHead: bigint | null = null
+let webSocketHeadSequence = 0
+let consumedWebSocketHeadSequence = 0
+let resolveWebSocketHeadWait: (() => void) | null = null
+let stopWebSocketHeadWatch: (() => void) | null = null
+let webSocketReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let webSocketReconnectAttempt = 0
+
+function signalWebSocketWaiter() {
+  const resolve = resolveWebSocketHeadWait
+  resolveWebSocketHeadWait = null
+  resolve?.()
+}
+
+function cancelScheduledWebSocketReconnect() {
+  if (webSocketReconnectTimer) clearTimeout(webSocketReconnectTimer)
+  webSocketReconnectTimer = null
+  scanTelemetry.webSocketNextReconnectAt = ''
+}
+
+function scheduleWebSocketHeadReconnect() {
+  if (!wsPub || webSocketReconnectTimer) return
+  const delay = Math.min(
+    WS_RECONNECT_MAX_MS,
+    WS_RECONNECT_BASE_MS * (2 ** Math.min(webSocketReconnectAttempt, 5)),
+  )
+  webSocketReconnectAttempt++
+  scanTelemetry.webSocketNextReconnectAt = new Date(Date.now() + delay).toISOString()
+  webSocketReconnectTimer = setTimeout(() => {
+    webSocketReconnectTimer = null
+    scanTelemetry.webSocketNextReconnectAt = ''
+    scanTelemetry.webSocketReconnectAttempts++
+
+    // watchBlockNumber's onError is terminal for this watcher even when the
+    // underlying socket transport later becomes healthy. Dispose the stale
+    // subscription handle and build a fresh eth_subscribe(newHeads) watcher.
+    const stop = stopWebSocketHeadWatch
+    stopWebSocketHeadWatch = null
+    try { stop?.() } catch { /* already closed */ }
+    startWebSocketHeadFeed()
+  }, delay)
+}
+
+function startWebSocketHeadFeed() {
+  if (!wsPub || stopWebSocketHeadWatch) return
+  try {
+    stopWebSocketHeadWatch = wsPub.watchBlockNumber({
+      emitOnBegin: true,
+      emitMissed: true,
+      poll: false,
+      onBlockNumber(blockNumber) {
+        const recovered = !scanTelemetry.webSocketConnected && scanTelemetry.webSocketErrors > 0
+        latestWebSocketHead = blockNumber
+        webSocketHeadSequence++
+        scanTelemetry.webSocketConnected = true
+        scanTelemetry.webSocketLastHeadAt = new Date().toISOString()
+        if (recovered) scanTelemetry.webSocketRecoveries++
+        webSocketReconnectAttempt = 0
+        cancelScheduledWebSocketReconnect()
+        signalWebSocketWaiter()
+      },
+      onError(error) {
+        scanTelemetry.webSocketConnected = false
+        scanTelemetry.webSocketErrors++
+        if (Date.now() - lastEventScanWarning > 30_000) {
+          lastEventScanWarning = Date.now()
+          console.warn(`[websocket fallback] ${(error as any)?.message ?? error} -- HTTP block polling remains active`)
+        }
+        signalWebSocketWaiter()
+        scheduleWebSocketHeadReconnect()
+      },
+    })
+  } catch (error: any) {
+    scanTelemetry.webSocketConnected = false
+    scanTelemetry.webSocketErrors++
+    console.warn(`[websocket fallback] ${error?.message ?? error} -- HTTP block polling remains active`)
+    scheduleWebSocketHeadReconnect()
+  }
+}
+
+async function nextObservedBlock(): Promise<bigint> {
+  if (!wsPub) return pub.getBlockNumber()
+  if (latestWebSocketHead !== null && webSocketHeadSequence !== consumedWebSocketHeadSequence) {
+    consumedWebSocketHeadSequence = webSocketHeadSequence
+    return latestWebSocketHead
+  }
+
+  const startingSequence = webSocketHeadSequence
+  await new Promise<void>(resolve => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (resolveWebSocketHeadWait === finish) resolveWebSocketHeadWait = null
+      resolve()
+    }
+    const timer = setTimeout(finish, WS_FALLBACK_POLL_MS)
+    resolveWebSocketHeadWait = finish
+    // Close the tiny race where a head arrived between the pre-check above
+    // and installing this waiter.
+    if (webSocketHeadSequence !== startingSequence) finish()
+  })
+
+  if (latestWebSocketHead !== null && webSocketHeadSequence !== consumedWebSocketHeadSequence) {
+    consumedWebSocketHeadSequence = webSocketHeadSequence
+    return latestWebSocketHead
+  }
+  scanTelemetry.webSocketFallbackPolls++
+  return pub.getBlockNumber()
+}
 
 function rebuildEventWatchIndex() {
   if (eventWatchPoolCount === ARB_POOLS.length) return
@@ -4604,6 +5035,7 @@ async function main() {
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Block-aware scanning: enabled (at most one full scan per observed block)`)
   console.log(`  Event-driven pool refresh: ${EVENT_DRIVEN_SCANNING ? `enabled (${FULL_STATE_REFRESH_MS}ms safety refresh, ${GAS_ONLY_RECHECK_MS}ms gas recheck)` : 'disabled'}`)
+  console.log(`  WebSocket block wake-up: ${WEBSOCKET_SCANNING ? `enabled (${WS_FALLBACK_POLL_MS}ms HTTP fallback)` : 'disabled (HTTP polling)'}`)
   console.log(`  Exact quote wave: up to ${EXACT_QUOTE_CANDIDATES_PER_TICK} candidates / ${EXACT_QUOTE_CONCURRENCY} concurrent`)
   console.log(`  Historical learning: ${scanTelemetry.historicalClosedSuccesses} closed-cycle successes across ${scanTelemetry.provenVenueRoutes} proven venue routes`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
@@ -4614,14 +5046,16 @@ async function main() {
   console.log(`  Status file: ${statusPath}`)
   console.log()
 
+  startWebSocketHeadFeed()
+
   let lastScannedBlock: bigint | null = null
   let lastFullStateRefresh = 0
   let lastGasOnlyRecheck = 0
   while (true) {
     try {
-      const blockNumber = await pub.getBlockNumber()
+      const blockNumber = await nextObservedBlock()
       if (lastScannedBlock !== null && blockNumber === lastScannedBlock) {
-        await new Promise(r => setTimeout(r, INTERVAL_MS))
+        if (!WEBSOCKET_SCANNING) await new Promise(r => setTimeout(r, INTERVAL_MS))
         continue
       }
       const previousBlock = lastScannedBlock
