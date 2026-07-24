@@ -4322,10 +4322,11 @@ async function exactRankedShortlist(
   const quoteStartedAt = Date.now()
   const selected: RankedInternalCandidate[] = []
   const selectedSet = new Set<RankedInternalCandidate>()
-  const add = (candidate: RankedInternalCandidate | undefined) => {
-    if (!candidate || selected.length >= EXACT_QUOTE_CANDIDATES_PER_TICK || selectedSet.has(candidate)) return
+  const add = (candidate: RankedInternalCandidate | undefined): boolean => {
+    if (!candidate || selected.length >= EXACT_QUOTE_CANDIDATES_PER_TICK || selectedSet.has(candidate)) return false
     selected.push(candidate)
     selectedSet.add(candidate)
+    return true
   }
 
   // A route on cooldown already failed the real executor and must not consume
@@ -4377,8 +4378,24 @@ async function exactRankedShortlist(
     }
     explorationCursor += explorationSlots
   }
-  for (const candidate of proven) add(candidate)
-  for (const candidate of eligible) add(candidate)
+  // Route-depth budget guard: trade-log analysis (13d, ~11.7k records) shows
+  // 3-hop cycles are ~4.4x more profit-efficient per exact-quote slot than
+  // 4-hop ($0.022 vs $0.0043 realized USD per attempt), yet 4-hop floods 63%
+  // of deep attempts at a 4.2% win rate. Cap how many 4+hop CYCLE candidates
+  // the bulk rank-order fill may consume so shorter, higher-yield routes aren't
+  // starved of the scarce ~12 slots/tick. The top-3 and venue-diversity picks
+  // above intentionally bypass this so a genuinely top 4-hop edge or a unique
+  // venue-family route still gets quoted. Env-tunable; raise to disable.
+  const MAX_DEEP_HOP_EXACT_SLOTS = Math.max(0, parseInt(process.env.MAX_DEEP_HOP_EXACT_SLOTS ?? '4'))
+  const isDeepCycle = (c: RankedInternalCandidate) => c.kind === 'cycle' && c.opp.hops.length >= 4
+  let deepSlotsUsed = selected.filter(isDeepCycle).length
+  const addDepthCapped = (candidate: RankedInternalCandidate | undefined) => {
+    if (!candidate || selectedSet.has(candidate)) return
+    if (isDeepCycle(candidate) && deepSlotsUsed >= MAX_DEEP_HOP_EXACT_SLOTS) return
+    if (add(candidate) && isDeepCycle(candidate)) deepSlotsUsed++
+  }
+  for (const candidate of proven) addDepthCapped(candidate)
+  for (const candidate of eligible) addDepthCapped(candidate)
 
   // Put one historically successful, approximately net-positive route at the
   // front. It gets an exact quote by itself and can proceed immediately,
