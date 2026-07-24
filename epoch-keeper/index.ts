@@ -47,7 +47,11 @@ const INTERVAL_MS = parseInt(process.env.INTERVAL_MS ?? '1800000') // 30 min def
 // it from re-sweeping. This is the entire fix for the gas drain: no more
 // per-tick collectFees() spam.
 const SWEEP_WINDOW_MS = parseInt(process.env.SWEEP_WINDOW_MS ?? '5400000')
-const GAS_LIMIT_PER_COLLECT = 600_000n
+// collectFees() claims from poolFees + notifies the FeeDistributor (which hits
+// the oracle) -- that costs ~1.2-1.5M gas. The old 600k limit made EVERY
+// collect run out of gas and revert silently, so fees piled up uncollected in
+// poolFees and never reached voters. 1.8M gives comfortable headroom.
+const GAS_LIMIT_PER_COLLECT = 1_800_000n
 const STATUS_FILE = fileURLToPath(new URL('status.json', import.meta.url))
 
 // Which epoch we last collected fees for. Persisted to status.json so a
