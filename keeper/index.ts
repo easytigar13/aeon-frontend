@@ -4554,14 +4554,20 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
       recentErrors = recentErrors.slice(0, 5)
     }).finally(() => { poolDiscoveryInFlight = false })
   }
+  // Reuse the opening-tick gas price. Fetching it again here added another
+  // RPC round trip without improving freshness inside the same block.
+  const rankingGasPrice = cachedGasPrice ?? await pub.getGasPrice()
+  // stateRead (pool reserves) and balanceRead (wallet balances) are independent
+  // RPC reads -- neither needs the other's result -- so fetch them concurrently
+  // instead of back-to-back, shaving one round-trip (~140ms) off every tick.
   let states: PoolState[]
-  const stateReadStartedAt = Date.now()
+  let balanceSnapshot: BalancesResult
+  const readsStartedAt = Date.now()
   try {
-    states = await fetchAllStates(changedPoolKeys)
-    scanTelemetry.stateReadMs = Date.now() - stateReadStartedAt
-    scanTelemetry.inactivePools = ARB_POOLS
-      .filter(pool => !poolStateCache.has(poolStateKey(pool)))
-      .map(pool => pool.name)
+    ;[states, balanceSnapshot] = await Promise.all([
+      fetchAllStates(changedPoolKeys),
+      fetchBalances(rankingGasPrice),
+    ])
   } catch (err: any) {
     const message = err?.message ?? String(err)
     console.error(`[RPC error] ${message}`)
@@ -4569,25 +4575,16 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     recentErrors = recentErrors.slice(0, 5)
     return
   }
-
-  // Reuse the opening-tick gas price. Fetching it again here added another
-  // RPC round trip without improving freshness inside the same block.
-  const rankingGasPrice = cachedGasPrice ?? await pub.getGasPrice()
+  scanTelemetry.stateReadMs = Date.now() - readsStartedAt   // combined concurrent read window
+  scanTelemetry.balanceReadMs = 0                            // folded into the concurrent read above
+  scanTelemetry.inactivePools = ARB_POOLS
+    .filter(pool => !poolStateCache.has(poolStateKey(pool)))
+    .map(pool => pool.name)
   const graph = buildGraph(states)
-  const balanceReadStartedAt = Date.now()
-  let balanceSnapshot = await fetchBalances(rankingGasPrice)
-  // Reuse the batched balance snapshot rather than issuing a separate WETH
-  // balance RPC every block. Refresh balances only if an unwrap actually ran.
-  // Reuse the batched balance snapshot rather than issuing a separate WETH
-// balance RPC every block. Refresh balances only if an unwrap actually ran.
-if (false) {
-  balanceSnapshot = await fetchBalances(rankingGasPrice)
-}
   if (!balanceSnapshot.gasReserveHealthy) {
     const refilled = await ensureNativeGasReserve(balanceSnapshot.nativeEth, balanceSnapshot.gasReserveWei, rankingGasPrice, graph)
     if (refilled) balanceSnapshot = await fetchBalances(rankingGasPrice)
   }
-  scanTelemetry.balanceReadMs = Date.now() - balanceReadStartedAt
   const { balances, searchBalances, nativeEth, availableEthForWrap, gasReserveWei, gasReserveHealthy } = balanceSnapshot
   const bases = candidateBaseTokens(searchBalances)
   const localSearchStartedAt = Date.now()
