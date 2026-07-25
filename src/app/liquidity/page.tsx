@@ -1705,14 +1705,22 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
     }
     if (step === 'mint') {
       if (tickLower === undefined || tickUpper === undefined) { setStep('idle'); return }
+      // Derive the amounts the position ACTUALLY needs from the liquidity the
+      // range+price supports, rather than the raw inputs. With an imbalanced
+      // deposit the pool only uses the balanced subset of one token; setting
+      // amountMin to 98% of the raw (larger) input made that revert on slippage.
+      const L = liquidityForAmounts(sqrtPriceX96, tickLower, tickUpper, mintAmount0Wei, mintAmount1Wei)
+      const need = amountsForLiquidity(sqrtPriceX96, tickLower, tickUpper, L)
+      const d0 = need.amount0 > mintAmount0Wei ? mintAmount0Wei : need.amount0
+      const d1 = need.amount1 > mintAmount1Wei ? mintAmount1Wei : need.amount1
       writeContract({
         address: PM, abi: ALGEBRA_POSITION_MANAGER_ABI, functionName: 'mint',
         args: [{
           token0: mintToken0, token1: mintToken1,
           deployer: '0x0000000000000000000000000000000000000000' as `0x${string}`,
           tickLower, tickUpper,
-          amount0Desired: mintAmount0Wei, amount1Desired: mintAmount1Wei,
-          amount0Min: (mintAmount0Wei * 98n) / 100n, amount1Min: (mintAmount1Wei * 98n) / 100n,
+          amount0Desired: d0, amount1Desired: d1,
+          amount0Min: (d0 * 95n) / 100n, amount1Min: (d1 * 95n) / 100n,
           recipient: address, deadline: BigInt(Math.floor(Date.now() / 1000) + 1200),
         }],
       })
