@@ -358,6 +358,10 @@ export const TOKENS = {
   // symbol "Index", 18 decimals. Routed through canonical Uniswap V3 and
   // executor-certified Uniswap V4 pools; it is never used as a settlement asset.
   INDEX: { address: '0x56910D4409F3a0C78C64DD8D0545FF0705389870' as `0x${string}`, symbol: 'INDEX', decimals: 18, name: 'The Index' },
+  // Real Robinhood-chain tokens (verified on-chain name/symbol/decimals), added
+  // 2026-07-24 with CL/AEON pools + live gauges.
+  PONS: { address: '0x39dBED3a2bd333467115dE45665cC57F813C4571' as `0x${string}`, symbol: 'PONS', decimals: 18, name: 'Pons' },
+  AI:   { address: '0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18' as `0x${string}`, symbol: 'AI',   decimals: 18, name: 'Artificial Inu' },
   // Curated external routing tokens. These are intermediate assets only:
   // profitable cycles must still settle back into AEON, USDG, or WETH.
   TENDIES: { address: '0x45242320DBB855EeA8Fd36804C6487E10E97FCF9' as `0x${string}`, symbol: 'TENDIES', decimals: 18, name: 'TENDIES' },
@@ -600,6 +604,10 @@ export const CL_POOLS: {
   { name: 'VIRTUAL/AEON',  token0: 'VIRTUAL',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
   { name: 'ROBINFUN/AEON', token0: 'ROBINFUN', token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B' as `0x${string}` },
   { name: 'INDEX/AEON',    token0: 'INDEX',    token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x4dC794e446c90b73fEB82B58F7A1CE58E114dB24' as `0x${string}` },
+  { name: 'TENDIES/AEON',  token0: 'TENDIES',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x19fB8b8d103890Ce7ff65e954EaF4DaC3EcdF053' as `0x${string}` },
+  { name: 'VEX/AEON',      token0: 'VEX',      token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x79Fa300e73C1b35aD6b7acFd070d8A7C9a112a61' as `0x${string}` },
+  { name: 'PONS/AEON',     token0: 'PONS',     token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x21dBbAB7E90B7FD509a8eC2312B52313aba613B8' as `0x${string}` },
+  { name: 'AI/AEON',       token0: 'AI',       token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x8502c37f3f98E19Fc5607Afd4A304eE391941782' as `0x${string}` },
 ]
 // // { name: 'VIRTUAL/AEON',     token0: 'VIRTUAL',  token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
 // // { name: 'ROBINFUN/AEON',    token0: 'ROBINFUN', token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B' as `0x${string}` },
