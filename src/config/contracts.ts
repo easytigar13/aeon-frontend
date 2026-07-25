@@ -226,6 +226,14 @@ export const CL_GAUGES: Record<string, `0x${string}`> = {
   '0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6': '0x5f6c7ffca91223fc1187ac3e29abb5d66d455367', // CL AEON/USDG
   '0x96B5de75c08971f41DE6bde917fB0a8d0EB450F3': '0xb3ed0456a2637a71711c415e9e5c5982284fa432', // CL ETH/USDG
   '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d': '0xafff2c5d9bb53bc3553b2e9086225aa6e293a2cc', // CL VIRTUAL/AEON
+  // Added 2026-07-24 -- gauges for the new trending-token CL/AEON pools, so the
+  // Earn page can map each CL position to its gauge for staking.
+  '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B': '0xf4b4dd6caf39a73425a2db017a368936c3f44904', // CL ROBINFUN/AEON
+  '0x4dC794e446c90b73fEB82B58F7A1CE58E114dB24': '0x17cb3d9b14de2be2f4a01ebe7f21cd74775c4d10', // CL INDEX/AEON
+  '0x19fB8b8d103890Ce7ff65e954EaF4DaC3EcdF053': '0xdc52b1a80d094b2ab58cece08572f1b632723912', // CL TENDIES/AEON
+  '0x79Fa300e73C1b35aD6b7acFd070d8A7C9a112a61': '0x6f17059a4c1ec0e448e399ab391cbfb2767e3f57', // CL VEX/AEON
+  '0x21dBbAB7E90B7FD509a8eC2312B52313aba613B8': '0x95e9886357f5e49ccac734d9d81e1ea8c5ca17d2', // CL PONS/AEON
+  '0x8502c37f3f98E19Fc5607Afd4A304eE391941782': '0x046acc635581cb9fb84b3c0d0a5ba6ddf8d08a6e', // CL AI/AEON
   // Added 2026-07-09 -- one Algebra CL pool per remaining vAMM pair. The
   // factory's createPool(address,address) selector doesn't exist on this
   // deployment -- the real signature is createPool(address,address,bytes),
