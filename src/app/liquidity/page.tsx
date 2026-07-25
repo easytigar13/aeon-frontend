@@ -15,6 +15,7 @@ import { useVolume24h } from '@/hooks/useVolume24h'
 import { useClPositions } from '@/hooks/useClPositions'
 import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { TokenIcon } from '@/components/TokenIcon'
+import { ClGaugeRow } from '@/components/ClGaugeStake'
 import { priceOffsetToTick, pairedAmount, rangeSide, liquidityForAmounts, amountsForLiquidity, tickToSqrtPriceX96, tickToPrice, priceToTick } from '@/lib/clMath'
 import { binIdToPrice, dlmmRangeSide, computeSpotDistribution } from '@/lib/dlmmMath'
 import { hasMeaningfulPoolLiquidity, shouldDisplayPool } from '@/lib/poolVisibility'
@@ -94,6 +95,7 @@ function useAllowance(tokenAddr: `0x${string}` | undefined, owner: `0x${string}`
 }
 
 export default function LiquidityPage() {
+  const { address } = useAccount()
   const [view,        setView]        = useState<'list' | 'detail' | 'create'>('list')
   const [mode,        setMode]        = useState<PoolMode>('vAMM')
   const [initialPool, setInitialPool] = useState<string | undefined>(undefined)
@@ -167,8 +169,20 @@ export default function LiquidityPage() {
           see that comment in contracts.ts. PoolListView can now produce
           CL/DLMM rows again, so handleDeposit can set mode to 'CL'/'DLMM'
           and this needs to route to the matching form. */}
-      {mode === 'CL' ? <ClLiquidity initialPool={initialPool} /> :
-       mode === 'DLMM' ? <DlmmLiquidity initialPool={initialPool} /> :
+      {mode === 'CL' ? (
+        <>
+          <ClLiquidity initialPool={initialPool} />
+          {(() => {
+            const clPool = CL_POOLS.find(p => p.address.toLowerCase() === (initialPool ?? '').toLowerCase())
+            return clPool ? (
+              <div className="mt-6">
+                <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-2">Stake this position to earn AEON</div>
+                <ClGaugeRow pool={clPool} wallet={address} defaultOpen />
+              </div>
+            ) : null
+          })()}
+        </>
+      ) : mode === 'DLMM' ? <DlmmLiquidity initialPool={initialPool} /> :
        <VammLiquidity initialPool={initialPool} />}
       </div>
     </div>
@@ -407,12 +421,23 @@ function PoolListView({ onDeposit, onCreatePool }: { onDeposit: (mode: PoolMode,
                   <span className={clsx('text-2xs font-mono px-2 py-1 rounded-full border', p.health === 'Healthy' ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10' : p.health === 'Data pending' ? 'text-text-muted border-bg-border' : 'text-amber-400 border-amber-500/30 bg-amber-500/10')}>{p.health}</span>
                 </td>
                 <td className="px-4 py-3 text-right">
-                  <button
-                    onClick={() => onDeposit(p.type, p.address)}
-                    className="px-3 py-1.5 rounded-lg text-xs font-bold bg-aeon-400 text-bg-base hover:bg-aeon-300 hover:scale-110 active:scale-95 transition-all"
-                  >
-                    DEPOSIT
-                  </button>
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      onClick={() => onDeposit(p.type, p.address)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-aeon-400 text-bg-base hover:bg-aeon-300 hover:scale-110 active:scale-95 transition-all"
+                    >
+                      DEPOSIT
+                    </button>
+                    {p.type === 'CL' && (
+                      <button
+                        onClick={() => onDeposit(p.type, p.address)}
+                        title="Add liquidity, then stake the position to earn AEON"
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-aeon-400/40 text-aeon-400 hover:bg-aeon-400/10 hover:scale-110 active:scale-95 transition-all"
+                      >
+                        STAKE
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
