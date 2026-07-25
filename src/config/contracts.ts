@@ -228,7 +228,7 @@ export const CL_GAUGES: Record<string, `0x${string}`> = {
   '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d': '0xafff2c5d9bb53bc3553b2e9086225aa6e293a2cc', // CL VIRTUAL/AEON
   // Added 2026-07-24 -- gauges for the new trending-token CL/AEON pools, so the
   // Earn page can map each CL position to its gauge for staking.
-  '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B': '0xf4b4dd6caf39a73425a2db017a368936c3f44904', // CL ROBINFUN/AEON
+  // (ROBINFUN/AEON is already mapped below in the 2026-07-09 block.)
   '0x4dC794e446c90b73fEB82B58F7A1CE58E114dB24': '0x17cb3d9b14de2be2f4a01ebe7f21cd74775c4d10', // CL INDEX/AEON
   '0x19fB8b8d103890Ce7ff65e954EaF4DaC3EcdF053': '0xdc52b1a80d094b2ab58cece08572f1b632723912', // CL TENDIES/AEON
   '0x79Fa300e73C1b35aD6b7acFd070d8A7C9a112a61': '0x6f17059a4c1ec0e448e399ab391cbfb2767e3f57', // CL VEX/AEON
