@@ -1741,6 +1741,9 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
     if (step === 'approve1' || step === 'approve1_wait') return `Approving ${dispEthSym(selectedPool.token1)}…`
     if (step === 'mint' || step === 'mint_wait') return 'Minting Position…'
     if (step === 'done') return '✓ Position Minted!'
+    // A Custom range with empty/invalid min-max leaves ticks undefined, which
+    // makes startMint a silent no-op -- surface it instead of a dead button.
+    if (poolInitialized && (tickLower === undefined || tickUpper === undefined)) return 'Set a price range'
     if (needApprove0 && mintAmount0Wei > 0n) return `1. Approve ${dispEthSym(selectedPool.token0)}`
     if (needApprove1 && mintAmount1Wei > 0n) return `2. Approve ${dispEthSym(selectedPool.token1)}`
     return 'Add Concentrated Liquidity'
@@ -1968,7 +1971,7 @@ function ClLiquidity({ initialPool }: { initialPool?: string }) {
 
           <button
             onClick={startMint}
-            disabled={isConnected && (isProcessing || (mintAmount0Wei === 0n && mintAmount1Wei === 0n))}
+            disabled={isConnected && (isProcessing || (mintAmount0Wei === 0n && mintAmount1Wei === 0n) || (poolInitialized && (tickLower === undefined || tickUpper === undefined)))}
             className="btn-primary w-full py-4 flex items-center justify-center gap-2"
           >
             {(isProcessing || (isPending && step !== 'idle') || txWaiting) && <Loader2 size={16} className="animate-spin" />}
