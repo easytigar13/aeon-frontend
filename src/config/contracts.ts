@@ -592,8 +592,15 @@ export const CL_POOLS: {
   { name: 'TSLA/USDG',  token0: 'TSLA',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x01D9dE7f5826eb4f5f94948E646bC11b88391c2d' as `0x${string}` },
   { name: 'USAR/AEON',  token0: 'USAR',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x8a57FC5dB97fA95C8bB01CC48B231194309A685C' as `0x${string}` },
   { name: 'USAR/USDG',  token0: 'USAR',  token1: 'USDG', type: 'CL', fee: '0.25%', address: '0x944923F4C9194428577bb74074d07962b2522524' as `0x${string}` },
+  // Added 2026-07-24: CL/AEON pools for trending Robinhood-chain tokens, each
+  // with a live AeonClGauge (registered kind=1, active) in the controller.
+  // VIRTUAL & ROBINFUN pools already existed on-chain but were never wired in;
+  // INDEX was freshly created. Empty at creation -- first LP sets the market.
+  // (TENDIES/VEX pools also created but their gauges await deployer-wallet gas.)
+  { name: 'VIRTUAL/AEON',  token0: 'VIRTUAL',  token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
+  { name: 'ROBINFUN/AEON', token0: 'ROBINFUN', token1: 'AEON', type: 'CL', fee: '0.25%', address: '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B' as `0x${string}` },
+  { name: 'INDEX/AEON',    token0: 'INDEX',    token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x4dC794e446c90b73fEB82B58F7A1CE58E114dB24' as `0x${string}` },
 ]
-// Still hidden -- VIRTUAL/ROBINFUN pairs, not part of the restored subset.
 // // { name: 'VIRTUAL/AEON',     token0: 'VIRTUAL',  token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
 // // { name: 'ROBINFUN/AEON',    token0: 'ROBINFUN', token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B' as `0x${string}` },
 // // { name: 'CASHCAT/ROBINFUN', token0: 'CASHCAT',  token1: 'ROBINFUN', type: 'CL', fee: '0.25%', address: '0x14E266508d68107509487DE6Ead5ded5764C5F20' as `0x${string}` },
@@ -657,6 +664,7 @@ export const UNISWAP_POOLS = [
   { name: 'USDG/VIRTUAL',  token0: 'USDG', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D' as `0x${string}` },
   { name: 'VEX/VIRTUAL',   token0: 'VEX', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0x817f16F5D8da83d1B089B082c0172af3923618dA' as `0x${string}` },
   { name: 'WETH/ROBINFUN', token0: 'WETH', token1: 'ROBINFUN', type: 'UniV2', fee: '0.3%', address: '0xE53377eB912D08e1B0160E5Ea0c626CF162870fF' as `0x${string}` },
+  { name: 'UniV3 CASHCAT/WETH', token0: 'CASHCAT', token1: 'WETH', type: 'UniV3', fee: '0.2%', address: '0x8607Cb6c6F48850A4B605F044eB699ffa854CD84' as `0x${string}` },
 ]
 
 // Genesis + ongoing tokenomics — mirrors VoteDirectedLpEmissionsEngineRH.sol / FeeDistributorV3.sol / BuybackEngineV3.sol
