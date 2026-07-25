@@ -4265,12 +4265,14 @@ function sortRankedCandidates(candidates: RankedInternalCandidate[]) {
 // loop from appearing to prefer AEON merely because those failures were the
 // only attempts recorded in Recent Activity.
 const EXACT_QUOTE_CANDIDATES_PER_TICK = Math.max(4, Math.min(32, parseInt(process.env.EXACT_QUOTE_CANDIDATES ?? '12')))
-// Keep quote pressure below the dedicated reader's burst ceiling. The first
-// candidate is still exact-quoted alone and can execute immediately; only the
-// fallback exploration wave is capped at two concurrent routes. Six-way
-// bursts were confirmed to produce mixed 200/429 responses on the configured
-// Alchemy plan and needlessly pushed Mirajane onto the public RPC fallback.
-const EXACT_QUOTE_CONCURRENCY = Math.max(1, Math.min(32, parseInt(process.env.EXACT_QUOTE_CONCURRENCY ?? '2')))
+// How many candidates to exact-quote concurrently. exactQuote is the dominant
+// per-tick cost (network round-trips), so this directly sets scan latency.
+// Default was 2 to dodge 429s on a low-tier Alchemy plan; measured on the
+// public RPC, 4 roughly HALVES exactQuote (~3000ms -> ~1600ms) with zero RPC
+// errors and low variance, while 6 only adds variance (brushing the public
+// RPC's parallelism ceiling). 4 is the sweet spot for the public RPC and stays
+// safe on a paid endpoint. Raise via env once on a dedicated RPC if desired.
+const EXACT_QUOTE_CONCURRENCY = Math.max(1, Math.min(32, parseInt(process.env.EXACT_QUOTE_CONCURRENCY ?? '4')))
 let explorationCursor = 0
 
 async function revalidateCandidateExact(
