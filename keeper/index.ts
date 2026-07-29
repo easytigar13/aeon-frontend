@@ -2843,8 +2843,11 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
       ? `   ARB TRANSACTION FAILED (atomic revert): ${message}`
       : `   Candidate rejected before submission (no transaction, no gas spent): ${message}`)
     // Route-local failures are isolated by their own cooldown and must not
-    // pause unrelated routes through the global circuit breaker.
-    if (reachedSubmission && !failure.routeScoped) consecutiveFailures++
+    // pause unrelated routes through the global circuit breaker. Transient RPC
+    // failures (timeout/429/fetch) are infrastructure, not a systemic fault --
+    // they must NOT trip the breaker, or a public-RPC overload during a big
+    // pump/dump would self-inflict a 5-min pause during the best opportunities.
+    if (reachedSubmission && !failure.routeScoped && failure.category !== 'rpc') consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
@@ -3006,7 +3009,8 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     console.error(reachedSubmission
       ? `   ARB TRANSACTION FAILED (atomic revert): ${message}`
       : `   Candidate rejected before submission (no transaction, no gas spent): ${message}`)
-    if (reachedSubmission && !failure.routeScoped) consecutiveFailures++
+    // Transient RPC failures don't count toward the circuit breaker (see note above).
+    if (reachedSubmission && !failure.routeScoped && failure.category !== 'rpc') consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
@@ -3245,7 +3249,8 @@ async function executeSettlementSwap(
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
     console.error(`   ❌ SETTLE FAILED (no funds lost -- amountOutMin reverts atomically): ${message}`)
     totalFailed++
-    if (!failure.routeScoped) consecutiveFailures++
+    // Transient RPC failures don't count toward the circuit breaker (see note above).
+    if (!failure.routeScoped && failure.category !== 'rpc') consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
