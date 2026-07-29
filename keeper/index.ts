@@ -1840,6 +1840,37 @@ const outcomeCounters: Record<OutcomeKey, number> = {
   simulationFailed: 0, staleQuote: 0, reverted: 0,
 }
 
+// Per-epoch stat reset -- the Bot page's cumulative profit/trade counters
+// otherwise accumulate forever across restarts (they're reloaded from
+// status.json's `prior` on every boot). The user wants a fresh scoreboard
+// every epoch, so this process compares wall-clock epoch boundaries on its
+// own (no cross-process signaling from epoch-keeper needed) and zeroes the
+// counters the first tick after a new epoch begins. `lastResetEpoch` is
+// persisted in status.json so a restart mid-epoch doesn't re-trigger it.
+const WEEK_SECS = 604800n
+let lastResetEpoch: bigint | null = null // set from prior status.json, or on first reset
+function currentEpochSecs(): bigint {
+  const nowSecs = BigInt(Math.floor(Date.now() / 1000))
+  return (nowSecs / WEEK_SECS) * WEEK_SECS
+}
+function resetEpochStatsIfNeeded() {
+  const epoch = currentEpochSecs()
+  if (lastResetEpoch === null) {
+    // First check after boot -- don't wipe real history just because this
+    // feature is new; only start resetting from the NEXT boundary onward.
+    lastResetEpoch = epoch
+    return
+  }
+  if (epoch <= lastResetEpoch) return
+  console.log(`[epoch reset] New epoch detected (${lastResetEpoch} -> ${epoch}) -- resetting cumulative bot stats.`)
+  cumulativeProfit = {}
+  totalExecuted = 0
+  totalFailed = 0
+  recentArbs = []
+  for (const k of Object.keys(outcomeCounters) as OutcomeKey[]) outcomeCounters[k] = 0
+  lastResetEpoch = epoch
+}
+
 interface PendingTransaction {
   hash: `0x${string}`
   label: string
@@ -2225,6 +2256,9 @@ try {
   totalExecuted = prior.totalArbsExecuted ?? 0
   totalFailed = prior.totalArbsFailed ?? 0
   Object.assign(outcomeCounters, prior.outcomeCounters ?? {})
+  if (typeof prior.lastResetEpoch === 'string' || typeof prior.lastResetEpoch === 'number') {
+    lastResetEpoch = BigInt(prior.lastResetEpoch)
+  }
 } catch { /* no prior status file -- fresh start */ }
 
 // Records a trade in the capped in-memory list (what status.json shows for
@@ -2394,6 +2428,7 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
     cumulativeProfit,
     totalArbsExecuted: totalExecuted,
     totalArbsFailed: totalFailed,
+    lastResetEpoch: lastResetEpoch !== null ? lastResetEpoch.toString() : null,
     consecutiveFailures,
     pausedUntil: pausedUntil > Date.now() ? new Date(pausedUntil).toISOString() : null,
     recentErrors: recentErrors.slice(0, 5),
@@ -5072,6 +5107,7 @@ async function main() {
   let lastGasOnlyRecheck = 0
   while (true) {
     try {
+      resetEpochStatsIfNeeded()
       const blockNumber = await nextObservedBlock()
       if (lastScannedBlock !== null && blockNumber === lastScannedBlock) {
         if (!WEBSOCKET_SCANNING) await new Promise(r => setTimeout(r, INTERVAL_MS))
