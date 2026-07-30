@@ -370,6 +370,9 @@ export const TOKENS = {
   // 2026-07-24 with CL/AEON pools + live gauges.
   PONS: { address: '0x39dBED3a2bd333467115dE45665cC57F813C4571' as `0x${string}`, symbol: 'PONS', decimals: 18, name: 'Pons' },
   AI:   { address: '0x2E8c31162b855A2ffa90F6F8634643Ad6F111e18' as `0x${string}`, symbol: 'AI',   decimals: 18, name: 'Artificial Inu' },
+  // Real Robinhood-chain token (verified on-chain name/symbol/decimals), added
+  // 2026-07-30 with a vAMM/AEON pool + live gauge.
+  FRONG: { address: '0x6245e67affA44a23077f0Ea7f981a8DC743a0c47' as `0x${string}`, symbol: 'FRONG', decimals: 18, name: 'frong' },
   // Curated external routing tokens. These are intermediate assets only:
   // profitable cycles must still settle back into AEON, USDG, or WETH.
   TENDIES: { address: '0x45242320DBB855EeA8Fd36804C6487E10E97FCF9' as `0x${string}`, symbol: 'TENDIES', decimals: 18, name: 'TENDIES' },
@@ -449,6 +452,7 @@ export const POOLS = [
   // deploying. Real gauges created for all 9. Empty until LP migrates over
   // from the corresponding (Old) pool above.
   { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'vAMM', fee: '1%',   address: '0x67B2da1742187Aa09b427082b06ACDC5bBCA2D99' as `0x${string}` },
+  { name: 'FRONG/AEON', token0: 'FRONG', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x2f8CBA007598cBb15FfABE7a826a9cC8576ed6be' as `0x${string}` },
   { name: 'ROBINFUN/AEON', token0: 'ROBINFUN', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xeB638e1FA253E5526C2be76626dE26F02E4bdaba' as `0x${string}` },
   { name: 'CASHCAT/AEON', token0: 'CASHCAT', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x22d76bf4e8d2c1DfCca7de6c9dC46Ec2a8Ed7Eb7' as `0x${string}` },
   { name: 'CASHCAT/ETH',  token0: 'CASHCAT', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x3DC6b6c354fB1e9CFdaA8A36ff845728f7176f4e' as `0x${string}` },
