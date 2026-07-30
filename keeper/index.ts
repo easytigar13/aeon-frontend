@@ -287,6 +287,36 @@ const ARB_POOLS: PoolConfig[] = POOLS
     kind: 'vAMM' as const,
   }))
 
+// Manual seed, 2026-07-30: dynamic V4 discovery (discoverHighVolumeUniswapV4Pools)
+// only ever queries TOKEN/WETH pairs -- it never looks for USDG pairs and misses
+// native-currency (address-zero) pools too, so 3 of FRONG's 4 real V4 pools were
+// invisible. Verified directly against the PoolManager's Initialize event log
+// (currency0/currency1/fee/tickSpacing all confirmed on-chain, not guessed) before
+// adding. The WETH/FRONG 2500 pool is already covered by normal discovery.
+ARB_POOLS.push(
+  { name: 'UniV4 USDG/FRONG 69130', address: UNISWAP_V4.poolManager, token0: 'USDG', token1: 'FRONG',
+    feeBps: (69130n + 99n) / 100n, isUniV2: false, kind: 'uniV4',
+    v4PoolId: '0xc2ca3fd5671c77f3f36a4ab72f821de8ab99358e3d0beb24ebca7016ecf72aaf', v4Fee: 69130, v4TickSpacing: 1383, v4Hooks: '0x0000000000000000000000000000000000000000', v4Native: false },
+  { name: 'UniV4 USDG/FRONG 46900', address: UNISWAP_V4.poolManager, token0: 'USDG', token1: 'FRONG',
+    feeBps: (46900n + 99n) / 100n, isUniV2: false, kind: 'uniV4',
+    v4PoolId: '0x67c92850184a76efc034072b3ccb6094d63dec6bec50df1c994eb643ba050a58', v4Fee: 46900, v4TickSpacing: 469, v4Hooks: '0x0000000000000000000000000000000000000000', v4Native: false },
+  { name: 'UniV4 WETH/FRONG 50000', address: UNISWAP_V4.poolManager, token0: 'WETH', token1: 'FRONG',
+    feeBps: (50000n + 99n) / 100n, isUniV2: false, kind: 'uniV4',
+    v4PoolId: '0x97afdc037eeb289a9af7b8a7d6e8279006af79762a4bb2d8b4267b50fecf61e9', v4Fee: 50000, v4TickSpacing: 500, v4Hooks: '0x0000000000000000000000000000000000000000', v4Native: true },
+  // Second manual batch, same day: 3 more real (nonzero on-chain liquidity,
+  // verified via StateView.getLiquidity before adding) FRONG V4 pools. Several
+  // other pool IDs given alongside these had 0 liquidity and were skipped.
+  { name: 'UniV4 WETH/FRONG 99999', address: UNISWAP_V4.poolManager, token0: 'WETH', token1: 'FRONG',
+    feeBps: (99999n + 99n) / 100n, isUniV2: false, kind: 'uniV4',
+    v4PoolId: '0xfd81465f8974e5f61ce45c85e56d003dce2fa0cebc9e9ea1470dea94791f9f2d', v4Fee: 99999, v4TickSpacing: 1000, v4Hooks: '0x0000000000000000000000000000000000000000', v4Native: true },
+  { name: 'UniV4 USDG/FRONG 840000', address: UNISWAP_V4.poolManager, token0: 'USDG', token1: 'FRONG',
+    feeBps: (840000n + 99n) / 100n, isUniV2: false, kind: 'uniV4',
+    v4PoolId: '0xbcd6e5623ef421a08aeea2d2b6e3beb76508195d417fb1a8ab6dc57633ea668b', v4Fee: 840000, v4TickSpacing: 8400, v4Hooks: '0x0000000000000000000000000000000000000000', v4Native: false },
+  { name: 'UniV4 USDG/FRONG 48400', address: UNISWAP_V4.poolManager, token0: 'USDG', token1: 'FRONG',
+    feeBps: (48400n + 99n) / 100n, isUniV2: false, kind: 'uniV4',
+    v4PoolId: '0xc73d40138093148bb2792e6ce6ffda2984503fb2d096fd66b7a6dba9157c59e3', v4Fee: 48400, v4TickSpacing: 968, v4Hooks: '0x0000000000000000000000000000000000000000', v4Native: false },
+)
+
 const UNISWAP_V2_FACTORY = '0x8bcEaA40B9AcdfAedF85AdF4FF01F5Ad6517937f' as `0x${string}`
 const UNISWAP_FEE_BPS = 30n
 // ROBINFUN charges transfer tax when its official Uniswap pair is involved.
@@ -339,6 +369,29 @@ const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?
 const MANUAL_EXTERNAL_TOKENS = new Set<keyof typeof TOKENS>(['HOODIE'])
 const uniswapV3Refs = new Map<string, UniswapV3PoolRef>()
 const uniswapV4Refs = new Map<string, UniswapV4PoolRef>()
+
+// Manual V4 ref seed, 2026-07-30 -- see matching ARB_POOLS.push() comment above.
+// State-reading (line ~2671, hop.pool.pool.v4PoolId -> uniswapV4Refs.get()) needs
+// an entry here too, not just an ARB_POOLS row, or these pools quote as empty.
+// Matches discoverUniswapV4Pools' exact construction: native currency0 (the V4
+// native-ETH sentinel, 0x0..0) translates token0 to the real WETH address for
+// symbol-matching, while currency0/currency1 keep the raw pool-key values used
+// for on-chain calls.
+{
+  const FRONG_ADDR = getAddress('0x6245e67affA44a23077f0Ea7f981a8DC743a0c47')
+  const USDG_ADDR = getAddress(TOKENS.USDG.address)
+  const WETH_ADDR = getAddress(TOKENS.WETH.address)
+  const NATIVE = '0x0000000000000000000000000000000000000000' as const
+  const manualV4Refs: UniswapV4PoolRef[] = [
+    { id: '0xc2ca3fd5671c77f3f36a4ab72f821de8ab99358e3d0beb24ebca7016ecf72aaf', token0: USDG_ADDR, token1: FRONG_ADDR, currency0: USDG_ADDR, currency1: FRONG_ADDR, fee: 69130, tickSpacing: 1383, hooks: NATIVE, native: false, volume24: 0 },
+    { id: '0x67c92850184a76efc034072b3ccb6094d63dec6bec50df1c994eb643ba050a58', token0: USDG_ADDR, token1: FRONG_ADDR, currency0: USDG_ADDR, currency1: FRONG_ADDR, fee: 46900, tickSpacing: 469, hooks: NATIVE, native: false, volume24: 0 },
+    { id: '0x97afdc037eeb289a9af7b8a7d6e8279006af79762a4bb2d8b4267b50fecf61e9', token0: WETH_ADDR, token1: FRONG_ADDR, currency0: NATIVE, currency1: FRONG_ADDR, fee: 50000, tickSpacing: 500, hooks: NATIVE, native: true, volume24: 0 },
+    { id: '0xfd81465f8974e5f61ce45c85e56d003dce2fa0cebc9e9ea1470dea94791f9f2d', token0: WETH_ADDR, token1: FRONG_ADDR, currency0: NATIVE, currency1: FRONG_ADDR, fee: 99999, tickSpacing: 1000, hooks: NATIVE, native: true, volume24: 0 },
+    { id: '0xbcd6e5623ef421a08aeea2d2b6e3beb76508195d417fb1a8ab6dc57633ea668b', token0: USDG_ADDR, token1: FRONG_ADDR, currency0: USDG_ADDR, currency1: FRONG_ADDR, fee: 840000, tickSpacing: 8400, hooks: NATIVE, native: false, volume24: 0 },
+    { id: '0xc73d40138093148bb2792e6ce6ffda2984503fb2d096fd66b7a6dba9157c59e3', token0: USDG_ADDR, token1: FRONG_ADDR, currency0: USDG_ADDR, currency1: FRONG_ADDR, fee: 48400, tickSpacing: 968, hooks: NATIVE, native: false, volume24: 0 },
+  ]
+  for (const ref of manualV4Refs) uniswapV4Refs.set(ref.id.toLowerCase(), ref)
+}
 
 // MIRAJANE MODE: a fixed, explicitly-curated cross-venue AEON pool set (our
 // vAMM/CL + external Uniswap V3/V4), generated on-chain by
