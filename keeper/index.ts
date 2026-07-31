@@ -1950,6 +1950,22 @@ async function ensureBaseTokenFunded(
 
 // ─── Status file (read by /api/bot/status on the website) ───────────────────
 
+// A landed transaction is not the same thing as a profitable one. `status` is
+// kept as the accounting record ('success' == it confirmed on chain), while the
+// route-history learner needs the ECONOMIC outcome, otherwise it reinforces
+// whatever route lands most often regardless of whether it made money. Shared
+// by recordArb() (live) and loadRouteHistory() (replay from disk) so a restart
+// relearns exactly the same way it learned live.
+function historicalOutcomeOf(trade: { status?: string; grossProfit?: string; gasCost?: string }): 'success' | 'failed' {
+  if (trade.status === 'failed') return 'failed'
+  const gross = parseFloat(trade.grossProfit ?? '')
+  const gas = parseFloat(trade.gasCost ?? '')
+  // Pre-instrumentation rows lack these fields; treat them as they were
+  // recorded rather than silently reclassifying them.
+  if (!Number.isFinite(gross) || !Number.isFinite(gas)) return 'success'
+  return gross - gas > 0 ? 'success' : 'failed'
+}
+
 interface ExecutedArb {
   time: string
   pair: string
@@ -2172,7 +2188,10 @@ function loadRouteHistory() {
         recordHistoricalOutcome(
           key,
           venueSequence,
-          trade.status,
+          // Same economics-derived outcome as the live path -- see
+          // historicalOutcomeOf(). Replaying `trade.status` here would rebuild
+          // the old landed-count store on every restart and undo the fix.
+          historicalOutcomeOf(trade),
           String(trade.time ?? ''),
         )
       } catch { /* ignore a partially written or legacy log line */ }
@@ -2423,7 +2442,20 @@ function recordArb(arb: ExecutedArb) {
     const pathKey = tokenPathKey(arb.pair)
     const tokens = pathKey.split('>').filter(Boolean)
     if (tokens.length >= 3 && tokens[0] === tokens[tokens.length - 1]) {
-      recordHistoricalOutcome(pathKey, venueSequenceFromDescription(arb.venues ?? ''), arb.status, arb.time)
+      // Learn from ECONOMICS, not from "the transaction landed". arb.status is
+      // the accounting truth (the tx confirmed) and stays as-is in trades.log,
+      // but feeding it to the history layer taught the bot that a confirmed
+      // net-negative fill was a win. Measured over 180 landed trades: 114
+      // net-LOSING 3-hop landings incremented successes against only 10
+      // net-winning 4-hop ones -- an 11.4:1 reinforcement of the depth that
+      // loses money over the one earning ~100% of lifetime profit.
+      //
+      // Deliberately derived from grossProfit - gasCost, NOT from arb.profit:
+      // until tonight profit was clamped to "0" on every loser, so a
+      // profit-based rule would reclassify all 180 historical successes as
+      // failures and wipe the store. grossProfit/gasCost are present on 100%
+      // of landed rows, so this reclassifies correctly on replay too.
+      recordHistoricalOutcome(pathKey, venueSequenceFromDescription(arb.venues ?? ''), historicalOutcomeOf(arb), arb.time)
     }
   }
   recentArbs = [arb, ...recentArbs].slice(0, 30)
@@ -4565,7 +4597,26 @@ async function exactRankedShortlist(
     add(eligible.find(candidate => candidate.opp.tokenIn.symbol === symbol))
   }
   if (KEEPER_ROLE === 'mirajane') {
-    add(eligible.find(candidate => candidate.opp.hops.every(hop => !isAeonPoolKind(hop.pool.pool.kind))))
+    // Pure-external routes (no AEON-owned pool in any hop) are the ONLY class
+    // with a positive lifetime net, and it is not close. Measured over 180
+    // landed trades, by class: 3-hop touching AEON n=149 median size $1.36,
+    // gas 131bps, net -$0.0801; 4-hop touching AEON n=15, gas 169bps, net
+    // -$0.0002; 3-hop pure-external n=10 median $8.04, net -$0.0402; 4-hop
+    // pure-external n=3 MEDIAN SIZE $98.99, gas 37bps, net +$0.5527.
+    //
+    // The cause is depth, not hop count: AEON's deepest pool is ~$3.9k against
+    // ~$161M for the deepest external, so any cycle touching an AEON pool is
+    // size-capped near $1.30 and flat per-tx gas becomes 131-169bps of notional,
+    // which no real edge on this chain clears. Granting exactly ONE slot here
+    // meant ~11 of 12 exact quotes per tick were spent on route shapes that
+    // cannot clear gas at their maximum achievable size. This applies at every
+    // depth -- 2, 3 and 4-hop pure-external routes all become eligible.
+    const PURE_EXTERNAL_EXACT_SLOTS = Math.max(1, parseInt(process.env.PURE_EXTERNAL_EXACT_SLOTS ?? '4'))
+    let pureExternalTaken = 0
+    for (const candidate of eligible) {
+      if (pureExternalTaken >= PURE_EXTERNAL_EXACT_SLOTS) break
+      if (candidate.opp.hops.every(hop => !isAeonPoolKind(hop.pool.pool.kind)) && add(candidate)) pureExternalTaken++
+    }
     add(eligible.find(candidate => {
       const internal = candidate.opp.hops.some(hop => isAeonPoolKind(hop.pool.pool.kind))
       const external = candidate.opp.hops.some(hop => !isAeonPoolKind(hop.pool.pool.kind))
