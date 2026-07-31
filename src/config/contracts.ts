@@ -65,8 +65,8 @@ export const CONTRACTS = {
   // rewards through BuybackEngineV3's redistribute share (10% of raw
   // trading fees, unrelated to this emissions-engine swap) -- see
   // EPOCH_CONFIG.buybackRedistributeSplit below.
-  EmissionsEngine:     '0xd3163F5390F1A5326671DeD6EC38D8b8E2eA96e6' as `0x${string}`,
-  MultiGaugeController:'0x63f61916cDAABa76556723A75EE3690deCA9bd9A' as `0x${string}`,
+  EmissionsEngine:     '0x34894a0d3d3636125AE86CCb9ee16951ddDe1ecE' as `0x${string}`,
+  MultiGaugeController:'0x4D49C36197bF806dc5f65267a847b3A7a4ab1335' as `0x${string}`,
   AeonOracle:          '0x5A1E28EE00C4e83De000C7ffa5b59B22B45BD9BD' as `0x${string}`,
   ConstantUsdFeed:     '0x182e8039659F8110D47a87BEad1FAAaEf981781d' as `0x${string}`,
   // Old factory (2026-07-02 genesis deploy) has an AeonPoolRH baked into its

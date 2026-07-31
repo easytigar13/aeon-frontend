@@ -180,7 +180,7 @@ export default function VotePage() {
   const { data: multiEpoch } = useReadContract({
     address: CONTRACTS.MultiGaugeController,
     abi: MULTI_GAUGE_CONTROLLER_ABI,
-    functionName: 'currentEpoch',
+    functionName: 'votingEpoch',
   })
 
   const { data: multiHasVoted, refetch: refetchMultiHasVoted } = useReadContract({
@@ -758,13 +758,13 @@ export default function VotePage() {
           <p className="text-2xs text-text-muted mb-3 -mt-1">
             {voteMode === 'vAMM'
               ? `Every vAMM pool remains on the legacy voter — up to ${MAX_VOTE_POOLS} at once.`
-              : `Existing CL and DLMM positions now receive automatic vote-weighted AEON emissions. Votes are epoch-scoped and renew weekly.`}
+              : `Existing CL and DLMM positions receive automatic vote-weighted AEON emissions. Votes cast now fund the upcoming epoch and renew weekly.`}
           </p>
 
           <div className="card overflow-hidden">
             <div className="grid grid-cols-12 gap-2 px-4 py-2 border-b border-bg-border">
               {['Pool', 'Type', 'TVL', 'Volume 24h', '7d gross fee APR', 'Live projected vAPR', ''].map((h, i) => (
-                <div key={h + i} title={i === 4 ? 'Trailing 7-day gross swap fees annualized: fees7d ÷ TVL × 365/7.' : i === 5 ? 'Live current-epoch fees projected into the next rolling snapshot, then the 10:1 rule, 3× cap, gauge vote share and staked TVL. Refreshes every minute.' : undefined} className={clsx('text-2xs font-mono text-text-muted uppercase tracking-wider', i === 0 ? 'col-span-3' : i === 1 ? 'col-span-1' : i === 6 ? 'col-span-1 text-right' : 'col-span-2')}>{h}</div>
+                <div key={h + i} title={i === 4 ? 'Trailing 7-day gross swap fees annualized: fees7d ÷ TVL × 365/7.' : i === 5 ? 'Live current-epoch fee estimate × 25%, allocated by upcoming-epoch gauge vote share and staked TVL. Refreshes every minute.' : undefined} className={clsx('text-2xs font-mono text-text-muted uppercase tracking-wider', i === 0 ? 'col-span-3' : i === 1 ? 'col-span-1' : i === 6 ? 'col-span-1 text-right' : 'col-span-2')}>{h}</div>
               ))}
             </div>
 

@@ -196,7 +196,7 @@ export default function DocsPage() {
             AEON supports three active liquidity architectures: full-range vAMM pools, Algebra Integral concentrated-liquidity pools, and Trader Joe/LFJ Liquidity Book DLMM pools. Each architecture can earn trading fees and automatic weekly, vote-weighted AEON emissions when its gauge receives votes.
           </P>
           <Note>
-            vAMM emissions continue through the original voter and gauges. CL and DLMM emissions are supplied by the Multi-Gauge Controller to the existing gauges. Activating the controller did not replace factories or pools, migrate CL NFTs or DLMM bins, or move existing staked positions. The Vote page exposes separate vAMM and CL + DLMM modes; CL/DLMM votes are epoch-scoped and renew weekly.
+            vAMM emissions continue through the original voter and gauges. CL and DLMM emissions are supplied by the Multi-Gauge Controller to the existing gauges. Activating the controller did not replace factories or pools, migrate CL NFTs or DLMM bins, or move existing staked positions. The Vote page exposes separate vAMM and CL + DLMM modes; CL/DLMM votes are recorded for the upcoming epoch and renew weekly.
           </Note>
 
           {/* The Furnace */}
@@ -330,7 +330,7 @@ export default function DocsPage() {
             Navigate to <Link href="/vote" className="text-aeon-400 hover:underline">Vote</Link>. Your veNFT and its current voting power are shown at the top.
           </Step>
           <Step n={3} title="Allocate votes to pools">
-            Choose the vAMM or CL + DLMM voting mode, then add pools and assign percentage weights. Total allocation must equal 100%. CL/DLMM votes apply to the current epoch and renew weekly.
+            Choose the vAMM or CL + DLMM voting mode, then add pools and assign percentage weights. Total allocation must equal 100%. CL/DLMM votes apply to the upcoming epoch and renew weekly.
           </Step>
           <Step n={4} title="Submit your vote">
             Confirm the transaction. Your vote is locked for the rest of the epoch. At epoch end, pools you voted for receive AEON emissions proportional to your weight.

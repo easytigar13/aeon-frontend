@@ -1183,6 +1183,7 @@ export const MULTI_GAUGE_CONTROLLER_ABI = [
     ],
   },
   { name: 'currentEpoch', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
+  { name: 'votingEpoch', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ name: '', type: 'uint256' }] },
   {
     name: 'hasVoted', type: 'function', stateMutability: 'view',
     inputs: [{ name: 'epoch', type: 'uint256' }, { name: 'tokenId', type: 'uint256' }],

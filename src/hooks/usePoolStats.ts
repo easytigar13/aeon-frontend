@@ -110,15 +110,14 @@ export function useDiscoveredPoolStats(discovered: DiscoveredPool[], prices: Pri
 
 // CL and DLMM pools ARE now vote-directed, but through the
 // MultiGaugeController (epoch-scoped `weights[epoch][pool]`), NOT the legacy
-// AeonVoter that vAMM pools use. This reads the controller's current-epoch
-// weight for a list of pools so the "Votes" column shows the real veAEON
-// backing a CL/DLMM gauge instead of a hardcoded 0. currentEpoch() must be
-// read first, so the per-pool weight reads are gated on it.
+// AeonVoter that vAMM pools use. Votes are recorded for the upcoming epoch,
+// so this reads votingEpoch() and shows the weights that will control the
+// next CL/DLMM emission rather than an already-active epoch's stale weight.
 function useControllerWeights(pools: readonly { address: `0x${string}` }[]): Record<string, bigint> {
   const { data: epoch } = useReadContract({
     address: CONTRACTS.MultiGaugeController,
     abi: MULTI_GAUGE_CONTROLLER_ABI,
-    functionName: 'currentEpoch',
+    functionName: 'votingEpoch',
     query: { refetchInterval: 30000 },
   })
   const { data } = useReadContracts({
