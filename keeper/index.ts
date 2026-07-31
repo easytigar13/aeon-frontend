@@ -485,7 +485,7 @@ async function validateMirajaneV3Pools(): Promise<void> {
       { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token0' as const },
       { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token1' as const },
     ]
-  }))
+  }), { background: true })
   const canonicalCalls: any[] = []
   const resolved: { pool: PoolConfig; address: `0x${string}`; actualFactory: `0x${string}`; actualToken0: `0x${string}`; actualToken1: `0x${string}`; actualFee: number }[] = []
   for (let i = 0; i < pools.length; i++) {
@@ -504,7 +504,7 @@ async function validateMirajaneV3Pools(): Promise<void> {
       functionName: 'getPool' as const, args: [actualToken0, actualToken1, actualFee] as const,
     })
   }
-  const canonicalResults = await chunkedMulticall(canonicalCalls)
+  const canonicalResults = await chunkedMulticall(canonicalCalls, { background: true })
   for (let i = 0; i < resolved.length; i++) {
     const { pool, address, actualFactory, actualToken0, actualToken1, actualFee } = resolved[i]
     const expectedTokens = new Set([
@@ -730,7 +730,7 @@ async function discoverAeonVammPools(): Promise<number> {
     }
   }
   if (poolCalls.length === 0) return 0
-  const poolResults = await chunkedMulticall(poolCalls)
+  const poolResults = await chunkedMulticall(poolCalls, { background: true })
   const addresses = Array.from(new Set(poolResults
     .filter(result => result?.status === 'success')
     .map(result => getAddress(result.result as `0x${string}`))))
@@ -741,7 +741,7 @@ async function discoverAeonVammPools(): Promise<number> {
     { address, abi: PAIR_ABI, functionName: 'token0' as const },
     { address, abi: PAIR_ABI, functionName: 'token1' as const },
     { address, abi: PAIR_ABI, functionName: 'feeBps' as const },
-  ]))
+  ]), { background: true })
   const addressToSymbol = new Map<string, keyof typeof TOKENS>()
   for (const symbol of Object.keys(TOKENS) as (keyof typeof TOKENS)[]) {
     addressToSymbol.set(TOKENS[symbol].address.toLowerCase(), symbol)
@@ -913,11 +913,61 @@ function poolStateKey(pool: PoolConfig): string {
 
 // Chunk to stay well under any single RPC's multicall gas/size ceiling.
 const MULTICALL_CHUNK = 120
-async function chunkedMulticall(contracts: any[]): Promise<any[]> {
+// ─── RPC pressure governor ───────────────────────────────────────────────────
+// The public RPC answers HTTP 429 with "limit will reset in 60 seconds". Two
+// things were making that self-inflicted:
+//   1. Pool discovery issues hundreds of multicalls back-to-back on the SAME
+//      client the trading path uses, taking 32-58s per refresh. It was eating
+//      the rate-limit budget the hot path needs, so state went stale and every
+//      subsequent simulateContract failed with stale_quote.
+//   2. The block-poll catch retried into an active 429 every INTERVAL_MS
+//      (1.2s) against a limit that explicitly says it resets in 60s.
+// Background (discovery) work now yields to an observed 429; the trading path
+// deliberately does NOT -- when a real edge exists we still want to try.
+const RPC_RATE_LIMIT_BACKOFF_MS = Math.max(1_000, parseInt(process.env.RPC_RATE_LIMIT_BACKOFF_MS ?? '60000'))
+const DISCOVERY_CHUNK_PACING_MS = Math.max(0, parseInt(process.env.DISCOVERY_CHUNK_PACING_MS ?? '150'))
+let rpcRateLimitedUntil = 0
+
+function isRateLimitError(err: any): boolean {
+  if (err?.code === 429 || err?.cause?.code === 429 || err?.status === 429) return true
+  const text = String(err?.details ?? err?.shortMessage ?? err?.message ?? err).toLowerCase()
+  return text.includes('rate limit') || text.includes('too many requests') || text.includes('429')
+}
+
+// Returns true when the error WAS a rate limit, so callers can branch on it.
+function noteRpcError(err: any): boolean {
+  if (!isRateLimitError(err)) return false
+  const until = Date.now() + RPC_RATE_LIMIT_BACKOFF_MS
+  if (until > rpcRateLimitedUntil) {
+    rpcRateLimitedUntil = until
+    scanTelemetry.rpcRateLimitHits++
+    scanTelemetry.rpcBackoffUntil = new Date(until).toISOString()
+    console.warn(`[rpc backoff] 429 observed -- holding background RPC work for ${Math.round(RPC_RATE_LIMIT_BACKOFF_MS / 1000)}s`)
+  }
+  return true
+}
+
+function rpcBackoffRemaining(): number {
+  return Math.max(0, rpcRateLimitedUntil - Date.now())
+}
+
+async function chunkedMulticall(contracts: any[], opts: { background?: boolean } = {}): Promise<any[]> {
   const results: any[] = []
   for (let i = 0; i < contracts.length; i += MULTICALL_CHUNK) {
-    const batch = await pub.multicall({ contracts: contracts.slice(i, i + MULTICALL_CHUNK) as any, allowFailure: true })
-    results.push(...batch)
+    if (opts.background) {
+      // Wait out an active 429 rather than adding to it, and pace normal chunks
+      // so a single discovery sweep cannot monopolise the shared rate limit.
+      const wait = rpcBackoffRemaining()
+      if (wait > 0) await new Promise(r => setTimeout(r, Math.min(wait, 5_000)))
+      else if (i > 0 && DISCOVERY_CHUNK_PACING_MS > 0) await new Promise(r => setTimeout(r, DISCOVERY_CHUNK_PACING_MS))
+    }
+    try {
+      const batch = await pub.multicall({ contracts: contracts.slice(i, i + MULTICALL_CHUNK) as any, allowFailure: true })
+      results.push(...batch)
+    } catch (err) {
+      noteRpcError(err)
+      throw err
+    }
   }
   return results
 }
@@ -2490,6 +2540,11 @@ const scanTelemetry = {
   // Parallel edges discarded by the per-pair cap in buildGraph. Overwritten on
   // every build, so it reflects the current graph, not a running total.
   graphEdgesDropped: 0,
+  // HTTP 429s observed from the RPC, and when the current background-work
+  // backoff expires. If rpcRateLimitHits climbs steadily the endpoint is the
+  // bottleneck, not the bot -- see the note above chunkedMulticall.
+  rpcRateLimitHits: 0,
+  rpcBackoffUntil: '',
   webSocketEnabled: WEBSOCKET_SCANNING,
   webSocketConnected: false,
   webSocketLastHeadAt: '',
@@ -5441,8 +5496,18 @@ async function main() {
       // block arrived while it was running, rescan immediately; otherwise
       // the same-block branch above applies the configured poll interval.
     } catch (e) {
-      console.error('[block poll error]', e)
-      await new Promise(r => setTimeout(r, INTERVAL_MS))
+      // A 429 says "limit will reset in 60 seconds"; retrying it every
+      // INTERVAL_MS (1.2s) just spends the budget the trading path needs and
+      // keeps the bot blind. Back off for real, but cap the sleep so a stale
+      // backoff window can never strand the loop.
+      if (noteRpcError(e)) {
+        const wait = Math.min(rpcBackoffRemaining(), RPC_RATE_LIMIT_BACKOFF_MS)
+        console.error(`[block poll rate-limited] backing off ${Math.round(wait / 1000)}s`)
+        await sleepOrWake(Math.max(INTERVAL_MS, wait))
+      } else {
+        console.error('[block poll error]', e)
+        await sleepOrWake(INTERVAL_MS)
+      }
     }
   }
 }
