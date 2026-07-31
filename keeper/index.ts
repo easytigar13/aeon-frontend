@@ -183,6 +183,23 @@ const WEBSOCKET_SCANNING = process.env.WEBSOCKET_SCANNING !== 'false' && /^wss:\
 const WS_FALLBACK_POLL_MS = Math.max(500, parseInt(process.env.WS_FALLBACK_POLL_MS ?? '3000'))
 const WS_RECONNECT_BASE_MS = Math.max(250, parseInt(process.env.WS_RECONNECT_BASE_MS ?? '1000'))
 const WS_RECONNECT_MAX_MS = Math.max(WS_RECONNECT_BASE_MS, parseInt(process.env.WS_RECONNECT_MAX_MS ?? '30000'))
+// WSS_URL/WS_URL/PROVIDER_WSS point at Robinhood Chain's raw sequencer
+// broadcast feed -- confirmed by direct probe to be a proprietary framing
+// ({sequenceNumber, message:{message:{header,l2Msg}}}), the same shape as
+// an Arbitrum-Orbit sequencer feed relay, NOT a standard eth_subscribe
+// endpoint (it never replies to one -- that's why WS_RPC_URL/WEBSOCKET_SCANNING
+// above can't just point here). We do not decode tx content out of it --
+// that needs Nitro's L2 message format and would be untrusted input feeding
+// a bot that signs real transactions. We only use the ARRIVAL of a frame as
+// a low-latency "the sequencer just processed something, recheck now" wake
+// signal: a raw capture showed dozens of frames per block, so waking
+// (throttled) on frame arrival instead of waiting out a full INTERVAL_MS
+// poll gap meaningfully cuts worst-case detection latency. See
+// startSequencerFeedWakeup() below. Degrades to plain HTTP polling on any
+// disconnect -- never blocks the main loop.
+const SEQUENCER_FEED_URL = (process.env.WSS_URL || process.env.WS_URL || process.env.PROVIDER_WSS || '').trim()
+const SEQUENCER_FEED_ENABLED = process.env.SEQUENCER_FEED_WAKEUP !== 'false' && /^wss?:\/\//i.test(SEQUENCER_FEED_URL)
+const SEQUENCER_FEED_WAKE_MS = Math.max(100, parseInt(process.env.SEQUENCER_FEED_WAKE_MS ?? '300'))
 
 // Native ETH isn't one of the pool tokens (everything trades WETH), but
 // it's economically fungible with WETH via wrap/unwrap -- whatever's spare
@@ -1195,11 +1212,22 @@ function hasPositiveMarginalEdge(hops: HopCandidate[]): boolean {
 function optimalTrade(hops: HopCandidate[], maxIn: bigint): { amountIn: bigint; profit: bigint } {
   if (maxIn <= 1n) return { amountIn: 0n, profit: -1n }
   let lo = 0n, hi = maxIn
-  for (let i = 0; i < 100; i++) {
+  // Ternary search shrinks the bracket by only 2/3 per iteration, so the old
+  // `hi - lo < 2n` exit (converge to ONE WEI) never fired against an 18-decimal
+  // maxIn -- it needs ~101 iterations, so every route burned the full 100, two
+  // cycleOut() calls each. At ~12,700 sized routes per tick that was ~3.2M bigint
+  // swap evaluations and 79-86% of total tick time, which is the single largest
+  // term in quote staleness (blocks here are ~0.1s, so every second of tick is
+  // ~10 blocks of decay). Converging to 1 basis point of max size instead needs
+  // ln(1e4)/ln(1.5) ~= 23 iterations. Profit is second-order in size error near a
+  // concave optimum, so a 1bp size error costs ~1e-8 of relative profit -- and the
+  // chosen amountIn is still re-priced by quoteMixedRouteExact and gated by the
+  // on-chain amountOutMin/minProfit, so this cannot make a bad trade look good.
+  const tol = maxIn / 10_000n > 1n ? maxIn / 10_000n : 1n
+  for (let i = 0; i < 40 && hi - lo > tol; i++) {
     const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n
     const p1 = cycleOut(m1, hops) - m1, p2 = cycleOut(m2, hops) - m2
     if (p1 < p2) lo = m1; else hi = m2
-    if (hi - lo < 2n) break
   }
   const best = (lo + hi) / 2n
   return { amountIn: best, profit: cycleOut(best, hops) - best }
@@ -1360,10 +1388,13 @@ function findSettlementRoutes(
     const maxIn = poolCap < walletCap ? poolCap : walletCap
     if (maxIn <= 1n) return
     let lo = 0n, hi = maxIn
-    for (let i = 0; i < 100; i++) {
+    // Same 1bp tolerance as optimalTrade() -- see the note there. The old
+    // wei-precision exit never fired and burned all 100 iterations, here at
+    // two profitUsdgAt() calls each (which are more expensive than cycleOut).
+    const settlementTol = maxIn / 10_000n > 1n ? maxIn / 10_000n : 1n
+    for (let i = 0; i < 40 && hi - lo > settlementTol; i++) {
       const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n
       if (profitUsdgAt(m1) < profitUsdgAt(m2)) lo = m1; else hi = m2
-      if (hi - lo < 2n) break
     }
     const amountIn = (lo + hi) / 2n
     const profitUsdg = profitUsdgAt(amountIn)
@@ -2011,7 +2042,7 @@ function venueSequenceFromDescription(description: string): string {
 }
 
 function venueSequenceFromHops(hops: HopCandidate[]): string {
-  return hops.map(hop => hop.pool.kind).join('>')
+  return hops.map(hop => hop.pool.pool.kind).join('>')
 }
 
 function venueSequenceAllowedForRole(sequence: string): boolean {
@@ -2142,7 +2173,7 @@ function findHistoricalArbs(
       const tokenOut = template.tokens[index + 1]
       const kind = template.kinds[index]
       const matchingEdges = (graph.get(tokenIn) ?? []).filter(edge =>
-        edge.tokenOutSym === tokenOut && edge.pool.kind === kind,
+        edge.tokenOutSym === tokenOut && edge.pool.pool.kind === kind,
       )
       const next: HopCandidate[][] = []
       for (const partial of variants) {
@@ -2367,6 +2398,11 @@ const scanTelemetry = {
   webSocketReconnectAttempts: 0,
   webSocketRecoveries: 0,
   webSocketNextReconnectAt: '',
+  sequencerFeedEnabled: SEQUENCER_FEED_ENABLED,
+  sequencerFeedConnected: false,
+  sequencerFeedWakes: 0,
+  sequencerFeedErrors: 0,
+  sequencerFeedLastMessageAt: '',
   historicalClosedSuccesses: [...routeHistory.values()].reduce((sum, stats) => sum + stats.successes, 0),
   provenVenueRoutes: [...venueRouteHistory.values()].filter(stats => stats.successes > 0).length,
   approximateCandidates: 0,
@@ -2899,9 +2935,15 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
       const grossAdjustedAfter = useNativeCycle ? balanceAfter + totalGasWei : balanceAfter
       const realizedGross = grossAdjustedAfter > balanceBefore ? grossAdjustedAfter - balanceBefore : 0n
       const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
-      const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
+      // NEVER clamp this to zero. A fill whose realized gross came in below its
+      // own gas cost is a LOSS and has to be reportable as one. The old
+      // `: 0n` recorded every net-negative fill as profit "0" / status "success",
+      // which made a losing bot indistinguishable from a break-even one in
+      // trades.log, status.json and cumulativeProfit -- 110 of the first 158
+      // "successes" were actually net-negative and none of them were visible.
+      const realizedNet = realizedGross - actualGasInToken
       const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
-      console.log(`   ✅ ARB COMPLETE (CL/DLMM route) — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hSwap}`)
+      console.log(`   ${realizedNet < 0n ? '⚠ ARB COMPLETED AT A NET LOSS' : '✅ ARB COMPLETE'} (CL/DLMM route) — gross ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol}, net ${formatUnits(realizedNet, tokenIn.decimals)} ${tokenIn.symbol} — ${hSwap}`)
       totalExecuted++
       outcomeCounters.executed++
       consecutiveFailures = 0
@@ -3066,9 +3108,10 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
       const realizedGross = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n
       const totalGasWei = approvalGasWei + BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)
       const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
-      const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
+      // See the CL/DLMM path above: no zero-clamp, losses must stay visible.
+      const realizedNet = realizedGross - actualGasInToken
       const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
-      console.log(`   ✅ ARB COMPLETE — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hExec}`)
+      console.log(`   ${realizedNet < 0n ? '⚠ ARB COMPLETED AT A NET LOSS' : '✅ ARB COMPLETE'} — gross ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol}, net ${formatUnits(realizedNet, tokenIn.decimals)} ${tokenIn.symbol} — ${hExec}`)
       totalExecuted++
       outcomeCounters.executed++
       consecutiveFailures = 0
@@ -3757,11 +3800,12 @@ async function scanCashcatV3Arb(states: PoolState[], searchWethBal: bigint): Pro
       if (maxIn <= 1n) return
 
       let lo = 0n, hi = maxIn
-      for (let i = 0; i < 100; i++) {
+      // Same 1bp tolerance as optimalTrade() -- see the note there.
+      const v3Tol = maxIn / 10_000n > 1n ? maxIn / 10_000n : 1n
+      for (let i = 0; i < 40 && hi - lo > v3Tol; i++) {
         const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n
         const p1 = cycleOutWeth(m1) - m1, p2 = cycleOutWeth(m2) - m2
         if (p1 < p2) lo = m1; else hi = m2
-        if (hi - lo < 2n) break
       }
       const amountIn = (lo + hi) / 2n
       const profitRaw = cycleOutWeth(amountIn) - amountIn
@@ -4942,6 +4986,80 @@ function signalWebSocketWaiter() {
   resolve?.()
 }
 
+// Generic wake-up used by the main loop's INTERVAL_MS idle sleep (the
+// branch taken when WEBSOCKET_SCANNING is off, which is the case whenever
+// WS_RPC_URL isn't a working eth_subscribe endpoint -- see nextObservedBlock).
+// Independent of the wsPub/eth_subscribe machinery above so it works even
+// when that path is entirely disabled, as it is today.
+let mainLoopWakeResolvers: Array<() => void> = []
+function signalMainLoopWake() {
+  if (mainLoopWakeResolvers.length === 0) return
+  const resolvers = mainLoopWakeResolvers
+  mainLoopWakeResolvers = []
+  for (const resolve of resolvers) resolve()
+}
+function sleepOrWake(ms: number): Promise<void> {
+  return new Promise(resolve => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      clearTimeout(timer)
+      mainLoopWakeResolvers = mainLoopWakeResolvers.filter(r => r !== finish)
+      resolve()
+    }
+    const timer = setTimeout(finish, ms)
+    mainLoopWakeResolvers.push(finish)
+  })
+}
+
+let sequencerFeedSocket: WebSocket | null = null
+let sequencerFeedReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let lastSequencerFeedWake = 0
+
+function scheduleSequencerFeedReconnect() {
+  if (sequencerFeedReconnectTimer) return
+  sequencerFeedReconnectTimer = setTimeout(() => {
+    sequencerFeedReconnectTimer = null
+    startSequencerFeedWakeup()
+  }, 3000)
+}
+
+function startSequencerFeedWakeup() {
+  if (!SEQUENCER_FEED_ENABLED) return
+  try {
+    const sock = new WebSocket(SEQUENCER_FEED_URL)
+    sequencerFeedSocket = sock
+    sock.addEventListener('open', () => {
+      scanTelemetry.sequencerFeedConnected = true
+    })
+    sock.addEventListener('message', () => {
+      scanTelemetry.sequencerFeedLastMessageAt = new Date().toISOString()
+      const now = Date.now()
+      if (now - lastSequencerFeedWake < SEQUENCER_FEED_WAKE_MS) return
+      lastSequencerFeedWake = now
+      scanTelemetry.sequencerFeedWakes++
+      signalMainLoopWake()
+    })
+    sock.addEventListener('close', () => {
+      scanTelemetry.sequencerFeedConnected = false
+      sequencerFeedSocket = null
+      scheduleSequencerFeedReconnect()
+    })
+    sock.addEventListener('error', () => {
+      scanTelemetry.sequencerFeedConnected = false
+      scanTelemetry.sequencerFeedErrors++
+      if (Date.now() - lastEventScanWarning > 30_000) {
+        lastEventScanWarning = Date.now()
+        console.warn('[sequencer feed] connection error -- HTTP block polling remains active')
+      }
+    })
+  } catch {
+    scanTelemetry.sequencerFeedErrors++
+    scheduleSequencerFeedReconnect()
+  }
+}
+
 function cancelScheduledWebSocketReconnect() {
   if (webSocketReconnectTimer) clearTimeout(webSocketReconnectTimer)
   webSocketReconnectTimer = null
@@ -5143,6 +5261,7 @@ async function main() {
   console.log(`  Block-aware scanning: enabled (at most one full scan per observed block)`)
   console.log(`  Event-driven pool refresh: ${EVENT_DRIVEN_SCANNING ? `enabled (${FULL_STATE_REFRESH_MS}ms safety refresh, ${GAS_ONLY_RECHECK_MS}ms gas recheck)` : 'disabled'}`)
   console.log(`  WebSocket block wake-up: ${WEBSOCKET_SCANNING ? `enabled (${WS_FALLBACK_POLL_MS}ms HTTP fallback)` : 'disabled (HTTP polling)'}`)
+  console.log(`  Sequencer feed wake-up: ${SEQUENCER_FEED_ENABLED ? `enabled (${SEQUENCER_FEED_WAKE_MS}ms throttle)` : 'disabled'}`)
   console.log(`  Exact quote wave: up to ${EXACT_QUOTE_CANDIDATES_PER_TICK} candidates / ${EXACT_QUOTE_CONCURRENCY} concurrent`)
   console.log(`  Historical learning: ${scanTelemetry.historicalClosedSuccesses} closed-cycle successes across ${scanTelemetry.provenVenueRoutes} proven venue routes`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
@@ -5154,6 +5273,7 @@ async function main() {
   console.log()
 
   startWebSocketHeadFeed()
+  startSequencerFeedWakeup()
 
   let lastScannedBlock: bigint | null = null
   let lastFullStateRefresh = 0
@@ -5163,7 +5283,7 @@ async function main() {
       resetEpochStatsIfNeeded()
       const blockNumber = await nextObservedBlock()
       if (lastScannedBlock !== null && blockNumber === lastScannedBlock) {
-        if (!WEBSOCKET_SCANNING) await new Promise(r => setTimeout(r, INTERVAL_MS))
+        if (!WEBSOCKET_SCANNING) await sleepOrWake(INTERVAL_MS)
         continue
       }
       const previousBlock = lastScannedBlock
