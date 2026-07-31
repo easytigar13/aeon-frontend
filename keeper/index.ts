@@ -138,6 +138,11 @@ if (!['mirajane', 'aeon-only', 'general'].includes(configuredRole)) {
 }
 const KEEPER_ROLE = configuredRole as KeeperRole
 const BOT_ID = (process.env.BOT_ID ?? (KEEPER_ROLE === 'aeon-only' ? 'aeon' : '')).trim() || undefined
+// Declared here (rather than next to loadMirajanePools below) because the
+// static ARB_POOLS seed blocks further down have to know whether they are
+// about to be thrown away -- loadMirajanePools() splices ARB_POOLS to zero
+// before repopulating it from the manifest. See the guards on those blocks.
+const MIRAJANE_MODE = KEEPER_ROLE === 'mirajane'
 
 // Cross-venue (OpenOcean / 1inch) scan runs far less often than the internal
 // pool scan -- it costs real API calls (rate-limited, especially 1inch),
@@ -310,7 +315,14 @@ const ARB_POOLS: PoolConfig[] = POOLS
 // invisible. Verified directly against the PoolManager's Initialize event log
 // (currency0/currency1/fee/tickSpacing all confirmed on-chain, not guessed) before
 // adding. The WETH/FRONG 2500 pool is already covered by normal discovery.
-ARB_POOLS.push(
+//
+// GUARDED 2026-07-31: in MIRAJANE_MODE this push was silently discarded --
+// loadMirajanePools() splices ARB_POOLS to zero further down, so these rows
+// never survived to the graph. Nothing was actually lost, because the matching
+// uniswapV4Refs seed below is a SEPARATE Map that is never spliced, and dynamic
+// V4 discovery re-finds these pools anyway. Kept (not deleted) because the rows
+// are still correct and still load for the non-mirajane roles.
+if (!MIRAJANE_MODE) ARB_POOLS.push(
   { name: 'UniV4 USDG/FRONG 69130', address: UNISWAP_V4.poolManager, token0: 'USDG', token1: 'FRONG',
     feeBps: (69130n + 99n) / 100n, isUniV2: false, kind: 'uniV4',
     v4PoolId: '0xc2ca3fd5671c77f3f36a4ab72f821de8ab99358e3d0beb24ebca7016ecf72aaf', v4Fee: 69130, v4TickSpacing: 1383, v4Hooks: '0x0000000000000000000000000000000000000000', v4Native: false },
@@ -343,7 +355,15 @@ const UNISWAP_UNSUPPORTED_TOKENS = new Set<keyof typeof TOKENS>(['ROBINFUN'])
 // Seed explicitly verified V2-compatible pools, including factories outside
 // the primary discovery factory. Dynamic discovery below de-duplicates these
 // by address when it encounters the same pair.
-for (const p of UNISWAP_POOLS) {
+//
+// Skipped in MIRAJANE_MODE for the same reason as the V4 block above: these
+// rows were being spliced away by loadMirajanePools() before ever reaching the
+// graph. This makes that discard explicit instead of silent, and avoids doing
+// the work at all. Consequence to be aware of: adding a pool to UNISWAP_POOLS
+// in src/config/contracts.ts does NOT reach Mirajane -- the bot's external set
+// comes from mirajane-pools.json plus dynamic discovery. contracts.ts still
+// drives the website.
+if (!MIRAJANE_MODE) for (const p of UNISWAP_POOLS) {
   const token0 = p.token0 as keyof typeof TOKENS
   const token1 = p.token1 as keyof typeof TOKENS
   if (!(token0 in TOKENS) || !(token1 in TOKENS)) continue
@@ -417,7 +437,6 @@ const uniswapV4Refs = new Map<string, UniswapV4PoolRef>()
 // is what makes it stupidly fast (tiny fixed graph, zero remote latency) while
 // still arbing AEON/CASHCAT/etc across every venue. Cycles still only ever
 // settle in AEON/ETH/USDG (SETTLEMENT_TOKENS), unchanged.
-const MIRAJANE_MODE = KEEPER_ROLE === 'mirajane'
 function loadMirajanePools() {
   const path = fileURLToPath(new URL('mirajane-pools.json', import.meta.url))
   const { poolConfigs, v4Refs } = JSON.parse(fs.readFileSync(path, 'utf-8'))
@@ -1163,6 +1182,21 @@ interface SettlementOpp {
   reliabilityPct?: number
 }
 
+// The monitored pool set covers far fewer distinct PAIRS than it does pools:
+// ~283 pools across ~39 pairs, with USDG/WETH alone holding 19 parallel pools.
+// buildGraph used to emit every one of those as an independent directed edge,
+// so a 3-hop DFS through USDG/WETH enumerated and SIZED 19 near-identical
+// variants that cannot differ in the final decision. Route enumeration grows
+// roughly with (edges-per-hub)^hops, which is why tick time tracked pool count
+// so steeply (185 pools -> 1.9s, 286 pools -> 10.3s measured). Capping parallel
+// edges per direction is the fix.
+//
+// Why the union of TWO orderings rather than one: the best pool for a small
+// trade (best marginal price) and for a large trade (deepest) are frequently
+// different pools, so ranking by either alone systematically mis-sizes. Do not
+// set this to 1 for that reason.
+const MAX_PARALLEL_EDGES_PER_PAIR = Math.max(1, parseInt(process.env.MAX_PARALLEL_EDGES_PER_PAIR ?? '4'))
+
 function buildGraph(states: PoolState[]): Map<string, HopCandidate[]> {
   const graph = new Map<string, HopCandidate[]>()
   function addEdge(fromSym: string, toSym: string, pool: PoolState, reserveIn: bigint, reserveOut: bigint) {
@@ -1176,6 +1210,37 @@ function buildGraph(states: PoolState[]): Map<string, HopCandidate[]> {
     addEdge(t0Sym, t1Sym, s, r0real, r1real)
     addEdge(t1Sym, t0Sym, s, r1real, r0real)
   }
+
+  let dropped = 0
+  for (const [fromSym, edges] of graph) {
+    const byDest = new Map<string, HopCandidate[]>()
+    for (const edge of edges) {
+      const list = byDest.get(edge.tokenOutSym)
+      if (list) list.push(edge); else byDest.set(edge.tokenOutSym, [edge])
+    }
+    const kept: HopCandidate[] = []
+    for (const list of byDest.values()) {
+      if (list.length <= MAX_PARALLEL_EDGES_PER_PAIR) { kept.push(...list); continue }
+      // Cross-multiplied comparison -- no division, so a zero reserveIn can
+      // never trap here and precision is exact.
+      const byRate = [...list].sort((a, b) => {
+        const lhs = a.reserveOut * (10_000n - a.pool.effFeeBps) * b.reserveIn
+        const rhs = b.reserveOut * (10_000n - b.pool.effFeeBps) * a.reserveIn
+        return lhs === rhs ? 0 : lhs > rhs ? -1 : 1
+      })
+      const byDepth = [...list].sort((a, b) =>
+        a.reserveOut === b.reserveOut ? 0 : a.reserveOut > b.reserveOut ? -1 : 1)
+      const pick = new Set<HopCandidate>()
+      for (let i = 0; i < MAX_PARALLEL_EDGES_PER_PAIR; i++) {
+        if (byRate[i]) pick.add(byRate[i])
+        if (byDepth[i]) pick.add(byDepth[i])
+      }
+      dropped += list.length - pick.size
+      kept.push(...pick)
+    }
+    graph.set(fromSym, kept)
+  }
+  scanTelemetry.graphEdgesDropped = dropped
   return graph
 }
 
@@ -2390,6 +2455,9 @@ const scanTelemetry = {
   fastLaneMs: 0,
   fastLaneAttempts: 0,
   dirtyRouteCandidates: 0,
+  // Parallel edges discarded by the per-pair cap in buildGraph. Overwritten on
+  // every build, so it reflects the current graph, not a running total.
+  graphEdgesDropped: 0,
   webSocketEnabled: WEBSOCKET_SCANNING,
   webSocketConnected: false,
   webSocketLastHeadAt: '',
