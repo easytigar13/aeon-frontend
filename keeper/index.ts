@@ -215,8 +215,14 @@ const GAS_REFILL_RETRY_MS = parseInt(process.env.GAS_REFILL_RETRY_MS ?? '30000')
 // rarely clear it in practice. Hard-capped at 10 regardless of the env override.
 const BASE_TOKEN_OVERRIDE = (process.env.BASE_TOKEN ?? '').trim() as keyof typeof TOKENS | ''
 const MAX_HOPS = Math.max(2, Math.min(parseInt(process.env.MAX_HOPS ?? '12'), 16))
-const SETTLEMENT_TOKENS = ['AEON', 'USDG', 'WETH'] as const
-const SETTLEMENT_PRIORITY: Record<string, number> = { AEON: 0, USDG: 1, WETH: 2 }
+// CASHCAT added 2026-08-01: the wallet already carries a CASHCAT balance that was
+// unusable as trading capital because a cycle can only start and end in a
+// settlement token. It is also one of the most widely paired assets in the graph
+// (vAMM/CL/DLMM against AEON plus uniV2/V3/V4 against WETH and USDG), so allowing
+// cycles to anchor on it opens routes that previously had no legal entry point.
+// Ranked last so AEON/USDG/WETH still win on equal net profit.
+const SETTLEMENT_TOKENS = ['AEON', 'USDG', 'WETH', 'CASHCAT'] as const
+const SETTLEMENT_PRIORITY: Record<string, number> = { AEON: 0, USDG: 1, WETH: 2, CASHCAT: 3 }
 
 if (!PK || PK.length < 66) {
   console.error('Set KEEPER_PRIVATE_KEY in keeper/.env (copy keeper/.env.example first)')
@@ -1432,6 +1438,19 @@ const configuredGasSafetyPct = BigInt(process.env.GAS_SAFETY_MULT_PCT ?? '100')
 const GAS_SAFETY_MULT_PCT = configuredGasSafetyPct < 100n
   ? 100n
   : configuredGasSafetyPct > 200n ? 200n : configuredGasSafetyPct
+// Every executed cycle must clear its gas cost AND keep a real margin on top.
+// The old floor was gasFloor plus ONE raw token unit -- a single wei above break
+// even, which is indistinguishable from zero and leaves nothing for any adverse
+// move between quote and inclusion. This adds a minimum win of MIN_WIN_BPS basis
+// points of the input (default 1 bp = 0.01%). It is enforced everywhere the floor
+// is used, including the on-chain minProfit passed to AeonArbKeeper, so the
+// contract itself reverts unless the margin is actually realised.
+const MIN_WIN_BPS = BigInt(process.env.MIN_WIN_BPS ?? '1')
+function winMargin(amountIn: bigint): bigint {
+  const margin = (amountIn * MIN_WIN_BPS) / 10_000n
+  return margin > 0n ? margin : 1n
+}
+
 const APPROVE_GAS_FALLBACK = 60_000n
 const EXEC_ARB_BASE_GAS = 100_000n
 const EXEC_ARB_GAS_PER_HOP = 70_000n
@@ -2857,7 +2876,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     // Atomic Fast-Path: amountOutMin is set to (amountIn + gasFloor + 1)
     // Both NativeArbExecutor and UniversalRouter enforce on-chain that
     // amountOut >= amountOutMin. If the trade fails to clear gas, it reverts atomically.
-    requiredProfit = gasFloor + 1n
+    requiredProfit = gasFloor + winMargin(amountIn)
     amountOutMin = amountIn + requiredProfit
 
     console.log(useNativeCycle ? '   → atomic simulate ETH→WETH→route→WETH→ETH...' : '   → atomic simulate swapExactTokensForTokens...')
@@ -2988,8 +3007,8 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
 
   // Strictly profitable after the buffered gas estimate, with no additional
   // percentage or dollar floor: one raw unit of net profit is enough.
-  let requiredProfit = gasFloor + 1n
-  console.log(`   Required profit (buffered gas + 1 raw unit): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
+  let requiredProfit = gasFloor + winMargin(amountIn)
+  console.log(`   Required profit (buffered gas + 0.01% win margin): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     outcomeCounters.belowGas++
@@ -3041,7 +3060,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
 
     // Atomic Fast-Path: requiredProfit is enforced on-chain by AeonArbKeeper.sol.
     // Reverts atomically if amountOut < amountIn + requiredProfit.
-    requiredProfit = gasFloor + 1n
+    requiredProfit = gasFloor + winMargin(amountIn)
 
     console.log('   → atomic simulate executeArb...')
     failureStage = 'simulation'
@@ -3482,7 +3501,7 @@ async function executeAggregatorArb(opp: AggOpp, graph: Map<string, HopCandidate
   }
   console.log(`   Est. gas cost (2 tx pairs, incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenBase.decimals)} ${tokenBase.symbol}`)
 
-  const requiredProfit = gasFloor + 1n
+  const requiredProfit = gasFloor + winMargin(amountIn)
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     return 'skipped'
@@ -3798,7 +3817,7 @@ async function executeCashcatV3Arb(opp: CashcatV3Opp, graph: Map<string, HopCand
   }
   console.log(`   Est. gas cost (2 tx pairs, incl. 1.3x buffer): ~${formatUnits(gasFloor, weth.decimals)} WETH`)
 
-  const requiredProfit = gasFloor + 1n
+  const requiredProfit = gasFloor + winMargin(amountIn)
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     return 'skipped'
@@ -4111,7 +4130,7 @@ async function executeExternalArb(opp: ExternalArbOpp, graph: Map<string, HopCan
   }
   console.log(`   Est. gas cost (2 tx pairs, incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenBase.decimals)} ${tokenBase.symbol}`)
 
-  const requiredProfit = gasFloor + 1n
+  const requiredProfit = gasFloor + winMargin(amountIn)
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     return 'skipped'
