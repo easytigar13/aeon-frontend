@@ -48,3 +48,7 @@ tsconfig.tsbuildinfo
 !keeper/.env.example
 !keeper2/.env.example
 !epoch-keeper/.env.example
+
+# Local agentmemory hook wiring (machine-specific absolute paths)
+.claude/settings.json
+**/.claude/settings.json
