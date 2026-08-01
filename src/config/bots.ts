@@ -24,6 +24,7 @@ export interface BotConfig {
 
 export const BOTS: BotConfig[] = [
   { slug: 'mirajane', botId: undefined, dir: 'keeper',  name: 'Mirajane', subtitle: 'Bot #1 — broad-scope arb + cross-venue' },
+  { slug: 'aeon', botId: 'aeon', dir: 'Erza Scarlet', name: 'ERZA', subtitle: 'Bot #2 — cross-venue, non-atomic execution' },
 ]
 
 export const DEFAULT_BOT = BOTS[0]
