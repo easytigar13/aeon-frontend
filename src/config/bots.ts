@@ -6,13 +6,24 @@
 // default API behavior are byte-identical to before this registry existed --
 // any already-configured deployment is unaffected.
 //
-// Bot #2 ("ERZA", slug 'aeon') was pulled 2026-07-24 -- the placeholder
-// keeper2/"Erza Scarlet" instance turned out to share Mirajane's wallet
-// (copy-paste artifact from scaffolding), so it was never really
-// independent. The operator is replacing it with their own bot under the
-// same slug/name; re-add an entry here (dir + botId 'aeon') once that bot
-// is writing to aeon:bot:status:aeon / aeon:bot:trades:aeon or a local
-// status.json/trades.log.
+// Bot #2 ("ERZA", slug 'aeon') is gone for good as of 2026-08-01. Two
+// separate reasons, both fatal:
+//
+//   1. It shared Mirajane's wallet (copy-paste artifact from scaffolding),
+//      so it was never an independent bot -- its "profit" was just spending
+//      Mirajane's capital.
+//   2. Its non-atomic cross-venue path (ENABLE_CROSS_VENUE=true,
+//      ATOMIC_ONLY=false) executed leg 1 on-chain, reverted on leg 2, and
+//      logged the whole attempt as status:'failed', profit:'0' -- with no
+//      record that money had already left the wallet. 37 logged "failures"
+//      were really 15 completed one-way buys totalling 50.15 USDG +
+//      0.0235 WETH, leaving 13,710 VEX / 4,789 FRONG / 644 PONS /
+//      697 CASHCAT stranded and never sold. See erza-postmortem/.
+//
+// Do NOT re-add a non-atomic bot here without fixing (2) first: a two-tx
+// arb must record leg 1 settling as an open position, not as a no-op
+// failure. Mirajane is safe only because ENABLE_CROSS_VENUE=false makes
+// every trade a single atomic tx that cannot strand inventory.
 
 export interface BotConfig {
   slug: string        // ?bot= query param value; '' (default/omitted) selects bot #1
@@ -24,7 +35,6 @@ export interface BotConfig {
 
 export const BOTS: BotConfig[] = [
   { slug: 'mirajane', botId: undefined, dir: 'keeper',  name: 'Mirajane', subtitle: 'Bot #1 — broad-scope arb + cross-venue' },
-  { slug: 'aeon', botId: 'aeon', dir: 'Erza Scarlet', name: 'ERZA', subtitle: 'Bot #2 — cross-venue, non-atomic execution' },
 ]
 
 export const DEFAULT_BOT = BOTS[0]
