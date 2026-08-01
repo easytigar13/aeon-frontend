@@ -138,11 +138,6 @@ if (!['mirajane', 'aeon-only', 'general'].includes(configuredRole)) {
 }
 const KEEPER_ROLE = configuredRole as KeeperRole
 const BOT_ID = (process.env.BOT_ID ?? (KEEPER_ROLE === 'aeon-only' ? 'aeon' : '')).trim() || undefined
-// Declared here (rather than next to loadMirajanePools below) because the
-// static ARB_POOLS seed blocks further down have to know whether they are
-// about to be thrown away -- loadMirajanePools() splices ARB_POOLS to zero
-// before repopulating it from the manifest. See the guards on those blocks.
-const MIRAJANE_MODE = KEEPER_ROLE === 'mirajane'
 
 // Cross-venue (OpenOcean / 1inch) scan runs far less often than the internal
 // pool scan -- it costs real API calls (rate-limited, especially 1inch),
@@ -188,23 +183,6 @@ const WEBSOCKET_SCANNING = process.env.WEBSOCKET_SCANNING !== 'false' && /^wss:\
 const WS_FALLBACK_POLL_MS = Math.max(500, parseInt(process.env.WS_FALLBACK_POLL_MS ?? '3000'))
 const WS_RECONNECT_BASE_MS = Math.max(250, parseInt(process.env.WS_RECONNECT_BASE_MS ?? '1000'))
 const WS_RECONNECT_MAX_MS = Math.max(WS_RECONNECT_BASE_MS, parseInt(process.env.WS_RECONNECT_MAX_MS ?? '30000'))
-// WSS_URL/WS_URL/PROVIDER_WSS point at Robinhood Chain's raw sequencer
-// broadcast feed -- confirmed by direct probe to be a proprietary framing
-// ({sequenceNumber, message:{message:{header,l2Msg}}}), the same shape as
-// an Arbitrum-Orbit sequencer feed relay, NOT a standard eth_subscribe
-// endpoint (it never replies to one -- that's why WS_RPC_URL/WEBSOCKET_SCANNING
-// above can't just point here). We do not decode tx content out of it --
-// that needs Nitro's L2 message format and would be untrusted input feeding
-// a bot that signs real transactions. We only use the ARRIVAL of a frame as
-// a low-latency "the sequencer just processed something, recheck now" wake
-// signal: a raw capture showed dozens of frames per block, so waking
-// (throttled) on frame arrival instead of waiting out a full INTERVAL_MS
-// poll gap meaningfully cuts worst-case detection latency. See
-// startSequencerFeedWakeup() below. Degrades to plain HTTP polling on any
-// disconnect -- never blocks the main loop.
-const SEQUENCER_FEED_URL = (process.env.WSS_URL || process.env.WS_URL || process.env.PROVIDER_WSS || '').trim()
-const SEQUENCER_FEED_ENABLED = process.env.SEQUENCER_FEED_WAKEUP !== 'false' && /^wss?:\/\//i.test(SEQUENCER_FEED_URL)
-const SEQUENCER_FEED_WAKE_MS = Math.max(100, parseInt(process.env.SEQUENCER_FEED_WAKE_MS ?? '300'))
 
 // Native ETH isn't one of the pool tokens (everything trades WETH), but
 // it's economically fungible with WETH via wrap/unwrap -- whatever's spare
@@ -315,14 +293,7 @@ const ARB_POOLS: PoolConfig[] = POOLS
 // invisible. Verified directly against the PoolManager's Initialize event log
 // (currency0/currency1/fee/tickSpacing all confirmed on-chain, not guessed) before
 // adding. The WETH/FRONG 2500 pool is already covered by normal discovery.
-//
-// GUARDED 2026-07-31: in MIRAJANE_MODE this push was silently discarded --
-// loadMirajanePools() splices ARB_POOLS to zero further down, so these rows
-// never survived to the graph. Nothing was actually lost, because the matching
-// uniswapV4Refs seed below is a SEPARATE Map that is never spliced, and dynamic
-// V4 discovery re-finds these pools anyway. Kept (not deleted) because the rows
-// are still correct and still load for the non-mirajane roles.
-if (!MIRAJANE_MODE) ARB_POOLS.push(
+ARB_POOLS.push(
   { name: 'UniV4 USDG/FRONG 69130', address: UNISWAP_V4.poolManager, token0: 'USDG', token1: 'FRONG',
     feeBps: (69130n + 99n) / 100n, isUniV2: false, kind: 'uniV4',
     v4PoolId: '0xc2ca3fd5671c77f3f36a4ab72f821de8ab99358e3d0beb24ebca7016ecf72aaf', v4Fee: 69130, v4TickSpacing: 1383, v4Hooks: '0x0000000000000000000000000000000000000000', v4Native: false },
@@ -355,15 +326,7 @@ const UNISWAP_UNSUPPORTED_TOKENS = new Set<keyof typeof TOKENS>(['ROBINFUN'])
 // Seed explicitly verified V2-compatible pools, including factories outside
 // the primary discovery factory. Dynamic discovery below de-duplicates these
 // by address when it encounters the same pair.
-//
-// Skipped in MIRAJANE_MODE for the same reason as the V4 block above: these
-// rows were being spliced away by loadMirajanePools() before ever reaching the
-// graph. This makes that discard explicit instead of silent, and avoids doing
-// the work at all. Consequence to be aware of: adding a pool to UNISWAP_POOLS
-// in src/config/contracts.ts does NOT reach Mirajane -- the bot's external set
-// comes from mirajane-pools.json plus dynamic discovery. contracts.ts still
-// drives the website.
-if (!MIRAJANE_MODE) for (const p of UNISWAP_POOLS) {
+for (const p of UNISWAP_POOLS) {
   const token0 = p.token0 as keyof typeof TOKENS
   const token1 = p.token1 as keyof typeof TOKENS
   if (!(token0 in TOKENS) || !(token1 in TOKENS)) continue
@@ -437,6 +400,7 @@ const uniswapV4Refs = new Map<string, UniswapV4PoolRef>()
 // is what makes it stupidly fast (tiny fixed graph, zero remote latency) while
 // still arbing AEON/CASHCAT/etc across every venue. Cycles still only ever
 // settle in AEON/ETH/USDG (SETTLEMENT_TOKENS), unchanged.
+const MIRAJANE_MODE = KEEPER_ROLE === 'mirajane'
 function loadMirajanePools() {
   const path = fileURLToPath(new URL('mirajane-pools.json', import.meta.url))
   const { poolConfigs, v4Refs } = JSON.parse(fs.readFileSync(path, 'utf-8'))
@@ -485,7 +449,7 @@ async function validateMirajaneV3Pools(): Promise<void> {
       { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token0' as const },
       { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token1' as const },
     ]
-  }), { background: true })
+  }))
   const canonicalCalls: any[] = []
   const resolved: { pool: PoolConfig; address: `0x${string}`; actualFactory: `0x${string}`; actualToken0: `0x${string}`; actualToken1: `0x${string}`; actualFee: number }[] = []
   for (let i = 0; i < pools.length; i++) {
@@ -504,7 +468,7 @@ async function validateMirajaneV3Pools(): Promise<void> {
       functionName: 'getPool' as const, args: [actualToken0, actualToken1, actualFee] as const,
     })
   }
-  const canonicalResults = await chunkedMulticall(canonicalCalls, { background: true })
+  const canonicalResults = await chunkedMulticall(canonicalCalls)
   for (let i = 0; i < resolved.length; i++) {
     const { pool, address, actualFactory, actualToken0, actualToken1, actualFee } = resolved[i]
     const expectedTokens = new Set([
@@ -730,7 +694,7 @@ async function discoverAeonVammPools(): Promise<number> {
     }
   }
   if (poolCalls.length === 0) return 0
-  const poolResults = await chunkedMulticall(poolCalls, { background: true })
+  const poolResults = await chunkedMulticall(poolCalls)
   const addresses = Array.from(new Set(poolResults
     .filter(result => result?.status === 'success')
     .map(result => getAddress(result.result as `0x${string}`))))
@@ -741,7 +705,7 @@ async function discoverAeonVammPools(): Promise<number> {
     { address, abi: PAIR_ABI, functionName: 'token0' as const },
     { address, abi: PAIR_ABI, functionName: 'token1' as const },
     { address, abi: PAIR_ABI, functionName: 'feeBps' as const },
-  ]), { background: true })
+  ]))
   const addressToSymbol = new Map<string, keyof typeof TOKENS>()
   for (const symbol of Object.keys(TOKENS) as (keyof typeof TOKENS)[]) {
     addressToSymbol.set(TOKENS[symbol].address.toLowerCase(), symbol)
@@ -913,61 +877,11 @@ function poolStateKey(pool: PoolConfig): string {
 
 // Chunk to stay well under any single RPC's multicall gas/size ceiling.
 const MULTICALL_CHUNK = 120
-// ─── RPC pressure governor ───────────────────────────────────────────────────
-// The public RPC answers HTTP 429 with "limit will reset in 60 seconds". Two
-// things were making that self-inflicted:
-//   1. Pool discovery issues hundreds of multicalls back-to-back on the SAME
-//      client the trading path uses, taking 32-58s per refresh. It was eating
-//      the rate-limit budget the hot path needs, so state went stale and every
-//      subsequent simulateContract failed with stale_quote.
-//   2. The block-poll catch retried into an active 429 every INTERVAL_MS
-//      (1.2s) against a limit that explicitly says it resets in 60s.
-// Background (discovery) work now yields to an observed 429; the trading path
-// deliberately does NOT -- when a real edge exists we still want to try.
-const RPC_RATE_LIMIT_BACKOFF_MS = Math.max(1_000, parseInt(process.env.RPC_RATE_LIMIT_BACKOFF_MS ?? '60000'))
-const DISCOVERY_CHUNK_PACING_MS = Math.max(0, parseInt(process.env.DISCOVERY_CHUNK_PACING_MS ?? '150'))
-let rpcRateLimitedUntil = 0
-
-function isRateLimitError(err: any): boolean {
-  if (err?.code === 429 || err?.cause?.code === 429 || err?.status === 429) return true
-  const text = String(err?.details ?? err?.shortMessage ?? err?.message ?? err).toLowerCase()
-  return text.includes('rate limit') || text.includes('too many requests') || text.includes('429')
-}
-
-// Returns true when the error WAS a rate limit, so callers can branch on it.
-function noteRpcError(err: any): boolean {
-  if (!isRateLimitError(err)) return false
-  const until = Date.now() + RPC_RATE_LIMIT_BACKOFF_MS
-  if (until > rpcRateLimitedUntil) {
-    rpcRateLimitedUntil = until
-    scanTelemetry.rpcRateLimitHits++
-    scanTelemetry.rpcBackoffUntil = new Date(until).toISOString()
-    console.warn(`[rpc backoff] 429 observed -- holding background RPC work for ${Math.round(RPC_RATE_LIMIT_BACKOFF_MS / 1000)}s`)
-  }
-  return true
-}
-
-function rpcBackoffRemaining(): number {
-  return Math.max(0, rpcRateLimitedUntil - Date.now())
-}
-
-async function chunkedMulticall(contracts: any[], opts: { background?: boolean } = {}): Promise<any[]> {
+async function chunkedMulticall(contracts: any[]): Promise<any[]> {
   const results: any[] = []
   for (let i = 0; i < contracts.length; i += MULTICALL_CHUNK) {
-    if (opts.background) {
-      // Wait out an active 429 rather than adding to it, and pace normal chunks
-      // so a single discovery sweep cannot monopolise the shared rate limit.
-      const wait = rpcBackoffRemaining()
-      if (wait > 0) await new Promise(r => setTimeout(r, Math.min(wait, 5_000)))
-      else if (i > 0 && DISCOVERY_CHUNK_PACING_MS > 0) await new Promise(r => setTimeout(r, DISCOVERY_CHUNK_PACING_MS))
-    }
-    try {
-      const batch = await pub.multicall({ contracts: contracts.slice(i, i + MULTICALL_CHUNK) as any, allowFailure: true })
-      results.push(...batch)
-    } catch (err) {
-      noteRpcError(err)
-      throw err
-    }
+    const batch = await pub.multicall({ contracts: contracts.slice(i, i + MULTICALL_CHUNK) as any, allowFailure: true })
+    results.push(...batch)
   }
   return results
 }
@@ -1232,21 +1146,6 @@ interface SettlementOpp {
   reliabilityPct?: number
 }
 
-// The monitored pool set covers far fewer distinct PAIRS than it does pools:
-// ~283 pools across ~39 pairs, with USDG/WETH alone holding 19 parallel pools.
-// buildGraph used to emit every one of those as an independent directed edge,
-// so a 3-hop DFS through USDG/WETH enumerated and SIZED 19 near-identical
-// variants that cannot differ in the final decision. Route enumeration grows
-// roughly with (edges-per-hub)^hops, which is why tick time tracked pool count
-// so steeply (185 pools -> 1.9s, 286 pools -> 10.3s measured). Capping parallel
-// edges per direction is the fix.
-//
-// Why the union of TWO orderings rather than one: the best pool for a small
-// trade (best marginal price) and for a large trade (deepest) are frequently
-// different pools, so ranking by either alone systematically mis-sizes. Do not
-// set this to 1 for that reason.
-const MAX_PARALLEL_EDGES_PER_PAIR = Math.max(1, parseInt(process.env.MAX_PARALLEL_EDGES_PER_PAIR ?? '4'))
-
 function buildGraph(states: PoolState[]): Map<string, HopCandidate[]> {
   const graph = new Map<string, HopCandidate[]>()
   function addEdge(fromSym: string, toSym: string, pool: PoolState, reserveIn: bigint, reserveOut: bigint) {
@@ -1260,37 +1159,6 @@ function buildGraph(states: PoolState[]): Map<string, HopCandidate[]> {
     addEdge(t0Sym, t1Sym, s, r0real, r1real)
     addEdge(t1Sym, t0Sym, s, r1real, r0real)
   }
-
-  let dropped = 0
-  for (const [fromSym, edges] of graph) {
-    const byDest = new Map<string, HopCandidate[]>()
-    for (const edge of edges) {
-      const list = byDest.get(edge.tokenOutSym)
-      if (list) list.push(edge); else byDest.set(edge.tokenOutSym, [edge])
-    }
-    const kept: HopCandidate[] = []
-    for (const list of byDest.values()) {
-      if (list.length <= MAX_PARALLEL_EDGES_PER_PAIR) { kept.push(...list); continue }
-      // Cross-multiplied comparison -- no division, so a zero reserveIn can
-      // never trap here and precision is exact.
-      const byRate = [...list].sort((a, b) => {
-        const lhs = a.reserveOut * (10_000n - a.pool.effFeeBps) * b.reserveIn
-        const rhs = b.reserveOut * (10_000n - b.pool.effFeeBps) * a.reserveIn
-        return lhs === rhs ? 0 : lhs > rhs ? -1 : 1
-      })
-      const byDepth = [...list].sort((a, b) =>
-        a.reserveOut === b.reserveOut ? 0 : a.reserveOut > b.reserveOut ? -1 : 1)
-      const pick = new Set<HopCandidate>()
-      for (let i = 0; i < MAX_PARALLEL_EDGES_PER_PAIR; i++) {
-        if (byRate[i]) pick.add(byRate[i])
-        if (byDepth[i]) pick.add(byDepth[i])
-      }
-      dropped += list.length - pick.size
-      kept.push(...pick)
-    }
-    graph.set(fromSym, kept)
-  }
-  scanTelemetry.graphEdgesDropped = dropped
   return graph
 }
 
@@ -1327,22 +1195,11 @@ function hasPositiveMarginalEdge(hops: HopCandidate[]): boolean {
 function optimalTrade(hops: HopCandidate[], maxIn: bigint): { amountIn: bigint; profit: bigint } {
   if (maxIn <= 1n) return { amountIn: 0n, profit: -1n }
   let lo = 0n, hi = maxIn
-  // Ternary search shrinks the bracket by only 2/3 per iteration, so the old
-  // `hi - lo < 2n` exit (converge to ONE WEI) never fired against an 18-decimal
-  // maxIn -- it needs ~101 iterations, so every route burned the full 100, two
-  // cycleOut() calls each. At ~12,700 sized routes per tick that was ~3.2M bigint
-  // swap evaluations and 79-86% of total tick time, which is the single largest
-  // term in quote staleness (blocks here are ~0.1s, so every second of tick is
-  // ~10 blocks of decay). Converging to 1 basis point of max size instead needs
-  // ln(1e4)/ln(1.5) ~= 23 iterations. Profit is second-order in size error near a
-  // concave optimum, so a 1bp size error costs ~1e-8 of relative profit -- and the
-  // chosen amountIn is still re-priced by quoteMixedRouteExact and gated by the
-  // on-chain amountOutMin/minProfit, so this cannot make a bad trade look good.
-  const tol = maxIn / 10_000n > 1n ? maxIn / 10_000n : 1n
-  for (let i = 0; i < 40 && hi - lo > tol; i++) {
+  for (let i = 0; i < 100; i++) {
     const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n
     const p1 = cycleOut(m1, hops) - m1, p2 = cycleOut(m2, hops) - m2
     if (p1 < p2) lo = m1; else hi = m2
+    if (hi - lo < 2n) break
   }
   const best = (lo + hi) / 2n
   return { amountIn: best, profit: cycleOut(best, hops) - best }
@@ -1503,13 +1360,10 @@ function findSettlementRoutes(
     const maxIn = poolCap < walletCap ? poolCap : walletCap
     if (maxIn <= 1n) return
     let lo = 0n, hi = maxIn
-    // Same 1bp tolerance as optimalTrade() -- see the note there. The old
-    // wei-precision exit never fired and burned all 100 iterations, here at
-    // two profitUsdgAt() calls each (which are more expensive than cycleOut).
-    const settlementTol = maxIn / 10_000n > 1n ? maxIn / 10_000n : 1n
-    for (let i = 0; i < 40 && hi - lo > settlementTol; i++) {
+    for (let i = 0; i < 100; i++) {
       const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n
       if (profitUsdgAt(m1) < profitUsdgAt(m2)) lo = m1; else hi = m2
+      if (hi - lo < 2n) break
     }
     const amountIn = (lo + hi) / 2n
     const profitUsdg = profitUsdgAt(amountIn)
@@ -2000,22 +1854,6 @@ async function ensureBaseTokenFunded(
 
 // ─── Status file (read by /api/bot/status on the website) ───────────────────
 
-// A landed transaction is not the same thing as a profitable one. `status` is
-// kept as the accounting record ('success' == it confirmed on chain), while the
-// route-history learner needs the ECONOMIC outcome, otherwise it reinforces
-// whatever route lands most often regardless of whether it made money. Shared
-// by recordArb() (live) and loadRouteHistory() (replay from disk) so a restart
-// relearns exactly the same way it learned live.
-function historicalOutcomeOf(trade: { status?: string; grossProfit?: string; gasCost?: string }): 'success' | 'failed' {
-  if (trade.status === 'failed') return 'failed'
-  const gross = parseFloat(trade.grossProfit ?? '')
-  const gas = parseFloat(trade.gasCost ?? '')
-  // Pre-instrumentation rows lack these fields; treat them as they were
-  // recorded rather than silently reclassifying them.
-  if (!Number.isFinite(gross) || !Number.isFinite(gas)) return 'success'
-  return gross - gas > 0 ? 'success' : 'failed'
-}
-
 interface ExecutedArb {
   time: string
   pair: string
@@ -2173,7 +2011,7 @@ function venueSequenceFromDescription(description: string): string {
 }
 
 function venueSequenceFromHops(hops: HopCandidate[]): string {
-  return hops.map(hop => hop.pool.pool.kind).join('>')
+  return hops.map(hop => hop.pool.kind).join('>')
 }
 
 function venueSequenceAllowedForRole(sequence: string): boolean {
@@ -2238,10 +2076,7 @@ function loadRouteHistory() {
         recordHistoricalOutcome(
           key,
           venueSequence,
-          // Same economics-derived outcome as the live path -- see
-          // historicalOutcomeOf(). Replaying `trade.status` here would rebuild
-          // the old landed-count store on every restart and undo the fix.
-          historicalOutcomeOf(trade),
+          trade.status,
           String(trade.time ?? ''),
         )
       } catch { /* ignore a partially written or legacy log line */ }
@@ -2254,13 +2089,7 @@ loadRouteHistory()
 function historicalStats(hops: HopCandidate[]): RouteHistoryStats {
   const pathKey = tokenPathKeyFromHops(hops)
   const venueStats = venueRouteHistory.get(`${pathKey}|${venueSequenceFromHops(hops)}`)
-  // NO token-path fallback. The same token path across a DIFFERENT venue mix is a
-  // different trade with different fees and different depth. The fallback let a
-  // never-landed uniV2>uniV3>uniV2>uniV3 route inherit successes=2 from a
-  // uniV3>uniV3>uniV2>uniV4 route that genuinely worked, which promoted it into
-  // exactRankedShortlist's single-candidate early return: 131 of 249 attempts had
-  // the ENTIRE tick shortlist be that one route, leaving 11 of 12 quote slots idle.
-  return venueStats ?? { successes: 0, failures: 0, lastSuccessAt: 0 }
+  return venueStats ?? routeHistory.get(pathKey) ?? { successes: 0, failures: 0, lastSuccessAt: 0 }
 }
 
 function historicalExecutionFactor(hops: HopCandidate[]): number {
@@ -2313,7 +2142,7 @@ function findHistoricalArbs(
       const tokenOut = template.tokens[index + 1]
       const kind = template.kinds[index]
       const matchingEdges = (graph.get(tokenIn) ?? []).filter(edge =>
-        edge.tokenOutSym === tokenOut && edge.pool.pool.kind === kind,
+        edge.tokenOutSym === tokenOut && edge.pool.kind === kind,
       )
       const next: HopCandidate[][] = []
       for (const partial of variants) {
@@ -2498,20 +2327,7 @@ function recordArb(arb: ExecutedArb) {
     const pathKey = tokenPathKey(arb.pair)
     const tokens = pathKey.split('>').filter(Boolean)
     if (tokens.length >= 3 && tokens[0] === tokens[tokens.length - 1]) {
-      // Learn from ECONOMICS, not from "the transaction landed". arb.status is
-      // the accounting truth (the tx confirmed) and stays as-is in trades.log,
-      // but feeding it to the history layer taught the bot that a confirmed
-      // net-negative fill was a win. Measured over 180 landed trades: 114
-      // net-LOSING 3-hop landings incremented successes against only 10
-      // net-winning 4-hop ones -- an 11.4:1 reinforcement of the depth that
-      // loses money over the one earning ~100% of lifetime profit.
-      //
-      // Deliberately derived from grossProfit - gasCost, NOT from arb.profit:
-      // until tonight profit was clamped to "0" on every loser, so a
-      // profit-based rule would reclassify all 180 historical successes as
-      // failures and wipe the store. grossProfit/gasCost are present on 100%
-      // of landed rows, so this reclassifies correctly on replay too.
-      recordHistoricalOutcome(pathKey, venueSequenceFromDescription(arb.venues ?? ''), historicalOutcomeOf(arb), arb.time)
+      recordHistoricalOutcome(pathKey, venueSequenceFromDescription(arb.venues ?? ''), arb.status, arb.time)
     }
   }
   recentArbs = [arb, ...recentArbs].slice(0, 30)
@@ -2543,14 +2359,6 @@ const scanTelemetry = {
   fastLaneMs: 0,
   fastLaneAttempts: 0,
   dirtyRouteCandidates: 0,
-  // Parallel edges discarded by the per-pair cap in buildGraph. Overwritten on
-  // every build, so it reflects the current graph, not a running total.
-  graphEdgesDropped: 0,
-  // HTTP 429s observed from the RPC, and when the current background-work
-  // backoff expires. If rpcRateLimitHits climbs steadily the endpoint is the
-  // bottleneck, not the bot -- see the note above chunkedMulticall.
-  rpcRateLimitHits: 0,
-  rpcBackoffUntil: '',
   webSocketEnabled: WEBSOCKET_SCANNING,
   webSocketConnected: false,
   webSocketLastHeadAt: '',
@@ -2559,11 +2367,6 @@ const scanTelemetry = {
   webSocketReconnectAttempts: 0,
   webSocketRecoveries: 0,
   webSocketNextReconnectAt: '',
-  sequencerFeedEnabled: SEQUENCER_FEED_ENABLED,
-  sequencerFeedConnected: false,
-  sequencerFeedWakes: 0,
-  sequencerFeedErrors: 0,
-  sequencerFeedLastMessageAt: '',
   historicalClosedSuccesses: [...routeHistory.values()].reduce((sum, stats) => sum + stats.successes, 0),
   provenVenueRoutes: [...venueRouteHistory.values()].filter(stats => stats.successes > 0).length,
   approximateCandidates: 0,
@@ -3003,12 +2806,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
   }
   console.log(`   Est. gas cost (incl. 1.1x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
 
-  // Was `= 0n`, which made the guard below unreachable: profitRaw > 0n is already
-  // guaranteed by the fresh-quote check above, so every candidate with >=1 raw unit
-  // of modelled profit went straight to simulateContract against
-  // amountOutMin = amountIn + gasFloor + 1 and reverted. belowGas stayed at exactly
-  // 0 across 81,798 detections, proving the branch never fired once.
-  let requiredProfit = gasFloor + 1n
+  let requiredProfit = 0n
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     outcomeCounters.belowGas++
@@ -3101,15 +2899,9 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
       const grossAdjustedAfter = useNativeCycle ? balanceAfter + totalGasWei : balanceAfter
       const realizedGross = grossAdjustedAfter > balanceBefore ? grossAdjustedAfter - balanceBefore : 0n
       const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
-      // NEVER clamp this to zero. A fill whose realized gross came in below its
-      // own gas cost is a LOSS and has to be reportable as one. The old
-      // `: 0n` recorded every net-negative fill as profit "0" / status "success",
-      // which made a losing bot indistinguishable from a break-even one in
-      // trades.log, status.json and cumulativeProfit -- 110 of the first 158
-      // "successes" were actually net-negative and none of them were visible.
-      const realizedNet = realizedGross - actualGasInToken
+      const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
       const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
-      console.log(`   ${realizedNet < 0n ? '⚠ ARB COMPLETED AT A NET LOSS' : '✅ ARB COMPLETE'} (CL/DLMM route) — gross ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol}, net ${formatUnits(realizedNet, tokenIn.decimals)} ${tokenIn.symbol} — ${hSwap}`)
+      console.log(`   ✅ ARB COMPLETE (CL/DLMM route) — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hSwap}`)
       totalExecuted++
       outcomeCounters.executed++
       consecutiveFailures = 0
@@ -3274,10 +3066,9 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
       const realizedGross = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n
       const totalGasWei = approvalGasWei + BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)
       const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
-      // See the CL/DLMM path above: no zero-clamp, losses must stay visible.
-      const realizedNet = realizedGross - actualGasInToken
+      const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
       const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
-      console.log(`   ${realizedNet < 0n ? '⚠ ARB COMPLETED AT A NET LOSS' : '✅ ARB COMPLETE'} — gross ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol}, net ${formatUnits(realizedNet, tokenIn.decimals)} ${tokenIn.symbol} — ${hExec}`)
+      console.log(`   ✅ ARB COMPLETE — profit ~${formatUnits(profitRaw, tokenIn.decimals)} ${tokenIn.symbol} — ${hExec}`)
       totalExecuted++
       outcomeCounters.executed++
       consecutiveFailures = 0
@@ -3966,12 +3757,11 @@ async function scanCashcatV3Arb(states: PoolState[], searchWethBal: bigint): Pro
       if (maxIn <= 1n) return
 
       let lo = 0n, hi = maxIn
-      // Same 1bp tolerance as optimalTrade() -- see the note there.
-      const v3Tol = maxIn / 10_000n > 1n ? maxIn / 10_000n : 1n
-      for (let i = 0; i < 40 && hi - lo > v3Tol; i++) {
+      for (let i = 0; i < 100; i++) {
         const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n
         const p1 = cycleOutWeth(m1) - m1, p2 = cycleOutWeth(m2) - m2
         if (p1 < p2) lo = m1; else hi = m2
+        if (hi - lo < 2n) break
       }
       const amountIn = (lo + hi) / 2n
       const profitRaw = cycleOutWeth(amountIn) - amountIn
@@ -4663,26 +4453,7 @@ async function exactRankedShortlist(
     add(eligible.find(candidate => candidate.opp.tokenIn.symbol === symbol))
   }
   if (KEEPER_ROLE === 'mirajane') {
-    // Pure-external routes (no AEON-owned pool in any hop) are the ONLY class
-    // with a positive lifetime net, and it is not close. Measured over 180
-    // landed trades, by class: 3-hop touching AEON n=149 median size $1.36,
-    // gas 131bps, net -$0.0801; 4-hop touching AEON n=15, gas 169bps, net
-    // -$0.0002; 3-hop pure-external n=10 median $8.04, net -$0.0402; 4-hop
-    // pure-external n=3 MEDIAN SIZE $98.99, gas 37bps, net +$0.5527.
-    //
-    // The cause is depth, not hop count: AEON's deepest pool is ~$3.9k against
-    // ~$161M for the deepest external, so any cycle touching an AEON pool is
-    // size-capped near $1.30 and flat per-tx gas becomes 131-169bps of notional,
-    // which no real edge on this chain clears. Granting exactly ONE slot here
-    // meant ~11 of 12 exact quotes per tick were spent on route shapes that
-    // cannot clear gas at their maximum achievable size. This applies at every
-    // depth -- 2, 3 and 4-hop pure-external routes all become eligible.
-    const PURE_EXTERNAL_EXACT_SLOTS = Math.max(1, parseInt(process.env.PURE_EXTERNAL_EXACT_SLOTS ?? '4'))
-    let pureExternalTaken = 0
-    for (const candidate of eligible) {
-      if (pureExternalTaken >= PURE_EXTERNAL_EXACT_SLOTS) break
-      if (candidate.opp.hops.every(hop => !isAeonPoolKind(hop.pool.pool.kind)) && add(candidate)) pureExternalTaken++
-    }
+    add(eligible.find(candidate => candidate.opp.hops.every(hop => !isAeonPoolKind(hop.pool.pool.kind))))
     add(eligible.find(candidate => {
       const internal = candidate.opp.hops.some(hop => isAeonPoolKind(hop.pool.pool.kind))
       const external = candidate.opp.hops.some(hop => !isAeonPoolKind(hop.pool.pool.kind))
@@ -5171,80 +4942,6 @@ function signalWebSocketWaiter() {
   resolve?.()
 }
 
-// Generic wake-up used by the main loop's INTERVAL_MS idle sleep (the
-// branch taken when WEBSOCKET_SCANNING is off, which is the case whenever
-// WS_RPC_URL isn't a working eth_subscribe endpoint -- see nextObservedBlock).
-// Independent of the wsPub/eth_subscribe machinery above so it works even
-// when that path is entirely disabled, as it is today.
-let mainLoopWakeResolvers: Array<() => void> = []
-function signalMainLoopWake() {
-  if (mainLoopWakeResolvers.length === 0) return
-  const resolvers = mainLoopWakeResolvers
-  mainLoopWakeResolvers = []
-  for (const resolve of resolvers) resolve()
-}
-function sleepOrWake(ms: number): Promise<void> {
-  return new Promise(resolve => {
-    let done = false
-    const finish = () => {
-      if (done) return
-      done = true
-      clearTimeout(timer)
-      mainLoopWakeResolvers = mainLoopWakeResolvers.filter(r => r !== finish)
-      resolve()
-    }
-    const timer = setTimeout(finish, ms)
-    mainLoopWakeResolvers.push(finish)
-  })
-}
-
-let sequencerFeedSocket: WebSocket | null = null
-let sequencerFeedReconnectTimer: ReturnType<typeof setTimeout> | null = null
-let lastSequencerFeedWake = 0
-
-function scheduleSequencerFeedReconnect() {
-  if (sequencerFeedReconnectTimer) return
-  sequencerFeedReconnectTimer = setTimeout(() => {
-    sequencerFeedReconnectTimer = null
-    startSequencerFeedWakeup()
-  }, 3000)
-}
-
-function startSequencerFeedWakeup() {
-  if (!SEQUENCER_FEED_ENABLED) return
-  try {
-    const sock = new WebSocket(SEQUENCER_FEED_URL)
-    sequencerFeedSocket = sock
-    sock.addEventListener('open', () => {
-      scanTelemetry.sequencerFeedConnected = true
-    })
-    sock.addEventListener('message', () => {
-      scanTelemetry.sequencerFeedLastMessageAt = new Date().toISOString()
-      const now = Date.now()
-      if (now - lastSequencerFeedWake < SEQUENCER_FEED_WAKE_MS) return
-      lastSequencerFeedWake = now
-      scanTelemetry.sequencerFeedWakes++
-      signalMainLoopWake()
-    })
-    sock.addEventListener('close', () => {
-      scanTelemetry.sequencerFeedConnected = false
-      sequencerFeedSocket = null
-      scheduleSequencerFeedReconnect()
-    })
-    sock.addEventListener('error', () => {
-      scanTelemetry.sequencerFeedConnected = false
-      scanTelemetry.sequencerFeedErrors++
-      if (Date.now() - lastEventScanWarning > 30_000) {
-        lastEventScanWarning = Date.now()
-        console.warn('[sequencer feed] connection error -- HTTP block polling remains active')
-      }
-    })
-  } catch {
-    scanTelemetry.sequencerFeedErrors++
-    scheduleSequencerFeedReconnect()
-  }
-}
-
 function cancelScheduledWebSocketReconnect() {
   if (webSocketReconnectTimer) clearTimeout(webSocketReconnectTimer)
   webSocketReconnectTimer = null
@@ -5446,7 +5143,6 @@ async function main() {
   console.log(`  Block-aware scanning: enabled (at most one full scan per observed block)`)
   console.log(`  Event-driven pool refresh: ${EVENT_DRIVEN_SCANNING ? `enabled (${FULL_STATE_REFRESH_MS}ms safety refresh, ${GAS_ONLY_RECHECK_MS}ms gas recheck)` : 'disabled'}`)
   console.log(`  WebSocket block wake-up: ${WEBSOCKET_SCANNING ? `enabled (${WS_FALLBACK_POLL_MS}ms HTTP fallback)` : 'disabled (HTTP polling)'}`)
-  console.log(`  Sequencer feed wake-up: ${SEQUENCER_FEED_ENABLED ? `enabled (${SEQUENCER_FEED_WAKE_MS}ms throttle)` : 'disabled'}`)
   console.log(`  Exact quote wave: up to ${EXACT_QUOTE_CANDIDATES_PER_TICK} candidates / ${EXACT_QUOTE_CONCURRENCY} concurrent`)
   console.log(`  Historical learning: ${scanTelemetry.historicalClosedSuccesses} closed-cycle successes across ${scanTelemetry.provenVenueRoutes} proven venue routes`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
@@ -5458,7 +5154,6 @@ async function main() {
   console.log()
 
   startWebSocketHeadFeed()
-  startSequencerFeedWakeup()
 
   let lastScannedBlock: bigint | null = null
   let lastFullStateRefresh = 0
@@ -5468,7 +5163,7 @@ async function main() {
       resetEpochStatsIfNeeded()
       const blockNumber = await nextObservedBlock()
       if (lastScannedBlock !== null && blockNumber === lastScannedBlock) {
-        if (!WEBSOCKET_SCANNING) await sleepOrWake(INTERVAL_MS)
+        if (!WEBSOCKET_SCANNING) await new Promise(r => setTimeout(r, INTERVAL_MS))
         continue
       }
       const previousBlock = lastScannedBlock
@@ -5507,18 +5202,8 @@ async function main() {
       // block arrived while it was running, rescan immediately; otherwise
       // the same-block branch above applies the configured poll interval.
     } catch (e) {
-      // A 429 says "limit will reset in 60 seconds"; retrying it every
-      // INTERVAL_MS (1.2s) just spends the budget the trading path needs and
-      // keeps the bot blind. Back off for real, but cap the sleep so a stale
-      // backoff window can never strand the loop.
-      if (noteRpcError(e)) {
-        const wait = Math.min(rpcBackoffRemaining(), RPC_RATE_LIMIT_BACKOFF_MS)
-        console.error(`[block poll rate-limited] backing off ${Math.round(wait / 1000)}s`)
-        await sleepOrWake(Math.max(INTERVAL_MS, wait))
-      } else {
-        console.error('[block poll error]', e)
-        await sleepOrWake(INTERVAL_MS)
-      }
+      console.error('[block poll error]', e)
+      await new Promise(r => setTimeout(r, INTERVAL_MS))
     }
   }
 }
