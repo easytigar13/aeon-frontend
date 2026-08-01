@@ -2254,7 +2254,13 @@ loadRouteHistory()
 function historicalStats(hops: HopCandidate[]): RouteHistoryStats {
   const pathKey = tokenPathKeyFromHops(hops)
   const venueStats = venueRouteHistory.get(`${pathKey}|${venueSequenceFromHops(hops)}`)
-  return venueStats ?? routeHistory.get(pathKey) ?? { successes: 0, failures: 0, lastSuccessAt: 0 }
+  // NO token-path fallback. The same token path across a DIFFERENT venue mix is a
+  // different trade with different fees and different depth. The fallback let a
+  // never-landed uniV2>uniV3>uniV2>uniV3 route inherit successes=2 from a
+  // uniV3>uniV3>uniV2>uniV4 route that genuinely worked, which promoted it into
+  // exactRankedShortlist's single-candidate early return: 131 of 249 attempts had
+  // the ENTIRE tick shortlist be that one route, leaving 11 of 12 quote slots idle.
+  return venueStats ?? { successes: 0, failures: 0, lastSuccessAt: 0 }
 }
 
 function historicalExecutionFactor(hops: HopCandidate[]): number {
@@ -2997,7 +3003,12 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
   }
   console.log(`   Est. gas cost (incl. 1.1x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
 
-  let requiredProfit = 0n
+  // Was `= 0n`, which made the guard below unreachable: profitRaw > 0n is already
+  // guaranteed by the fresh-quote check above, so every candidate with >=1 raw unit
+  // of modelled profit went straight to simulateContract against
+  // amountOutMin = amountIn + gasFloor + 1 and reverted. belowGas stayed at exactly
+  // 0 across 81,798 detections, proving the branch never fired once.
+  let requiredProfit = gasFloor + 1n
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     outcomeCounters.belowGas++
