@@ -1442,13 +1442,26 @@ const GAS_SAFETY_MULT_PCT = configuredGasSafetyPct < 100n
 // The old floor was gasFloor plus ONE raw token unit -- a single wei above break
 // even, which is indistinguishable from zero and leaves nothing for any adverse
 // move between quote and inclusion. This adds a minimum win of MIN_WIN_BPS basis
-// points of the input (default 1 bp = 0.01%). It is enforced everywhere the floor
-// is used, including the on-chain minProfit passed to AeonArbKeeper, so the
-// contract itself reverts unless the margin is actually realised.
-const MIN_WIN_BPS = BigInt(process.env.MIN_WIN_BPS ?? '1')
+// points of the input. It is enforced everywhere the floor is used, including
+// the on-chain minProfit passed to AeonArbKeeper, so the contract itself
+// reverts unless the margin is actually realised.
+//
+// Raised from 1 bp to 5 bp (0.05%) on 2026-08-01. At 1 bp the margin was so
+// close to break-even that a cycle could clear the floor and still round to
+// nothing: on 2026-08-01, 8 of 15 executed trades logged realizedProfitUsd 0,
+// and the day's headline "+2.42 CASHCAT" was worth $0.099 total. 5 bp requires
+// the cycle to actually beat gas by a visible amount before it is worth the
+// slot. Set MIN_WIN_BPS in keeper/.env to override.
+const MIN_WIN_BPS = BigInt(process.env.MIN_WIN_BPS ?? '5')
 function winMargin(amountIn: bigint): bigint {
   const margin = (amountIn * MIN_WIN_BPS) / 10_000n
   return margin > 0n ? margin : 1n
+}
+
+// Render a bp count as a percentage for logs, so the console never claims a
+// margin the live config isn't actually enforcing.
+function formatBps(bps: bigint): string {
+  return `${(Number(bps) / 100).toFixed(2)}%`
 }
 
 const APPROVE_GAS_FALLBACK = 60_000n
@@ -3008,7 +3021,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
   // Strictly profitable after the buffered gas estimate, with no additional
   // percentage or dollar floor: one raw unit of net profit is enough.
   let requiredProfit = gasFloor + winMargin(amountIn)
-  console.log(`   Required profit (buffered gas + 0.01% win margin): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
+  console.log(`   Required profit (buffered gas + ${formatBps(MIN_WIN_BPS)} win margin): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     outcomeCounters.belowGas++
@@ -5157,6 +5170,7 @@ async function main() {
   console.log(`  AEON CL pools discovered: ${clPools}  |  AEON DLMM pools discovered: ${dlmmPools}`)
   console.log(`  Pool discovery refresh interval: ${POOL_REFRESH_INTERVAL_MS}ms`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
+  console.log(`  Execution floor: buffered gas + ${formatBps(MIN_WIN_BPS)} of input (MIN_WIN_BPS=${MIN_WIN_BPS}), enforced on-chain as minProfit`)
   console.log(`  Exact gas safety margin: ${Number(GAS_SAFETY_MULT_PCT) / 100}x`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Block-aware scanning: enabled (at most one full scan per observed block)`)
