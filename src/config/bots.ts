@@ -34,7 +34,12 @@ export interface BotConfig {
 }
 
 export const BOTS: BotConfig[] = [
-  { slug: 'mirajane', botId: undefined, dir: 'keeper',  name: 'Mirajane', subtitle: 'Bot #1 — broad-scope arb + cross-venue' },
+  // "cross-venue" here means the ROUTE spans venues inside one atomic tx (AEON
+  // CL/DLMM plus Uniswap V3/V4). It does NOT mean the non-atomic aggregator
+  // path -- that runs on ENABLE_CROSS_VENUE, which is false for Mirajane and is
+  // the exact mechanism that stranded ERZA's inventory. Keep the distinction in
+  // the copy; conflating them is what made the old subtitle wrong.
+  { slug: 'mirajane', botId: undefined, dir: 'keeper',  name: 'Mirajane', subtitle: 'Atomic cross-venue cycles — AEON pools + Uniswap V3/V4' },
 ]
 
 export const DEFAULT_BOT = BOTS[0]

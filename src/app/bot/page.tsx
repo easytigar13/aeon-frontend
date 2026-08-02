@@ -165,8 +165,11 @@ function BotPageInner() {
             </div>
             <h1 className="font-display font-bold text-3xl sm:text-4xl text-text-primary mb-2">Arb <span className="text-aeon-400">Keeper</span></h1>
             <p className="text-text-secondary max-w-3xl">
-              Scans every AEON pool for price-equalization opportunities and executes them atomically
-              through the on-chain AeonArbKeeper contract — it can never execute at a loss.
+              Scans AEON&apos;s own pools alongside external venues for cycles that start and end in the
+              same token, then executes them in a single atomic transaction through the on-chain
+              AeonArbKeeper contract. Every cycle must clear its buffered gas cost plus a 0.05% margin
+              on the input — that floor is passed on-chain as <span className="font-mono text-text-primary">minProfit</span>,
+              so the contract reverts rather than settle for less.
             </p>
           </div>
           <div className={clsx(
