@@ -1443,9 +1443,16 @@ function findSettlementRoutes(
 
 // This chain confirms in a fraction of a second, so a 30% surcharge rejected
 // many historically profitable routes after the exact pre-submit estimate.
-// Keep a small configurable buffer, but never allow less than 100% of the
-// fresh estimate: amountOutMin still enforces amountIn + estimated gas + 1.
-const configuredGasSafetyPct = BigInt(process.env.GAS_SAFETY_MULT_PCT ?? '100')
+// Configurable buffer on the estimated gas floor, clamped to [100%, 200%].
+// Default is 175%, NOT 100%: the fixed per-hop estimate (EXEC_ARB_BASE_GAS +
+// EXEC_ARB_GAS_PER_HOP*hops) systematically under-counts real gas for mixed
+// V3/CL/V4 routes -- measured 2026-08-02, a 3-hop WETH cycle burned 472969 gas
+// against a 310000 estimate (1.53x). At 100% the floor priced gas BELOW what
+// the trade actually paid, so marginal cycles cleared the floor and then netted
+// a LOSS after gas (grossProfit < real gas, logged as profit 0 / success).
+// 175% covers the observed ~1.5x under-count plus gas-price drift between quote
+// and inclusion. Override with GAS_SAFETY_MULT_PCT.
+const configuredGasSafetyPct = BigInt(process.env.GAS_SAFETY_MULT_PCT ?? '175')
 const GAS_SAFETY_MULT_PCT = configuredGasSafetyPct < 100n
   ? 100n
   : configuredGasSafetyPct > 200n ? 200n : configuredGasSafetyPct
@@ -2847,7 +2854,7 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     console.warn(`   ⚠ No live WETH price path for ${tokenIn.symbol} -- can't verify profit clears gas cost, skipping for safety`)
     return 'skipped'
   }
-  console.log(`   Est. gas cost (incl. 1.1x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
+  console.log(`   Est. gas cost (incl. ${Number(GAS_SAFETY_MULT_PCT) / 100}x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
 
   let requiredProfit = 0n
   if (profitRaw < requiredProfit) {
@@ -3027,7 +3034,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     console.warn(`   ⚠ No live WETH price path for ${tokenIn.symbol} -- can't verify profit clears gas cost, skipping for safety`)
     return 'skipped'
   }
-  console.log(`   Est. gas cost (incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
+  console.log(`   Est. gas cost (incl. ${Number(GAS_SAFETY_MULT_PCT) / 100}x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
 
   // Strictly profitable after the buffered gas estimate, with no additional
   // percentage or dollar floor: one raw unit of net profit is enough.
@@ -5194,6 +5201,7 @@ async function main() {
   console.log(`  Pool discovery refresh interval: ${POOL_REFRESH_INTERVAL_MS}ms`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
   console.log(`  Execution floor: buffered gas + ${formatBps(MIN_WIN_BPS)} of input (MIN_WIN_BPS=${MIN_WIN_BPS}), enforced on-chain as minProfit`)
+  console.log(`  Gas floor buffer: ${Number(GAS_SAFETY_MULT_PCT) / 100}x the estimated gas (GAS_SAFETY_MULT_PCT=${GAS_SAFETY_MULT_PCT})`)
   console.log(`  Exact gas safety margin: ${Number(GAS_SAFETY_MULT_PCT) / 100}x`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Block-aware scanning: enabled (at most one full scan per observed block)`)
