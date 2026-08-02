@@ -1443,16 +1443,14 @@ function findSettlementRoutes(
 
 // This chain confirms in a fraction of a second, so a 30% surcharge rejected
 // many historically profitable routes after the exact pre-submit estimate.
-// Configurable buffer on the estimated gas floor, clamped to [100%, 200%].
-// Default is 175%, NOT 100%: the fixed per-hop estimate (EXEC_ARB_BASE_GAS +
-// EXEC_ARB_GAS_PER_HOP*hops) systematically under-counts real gas for mixed
-// V3/CL/V4 routes -- measured 2026-08-02, a 3-hop WETH cycle burned 472969 gas
-// against a 310000 estimate (1.53x). At 100% the floor priced gas BELOW what
-// the trade actually paid, so marginal cycles cleared the floor and then netted
-// a LOSS after gas (grossProfit < real gas, logged as profit 0 / success).
-// 175% covers the observed ~1.5x under-count plus gas-price drift between quote
-// and inclusion. Override with GAS_SAFETY_MULT_PCT.
-const configuredGasSafetyPct = BigInt(process.env.GAS_SAFETY_MULT_PCT ?? '175')
+// Small drift cushion on the gas estimate, clamped to [100%, 200%]. This is
+// NOT the mechanism that keeps trades profitable -- EXEC_ARB_BASE_GAS/PER_HOP
+// above are now sized to real measured gas, so the floor already reflects gas
+// the trade will actually pay. This only absorbs gas-PRICE movement between
+// quoting and inclusion. Default 110%. (It was briefly 175% as a stopgap while
+// the estimate itself under-counted; with an accurate estimate that hack is no
+// longer doing the work.) Override with GAS_SAFETY_MULT_PCT.
+const configuredGasSafetyPct = BigInt(process.env.GAS_SAFETY_MULT_PCT ?? '110')
 const GAS_SAFETY_MULT_PCT = configuredGasSafetyPct < 100n
   ? 100n
   : configuredGasSafetyPct > 200n ? 200n : configuredGasSafetyPct
@@ -1483,8 +1481,17 @@ function formatBps(bps: bigint): string {
 }
 
 const APPROVE_GAS_FALLBACK = 60_000n
-const EXEC_ARB_BASE_GAS = 100_000n
-const EXEC_ARB_GAS_PER_HOP = 70_000n
+// Gas-per-cycle estimate, used to price the break-even gas floor a trade must
+// clear BEFORE any profit. The old 100k + 70k/hop figure was ~half of reality:
+// measured on-chain 2026-08-02 across 20 live fills, a 3-hop cycle burned
+// 351k-486k gas (avg 415k) and a 4-hop 437k-475k. At the old estimate the floor
+// sat below real gas, so a cycle could clear it and still net a LOSS after gas
+// -- which is why profitable-looking trades logged profit 0. These values
+// (130k base + 120k/hop -> 3-hop 490k, 4-hop 610k) cover the observed max, so
+// the floor now reflects gas the trade will actually pay and the MIN_WIN_BPS
+// margin on top is real profit into the coin, not gas the estimate missed.
+const EXEC_ARB_BASE_GAS = 130_000n
+const EXEC_ARB_GAS_PER_HOP = 120_000n
 const MAX_UINT256 = (1n << 256n) - 1n
 
 // BFS shortest path (by hop count) from fromSym to toSym through the pool
