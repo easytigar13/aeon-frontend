@@ -20,15 +20,7 @@
       "isUniV2": false,
       "kind": "vAMM"
     },
-    {
-      "name": "VIRTUAL/AEON",
-      "address": "0x67B2da1742187Aa09b427082b06ACDC5bBCA2D99",
-      "token0": "VIRTUAL",
-      "token1": "AEON",
-      "feeBps": 100,
-      "isUniV2": false,
-      "kind": "vAMM"
-    },
+
     {
       "name": "FRONG/AEON",
       "address": "0x2f8CBA007598cBb15FfABE7a826a9cC8576ed6be",
@@ -75,33 +67,7 @@
       "isUniV2": true,
       "kind": "UniV2"
     },
-    {
-      "name": "WETH/VIRTUAL",
-      "address": "0xd95e8e2Cd04c207625C6F23c974d365a5F3A91D3",
-      "token0": "WETH",
-      "token1": "VIRTUAL",
-      "feeBps": 30,
-      "isUniV2": true,
-      "kind": "UniV2"
-    },
-    {
-      "name": "USDG/VIRTUAL",
-      "address": "0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D",
-      "token0": "USDG",
-      "token1": "VIRTUAL",
-      "feeBps": 30,
-      "isUniV2": true,
-      "kind": "UniV2"
-    },
-    {
-      "name": "VEX/VIRTUAL",
-      "address": "0x817f16F5D8da83d1B089B082c0172af3923618dA",
-      "token0": "VEX",
-      "token1": "VIRTUAL",
-      "feeBps": 100,
-      "isUniV2": true,
-      "kind": "UniV2"
-    },
+
 
     {
       "name": "UniV3 CASHCAT/WETH",

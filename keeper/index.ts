@@ -242,7 +242,7 @@ const UNISWAP_FEE_BPS = 30n
 // ROBINFUN charges transfer tax when its official Uniswap pair is involved.
 // AeonArbKeeper uses standard V2 exact-input math, so those pairs cannot be
 // executed safely until the contract re-measures received amounts per hop.
-const UNISWAP_UNSUPPORTED_TOKENS = new Set<keyof typeof TOKENS>(['ROBINFUN'])
+const UNISWAP_UNSUPPORTED_TOKENS = new Set<keyof typeof TOKENS>(['ROBINFUN', 'VIRTUAL'])
 // Seed explicitly verified V2-compatible pools, including factories outside
 // the primary discovery factory. Dynamic discovery below de-duplicates these
 // by address when it encounters the same pair.
