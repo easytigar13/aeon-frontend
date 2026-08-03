@@ -9,15 +9,7 @@
       "feeBps": 100,
       "isUniV2": false,
       "kind": "vAMM"
-    },
-    {
-      "name": "SHERWOOD/AEON",
-      "address": "0xB4692A778E33fBA0B97Feaa863377C6322c83AA4",
-      "token0": "SHERWOOD",
-      "token1": "AEON",
-      "feeBps": 100,
-      "isUniV2": false,
-      "kind": "vAMM"
+
     },
     {
       "name": "USDG/AEON",
@@ -54,15 +46,7 @@
       "feeBps": 0,
       "isUniV2": false,
       "kind": "CL"
-    },
-    {
-      "name": "ROBINFUN/AEON",
-      "address": "0xeB638e1FA253E5526C2be76626dE26F02E4bdaba",
-      "token0": "ROBINFUN",
-      "token1": "AEON",
-      "feeBps": 100,
-      "isUniV2": false,
-      "kind": "vAMM"
+
     },
     {
       "name": "UniV3 WETH/AEON",
