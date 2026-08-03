@@ -1309,11 +1309,13 @@ interface BalancesResult {
 // prices rather than trusting a number picked once and forgotten.
 const GAS_RESERVE_SAFETY_MULT = 3n
 function computeMinGasReserveWei(gasPrice: bigint): bigint {
-  const worstCaseGasUnits = APPROVE_GAS_FALLBACK + EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * BigInt(MAX_HOPS)
+  const worstCaseGasUnits = APPROVE_GAS_FALLBACK + EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * 4n
   const bufferedCostWei = (worstCaseGasUnits * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
   const dynamicReserveWei = bufferedCostWei * GAS_RESERVE_SAFETY_MULT
   const staticReserveWei = parseEther(String(GAS_RESERVE_ETH))
-  return dynamicReserveWei > staticReserveWei ? dynamicReserveWei : staticReserveWei
+  const reserve = dynamicReserveWei > staticReserveWei ? dynamicReserveWei : staticReserveWei
+  const maxReserveCap = parseEther('0.005')
+  return reserve > maxReserveCap ? maxReserveCap : reserve
 }
 
 async function fetchBalances(gasPrice: bigint): Promise<BalancesResult> {
