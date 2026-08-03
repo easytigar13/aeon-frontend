@@ -73,17 +73,15 @@ import { privateKeyToAccount } from 'viem/accounts'
 import * as dotenv from 'dotenv'
 import * as fs from 'fs'
 import { fileURLToPath } from 'url'
-import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES, UNISWAP_POOLS, ALGEBRA_CONTRACTS, DLMM_CONTRACTS } from '../src/config/contracts'
-import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, AEON_NATIVE_ARB_EXECUTOR_ABI, AEON_FACTORY_ABI, ALGEBRA_POOL_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
+import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES, UNISWAP_POOLS } from '../src/config/contracts'
+import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
 import { writeBotStatus, appendTrade, isBotStoreConfigured } from '../src/lib/botStore'
-import { discoverUniswapV3Pools, quoteUniswapV3ExactInput, UNISWAP_V3, UNISWAP_V3_FACTORY_ABI, UNISWAP_V3_POOL_ABI, type UniswapV3PoolRef } from './uniswap-v3'
+import { discoverUniswapV3Pools, quoteUniswapV3ExactInput, UNISWAP_V3_POOL_ABI, type UniswapV3PoolRef } from './uniswap-v3'
 import { discoverUniswapV4Pools, quoteUniswapV4ExactInput, UNISWAP_V4, UNISWAP_V4_STATE_VIEW_ABI, type UniswapV4PoolRef } from './uniswap-v4'
 
-// A second PM2 process can run this exact, current implementation with its
-// own wallet/config instead of drifting on a stale copy of index.ts.
-const envPath      = fileURLToPath(new URL(process.env.KEEPER_ENV_FILE ?? '.env', import.meta.url))
+const envPath      = fileURLToPath(new URL('.env', import.meta.url))
 dotenv.config({ path: envPath })
 
 // Overridable so a test run (or a second isolated instance) never touches
@@ -95,16 +93,12 @@ const tradesLogPath = process.env.TRADES_LOG_FILE ?? fileURLToPath(new URL('trad
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const PRIMARY_RPC  = process.env.RPC_URL ?? 'https://rpc.mainnet.chain.robinhood.com'
-const SUBMIT_RPC   = process.env.SUBMIT_RPC_URL ?? 'https://sequencer.mainnet.chain.robinhood.com'
 const RPC_URLS     = Array.from(new Set([
   ...((process.env.RPC_URLS ?? '').split(',').map(url => url.trim()).filter(Boolean)),
   PRIMARY_RPC,
-  // NOTE: the Blockscout proxy (robinhoodchain.blockscout.com) was removed
-  // from the default fallback -- it rate-limits (429) and lags the chain, and
-  // under aggressive polling the primary would time out and thrash to it,
-  // ballooning tick time to ~20s (stale quotes -> nothing executes). Add your
-  // own extra endpoint via RPC_URLS= if you have a fast one. For a cross-venue
-  // bot this hard: point RPC_URL at a dedicated/private node.
+  // Independent read/write proxy on the chain's Blockscout deployment. The
+  // official endpoint remains first; this is only used when it is unreachable.
+  'https://robinhoodchain.blockscout.com/api/eth-rpc',
 ]))
 const PK            = (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`
 const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT ?? '0')  // consider every positive quote; execution still requires profit above the buffered gas cost
@@ -123,16 +117,6 @@ const REPLACEMENT_GAS_BUMP_BPS = BigInt(process.env.REPLACEMENT_GAS_BUMP_BPS ?? 
 // it gives the sequencer room to include the transaction if base fees move
 // between signing and inclusion. Keep priority fee at zero, matching the L2.
 const TX_FEE_HEADROOM_BPS = BigInt(process.env.TX_FEE_HEADROOM_BPS ?? '20000')
-const TX_GAS_LIMIT_HEADROOM_BPS = BigInt(process.env.TX_GAS_LIMIT_HEADROOM_BPS ?? '12000')
-
-type KeeperRole = 'mirajane' | 'aeon-only' | 'general'
-const configuredRole = (process.env.KEEPER_ROLE ?? (process.env.MIRAJANE_MODE === 'true' ? 'mirajane' : 'general')).trim()
-if (!['mirajane', 'aeon-only', 'general'].includes(configuredRole)) {
-  console.error(`KEEPER_ROLE="${configuredRole}" must be mirajane, aeon-only, or general`)
-  process.exit(1)
-}
-const KEEPER_ROLE = configuredRole as KeeperRole
-const BOT_ID = (process.env.BOT_ID ?? (KEEPER_ROLE === 'aeon-only' ? 'aeon' : '')).trim() || undefined
 
 // Cross-venue (OpenOcean / 1inch) scan runs far less often than the internal
 // pool scan -- it costs real API calls (rate-limited, especially 1inch),
@@ -140,25 +124,17 @@ const BOT_ID = (process.env.BOT_ID ?? (KEEPER_ROLE === 'aeon-only' ? 'aeon' : ''
 const AGGREGATOR_SCAN_INTERVAL_MS = parseInt(process.env.AGGREGATOR_SCAN_INTERVAL_MS ?? '30000')
 const AGGREGATOR_SLIPPAGE_PCT = parseFloat(process.env.AGGREGATOR_SLIPPAGE_PCT ?? '0.5')
 const ENABLE_CROSS_VENUE = process.env.ENABLE_CROSS_VENUE === 'true'
-// Every executable arbitrage must close in exactly the asset it started in.
-// This makes the profit invariant exact: amountOut must exceed amountIn plus
-// the gas floor in that same token. Do not make this depend on deployment
-// configuration; a missing/stale environment variable must never silently
-// re-enable cross-settlement valuation.
-const SAME_TOKEN_ONLY = true
+// Settlement routes may start in AEON/USDG/WETH and finish in any of those
+// three assets. They still execute every hop atomically and enforce a live
+// USDG-equivalent output floor above input value + gas. Set true to restore
+// the stricter same-token-only mode.
+const SAME_TOKEN_ONLY = process.env.SAME_TOKEN_ONLY === 'true'
 const ATOMIC_ONLY = process.env.ATOMIC_ONLY !== 'false'
 
 // Re-run idempotent venue discovery so newly created pools and pools that
 // cross the external-volume threshold become routeable without a restart.
 const POOL_REFRESH_INTERVAL_MS = parseInt(process.env.POOL_REFRESH_INTERVAL_MS ?? '600000')
 const MULTI_GAUGE_DISTRIBUTION_INTERVAL_MS = parseInt(process.env.MULTI_GAUGE_DISTRIBUTION_INTERVAL_MS ?? '900000')
-const EVENT_DRIVEN_SCANNING = process.env.EVENT_DRIVEN_SCANNING !== 'false'
-// Logs are the fast path; this periodic full refresh is the safety net for
-// unusual pool implementations, missed RPC log ranges, and shallow reorgs.
-const FULL_STATE_REFRESH_MS = Math.max(5_000, parseInt(process.env.FULL_STATE_REFRESH_MS ?? '30000'))
-// Even with unchanged pools, a lower base fee can turn an existing gross edge
-// into a net-profitable trade. Re-rank cached state periodically for gas only.
-const GAS_ONLY_RECHECK_MS = Math.max(1_000, parseInt(process.env.GAS_ONLY_RECHECK_MS ?? '5000'))
 
 // Native ETH isn't one of the pool tokens (everything trades WETH), but
 // it's economically fungible with WETH via wrap/unwrap -- whatever's spare
@@ -171,7 +147,7 @@ const GAS_ONLY_RECHECK_MS = Math.max(1_000, parseInt(process.env.GAS_ONLY_RECHEC
 // silently falls behind if gas prices rise. Either way, the reserve is
 // NEVER touched -- it's what keeps the bot able to pay for its own future
 // transactions no matter what.
-const GAS_RESERVE_ETH = parseFloat(process.env.GAS_RESERVE_ETH ?? '0.002')
+const GAS_RESERVE_ETH = parseFloat(process.env.GAS_RESERVE_ETH ?? '0.005')
 // A refill targets 120% of the live reserve so the unwrap transaction and the
 // next arb do not immediately put the wallet below the floor again.
 const GAS_REFILL_TARGET_BPS = BigInt(process.env.GAS_REFILL_TARGET_BPS ?? '12000')
@@ -220,19 +196,6 @@ function parseFeeBps(fee: string): number {
 // same DFS/ternary-search sizing below via PoolState's r0/r1/effFeeBps --
 // only pool discovery, state-fetching, and on-chain execution differ by kind.
 type PoolKind = 'vAMM' | 'uniV2' | 'uniV3' | 'uniV4' | 'CL' | 'DLMM'
-
-const AEON_POOL_KINDS = new Set<PoolKind>(['vAMM', 'CL', 'DLMM'])
-function isAeonPoolKind(kind: PoolKind): boolean {
-  return AEON_POOL_KINDS.has(kind)
-}
-
-function routeAllowedForRole(hops: HopCandidate[]): boolean {
-  if (KEEPER_ROLE === 'aeon-only') return hops.every(hop => isAeonPoolKind(hop.pool.pool.kind))
-  // Mirajane owns external price discovery. AEON-only cycles belong to Bot 2,
-  // while mixed routes remain valid because they contain an external venue.
-  if (KEEPER_ROLE === 'mirajane') return hops.some(hop => !isAeonPoolKind(hop.pool.pool.kind))
-  return true
-}
 
 interface PoolConfig {
   name: string
@@ -288,154 +251,12 @@ for (const p of UNISWAP_POOLS) {
     kind: 'uniV2',
   })
 }
-// Hard pool allowlist. When POOL_ALLOWLIST is set (comma-separated pool
-// addresses), Mirajane trades ONLY these pools: all remote Uniswap
-// V2/V3/V4 discovery is skipped, and ARB_POOLS is filtered down to exactly
-// this set after every refresh. This is what makes it "stupidly fast" -- a
-// tiny, fixed pool graph with zero external-discovery latency. Cycles still
-// only ever settle in AEON/ETH/USDG (SETTLEMENT_TOKENS), unchanged.
-const POOL_ALLOWLIST = new Set(
-  (process.env.POOL_ALLOWLIST ?? '')
-    .split(',').map(a => a.trim().toLowerCase()).filter(Boolean),
-)
-const POOL_ALLOWLIST_ACTIVE = POOL_ALLOWLIST.size > 0
-
-function applyPoolAllowlist() {
-  if (!POOL_ALLOWLIST_ACTIVE) return
-  for (let i = ARB_POOLS.length - 1; i >= 0; i--) {
-    if (!POOL_ALLOWLIST.has(ARB_POOLS[i].address.toLowerCase())) ARB_POOLS.splice(i, 1)
-  }
-}
-
 const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?? '1000000')
 // Explicit user-requested external token pins. These remain in V3/V4
 // discovery even if the general exclusion policy is tightened later.
 const MANUAL_EXTERNAL_TOKENS = new Set<keyof typeof TOKENS>(['HOODIE'])
 const uniswapV3Refs = new Map<string, UniswapV3PoolRef>()
 const uniswapV4Refs = new Map<string, UniswapV4PoolRef>()
-
-// MIRAJANE MODE: a fixed, explicitly-curated cross-venue AEON pool set (our
-// vAMM/CL + external Uniswap V3/V4), generated on-chain by
-// gen-mirajane-pools.mjs into mirajane-pools.json. When on, ARB_POOLS is
-// EXACTLY this set -- no discovery of any kind, no address filtering -- which
-// is what makes it stupidly fast (tiny fixed graph, zero remote latency) while
-// still arbing AEON/CASHCAT/etc across every venue. Cycles still only ever
-// settle in AEON/ETH/USDG (SETTLEMENT_TOKENS), unchanged.
-const MIRAJANE_MODE = KEEPER_ROLE === 'mirajane'
-// Keep the proven July-18 graph bounded. Route enumeration grows
-// super-linearly, so allowing discovery to expand forever delays exact
-// quoting until the opportunity has already moved. Curated entries are kept
-// first, followed by AEON venues, then external discoveries.
-const MAX_MONITORED_POOLS = Math.max(0, parseInt(process.env.MAX_MONITORED_POOLS ?? '200'))
-const MIRAJANE_CURATED_POOL_KEYS = new Set<string>()
-function loadMirajanePools() {
-  const path = fileURLToPath(new URL('mirajane-pools.json', import.meta.url))
-  const { poolConfigs, v4Refs } = JSON.parse(fs.readFileSync(path, 'utf-8'))
-  ARB_POOLS.splice(0, ARB_POOLS.length) // drop the default POOLS-derived set
-  for (const p of poolConfigs) {
-    // Curated V3 manifests historically stored feeBps=0 and relied on the
-    // exact quoter to catch the discrepancy. That made the fast search invent
-    // gross edges which disappeared at preflight. Always derive the AMM-model
-    // fee from the canonical V3 fee tier, even when an older manifest is read.
-    const modeledFeeBps = p.kind === 'uniV3' && p.v3Fee !== undefined
-      ? Math.ceil(Number(p.v3Fee) / 100)
-      : Number(p.feeBps)
-    ARB_POOLS.push({
-      name: p.name, address: p.address as `0x${string}`,
-      token0: p.token0 as keyof typeof TOKENS, token1: p.token1 as keyof typeof TOKENS,
-      feeBps: BigInt(modeledFeeBps), isUniV2: !!p.isUniV2, kind: p.kind as PoolKind,
-      ...(p.v3Fee !== undefined ? { v3Fee: p.v3Fee } : {}),
-      ...(p.v4PoolId ? {
-        v4PoolId: p.v4PoolId as `0x${string}`, v4Fee: p.v4Fee, v4TickSpacing: p.v4TickSpacing,
-        v4Hooks: p.v4Hooks as `0x${string}`, v4Native: p.v4Native,
-      } : {}),
-    })
-  }
-  for (const r of v4Refs) uniswapV4Refs.set((r.id as string).toLowerCase(), r as UniswapV4PoolRef)
-}
-if (MIRAJANE_MODE) {
-  loadMirajanePools()
-  for (const pool of ARB_POOLS) MIRAJANE_CURATED_POOL_KEYS.add(poolStateKey(pool))
-}
-
-let mirajaneV3Validated = false
-
-// Mirajane's V3 execution path is pinned to the canonical Uniswap V3
-// factory/router. A pool from a different V3-style deployment can expose
-// the same slot0/liquidity interface and look profitable to the scanner,
-// but the router will execute against the canonical factory's pool instead.
-// Validate that quote and execution therefore address the exact same pool
-// before allowing a configured V3 edge into the graph.
-async function validateMirajaneV3Pools(): Promise<void> {
-  if (!MIRAJANE_MODE || mirajaneV3Validated) return
-
-  const rejected = new Set<string>()
-  const pools = ARB_POOLS.filter(p => p.kind === 'uniV3')
-  const metadata = await chunkedMulticall(pools.flatMap(pool => {
-    const address = getAddress(pool.address)
-    return [
-      { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'factory' as const },
-      { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'fee' as const },
-      { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token0' as const },
-      { address, abi: UNISWAP_V3_POOL_ABI, functionName: 'token1' as const },
-    ]
-  }))
-  const canonicalCalls: any[] = []
-  const resolved: { pool: PoolConfig; address: `0x${string}`; actualFactory: `0x${string}`; actualToken0: `0x${string}`; actualToken1: `0x${string}`; actualFee: number }[] = []
-  for (let i = 0; i < pools.length; i++) {
-    const values = metadata.slice(i * 4, i * 4 + 4)
-    if (values.some(value => value?.status !== 'success')) {
-      rejected.add(pools[i].address.toLowerCase())
-      continue
-    }
-    const actualFactory = getAddress(values[0].result as `0x${string}`)
-    const actualFee = Number(values[1].result)
-    const actualToken0 = getAddress(values[2].result as `0x${string}`)
-    const actualToken1 = getAddress(values[3].result as `0x${string}`)
-    resolved.push({ pool: pools[i], address: getAddress(pools[i].address), actualFactory, actualToken0, actualToken1, actualFee })
-    canonicalCalls.push({
-      address: UNISWAP_V3.factory, abi: UNISWAP_V3_FACTORY_ABI,
-      functionName: 'getPool' as const, args: [actualToken0, actualToken1, actualFee] as const,
-    })
-  }
-  const canonicalResults = await chunkedMulticall(canonicalCalls)
-  for (let i = 0; i < resolved.length; i++) {
-    const { pool, address, actualFactory, actualToken0, actualToken1, actualFee } = resolved[i]
-    const expectedTokens = new Set([
-      getAddress(TOKENS[pool.token0].address).toLowerCase(),
-      getAddress(TOKENS[pool.token1].address).toLowerCase(),
-    ])
-    const tokenPairMatches = expectedTokens.has(actualToken0.toLowerCase())
-      && expectedTokens.has(actualToken1.toLowerCase())
-    const canonical = canonicalResults[i]?.status === 'success'
-      ? getAddress(canonicalResults[i].result as `0x${string}`)
-      : ZERO_ADDRESS
-    const reason = actualFactory.toLowerCase() !== UNISWAP_V3.factory.toLowerCase()
-      ? `factory ${actualFactory}`
-      : !tokenPairMatches
-        ? 'configured token pair does not match pool token0/token1'
-        : actualFee !== pool.v3Fee
-          ? `configured fee ${pool.v3Fee ?? 'missing'} != on-chain fee ${actualFee}`
-          : canonical.toLowerCase() !== address.toLowerCase()
-            ? `canonical pool is ${canonical}`
-            : null
-
-    if (reason) {
-      rejected.add(address.toLowerCase())
-      console.warn(`[mirajane] rejecting non-canonical V3 pool ${pool.name} ${address}: ${reason}`)
-    } else {
-      // The generated manifest historically stored zero here. Correct it from
-      // the pool itself so approximate ranking includes the real V3 fee too.
-      pool.feeBps = (BigInt(actualFee) + 99n) / 100n
-    }
-  }
-
-  for (let i = ARB_POOLS.length - 1; i >= 0; i--) {
-    if (rejected.has(ARB_POOLS[i].address.toLowerCase())) ARB_POOLS.splice(i, 1)
-  }
-  mirajaneV3Validated = true
-  console.log(`[mirajane] canonical V3 validation complete: ${rejected.size} rejected, ${ARB_POOLS.filter(p => p.kind === 'uniV3').length} retained`)
-}
 
 async function discoverHighVolumeUniswapV3Pools(): Promise<number> {
   const symbols = (Object.keys(TOKENS) as (keyof typeof TOKENS)[]).filter(sym =>
@@ -515,10 +336,6 @@ const PAIR_ABI = [
     ]},
   { name: 'token0', type: 'function', stateMutability: 'view',
     inputs: [], outputs: [{ type: 'address' }] },
-  { name: 'token1', type: 'function', stateMutability: 'view',
-    inputs: [], outputs: [{ type: 'address' }] },
-  { name: 'feeBps', type: 'function', stateMutability: 'view',
-    inputs: [], outputs: [{ type: 'uint24' }] },
 ] as const
 
 const UNISWAP_FACTORY_ABI = [{
@@ -557,95 +374,9 @@ const account = privateKeyToAccount(PK)
 // Keep per-endpoint failure detection short: discovery performs hundreds of
 // reads, so an unhealthy primary must fail over in seconds, not multiply an
 // 8s timeout across the entire pool set.
-const rpcTransport = fallback(RPC_URLS.map(url => http(url, { timeout: 8_000, retryCount: 1 }))) as unknown as ReturnType<typeof http>
+const rpcTransport = fallback(RPC_URLS.map(url => http(url, { timeout: 3_000, retryCount: 0 }))) as unknown as ReturnType<typeof http>
 const pub = createPublicClient({ chain: robinhoodChain, transport: rpcTransport })
-
-// Nonce reads stay on the full JSON-RPC endpoint. Signed raw transactions go
-// directly to Robinhood's sequencer endpoint, avoiding an extra provider hop.
-// The sequencer intentionally exposes eth_sendRawTransaction only, so every
-// transaction is fully prepared (nonce, fees and gas) from `pub` before send.
-const walletReadTransport = http(PRIMARY_RPC, { timeout: 8_000, retryCount: 1 })
-const submissionTransport = http(SUBMIT_RPC, { timeout: 8_000, retryCount: 1 })
-const walletRpc = createPublicClient({ chain: robinhoodChain, transport: walletReadTransport })
-const wal = createWalletClient({ account, chain: robinhoodChain, transport: submissionTransport })
-const providerWal = createWalletClient({ account, chain: robinhoodChain, transport: walletReadTransport })
-
-async function submitPreparedContract(request: any): Promise<`0x${string}`> {
-  try {
-    return await wal.writeContract(request)
-  } catch (error: any) {
-    const message = String(error?.shortMessage ?? error?.message ?? error).toLowerCase()
-    const transportFailure = message.includes('http request') || message.includes('fetch failed')
-      || message.includes('timeout') || message.includes('not available') || message.includes('method')
-    if (SUBMIT_RPC === PRIMARY_RPC || !transportFailure) throw error
-    console.warn('   Direct sequencer transport unavailable; broadcasting through the primary RPC fallback')
-    return providerWal.writeContract(request)
-  }
-}
-
-function enforcePoolUniverseForRole() {
-  if (KEEPER_ROLE !== 'aeon-only') return
-  for (let i = ARB_POOLS.length - 1; i >= 0; i--) {
-    if (!isAeonPoolKind(ARB_POOLS[i].kind)) ARB_POOLS.splice(i, 1)
-  }
-}
-
-// Do not rely on the website's static pool manifest for the defender. Read
-// both AEON factories so every compatible, known-token vAMM pool becomes
-// tradeable automatically after it is created. Directly deployed legacy
-// pools remain covered by the static seed and are de-duplicated here.
-async function discoverAeonVammPools(): Promise<number> {
-  const factories = [CONTRACTS.AeonFactory, CONTRACTS.AeonFactoryV2]
-  const lengths = await pub.multicall({
-    contracts: factories.map(address => ({ address, abi: AEON_FACTORY_ABI, functionName: 'allPoolsLength' as const })),
-    allowFailure: true,
-  })
-  const poolCalls: any[] = []
-  for (let fi = 0; fi < factories.length; fi++) {
-    const lengthResult = lengths[fi]
-    if (lengthResult?.status !== 'success') continue
-    const length = Number(lengthResult.result)
-    for (let i = 0; i < length; i++) {
-      poolCalls.push({ address: factories[fi], abi: AEON_FACTORY_ABI, functionName: 'allPools' as const, args: [BigInt(i)] as const })
-    }
-  }
-  if (poolCalls.length === 0) return 0
-  const poolResults = await chunkedMulticall(poolCalls)
-  const addresses = Array.from(new Set(poolResults
-    .filter(result => result?.status === 'success')
-    .map(result => getAddress(result.result as `0x${string}`))))
-    .filter(address => !ARB_POOLS.some(pool => pool.address.toLowerCase() === address.toLowerCase()))
-  if (addresses.length === 0) return 0
-
-  const metadata = await chunkedMulticall(addresses.flatMap(address => [
-    { address, abi: PAIR_ABI, functionName: 'token0' as const },
-    { address, abi: PAIR_ABI, functionName: 'token1' as const },
-    { address, abi: PAIR_ABI, functionName: 'feeBps' as const },
-  ]))
-  const addressToSymbol = new Map<string, keyof typeof TOKENS>()
-  for (const symbol of Object.keys(TOKENS) as (keyof typeof TOKENS)[]) {
-    addressToSymbol.set(TOKENS[symbol].address.toLowerCase(), symbol)
-  }
-
-  let added = 0
-  for (let i = 0; i < addresses.length; i++) {
-    const token0Result = metadata[i * 3]
-    const token1Result = metadata[i * 3 + 1]
-    const feeResult = metadata[i * 3 + 2]
-    if (token0Result?.status !== 'success' || token1Result?.status !== 'success' || feeResult?.status !== 'success') continue
-    const token0 = addressToSymbol.get(String(token0Result.result).toLowerCase())
-    const token1 = addressToSymbol.get(String(token1Result.result).toLowerCase())
-    if (!token0 || !token1) continue
-    ARB_POOLS.push({
-      name: `AEON ${token0}/${token1}`,
-      address: addresses[i], token0, token1,
-      feeBps: BigInt(feeResult.result as bigint),
-      isUniV2: false, kind: 'vAMM',
-    })
-    added++
-  }
-  return added
-}
+const wal = createWalletClient({ account, chain: robinhoodChain, transport: rpcTransport })
 
 async function discoverUniswapPools(): Promise<number> {
   const ownPools = [...ARB_POOLS]
@@ -782,40 +513,6 @@ interface PoolState {
   effFeeBps: bigint   // this tick's actual fee -- static for vAMM/UniV2/DLMM, live-read for CL (Algebra's fee is dynamic)
 }
 
-// V4 pools all share PoolManager as their contract address, so their pool id
-// is the only stable cache/event identity. Every other venue has one contract
-// address per pool.
-function poolStateKey(pool: PoolConfig): string {
-  return pool.kind === 'uniV4' && pool.v4PoolId
-    ? `v4:${pool.v4PoolId.toLowerCase()}`
-    : `pool:${pool.address.toLowerCase()}`
-}
-
-function enforceMirajanePoolCap(): number {
-  if (!MIRAJANE_MODE || MAX_MONITORED_POOLS <= 0) return 0
-
-  const prioritized = [
-    ...ARB_POOLS.filter(pool => MIRAJANE_CURATED_POOL_KEYS.has(poolStateKey(pool))),
-    ...ARB_POOLS.filter(pool => !MIRAJANE_CURATED_POOL_KEYS.has(poolStateKey(pool)) && isAeonPoolKind(pool.kind)),
-    ...ARB_POOLS.filter(pool => !MIRAJANE_CURATED_POOL_KEYS.has(poolStateKey(pool)) && !isAeonPoolKind(pool.kind)),
-  ]
-  const seen = new Set<string>()
-  const retained: PoolConfig[] = []
-  for (const pool of prioritized) {
-    const key = poolStateKey(pool)
-    if (seen.has(key)) continue
-    seen.add(key)
-    if (retained.length < MAX_MONITORED_POOLS) retained.push(pool)
-  }
-
-  const removed = ARB_POOLS.length - retained.length
-  if (removed > 0) {
-    ARB_POOLS.splice(0, ARB_POOLS.length, ...retained)
-    console.log(`[mirajane] pool ceiling enforced: retained ${ARB_POOLS.length}, removed ${removed} duplicate/excess pool(s)`)
-  }
-  return removed
-}
-
 // Chunk to stay well under any single RPC's multicall gas/size ceiling.
 const MULTICALL_CHUNK = 120
 async function chunkedMulticall(contracts: any[]): Promise<any[]> {
@@ -827,12 +524,12 @@ async function chunkedMulticall(contracts: any[]): Promise<any[]> {
   return results
 }
 
-async function fetchPoolStates(pools: PoolConfig[]): Promise<PoolState[]> {
-  const vammPools = pools.filter(p => p.kind === 'vAMM' || p.kind === 'uniV2')
-  const v3Pools   = pools.filter(p => p.kind === 'uniV3')
-  const v4Pools   = pools.filter(p => p.kind === 'uniV4')
-  const clPools   = pools.filter(p => p.kind === 'CL')
-  const dlmmPools = pools.filter(p => p.kind === 'DLMM')
+async function fetchAllStates(): Promise<PoolState[]> {
+  const vammPools = ARB_POOLS.filter(p => p.kind === 'vAMM' || p.kind === 'uniV2')
+  const v3Pools   = ARB_POOLS.filter(p => p.kind === 'uniV3')
+  const v4Pools   = ARB_POOLS.filter(p => p.kind === 'uniV4')
+  const clPools   = ARB_POOLS.filter(p => p.kind === 'CL')
+  const dlmmPools = ARB_POOLS.filter(p => p.kind === 'DLMM')
 
   const vammContracts = vammPools.flatMap(p => [
     { address: p.address, abi: PAIR_ABI, functionName: 'getReserves' as const },
@@ -973,34 +670,6 @@ async function fetchPoolStates(pools: PoolConfig[]): Promise<PoolState[]> {
   return [...vammStates, ...clStates, ...dlmmStates, ...v3States, ...v4States].filter(s => s.r0 > 0n && s.r1 > 0n && hasRealLiquidity(s))
 }
 
-// State is immutable within a block and only pools that emitted logs since
-// the previous scan can have changed. Keep the last good snapshot and replace
-// just those entries. A missing refreshed state removes the old entry, so a
-// pool that loses usable liquidity cannot remain tradeable from stale cache.
-const poolStateCache = new Map<string, PoolState>()
-const knownPoolStateKeys = new Set<string>()
-let poolStateCacheReady = false
-
-async function fetchAllStates(changedPoolKeys?: Set<string>): Promise<PoolState[]> {
-  const poolsToFetch = !poolStateCacheReady || !changedPoolKeys
-    ? [...ARB_POOLS]
-    : ARB_POOLS.filter(pool => changedPoolKeys.has(poolStateKey(pool)) || !knownPoolStateKeys.has(poolStateKey(pool)))
-
-  if (poolsToFetch.length > 0) {
-    const refreshed = await fetchPoolStates(poolsToFetch)
-    for (const pool of poolsToFetch) {
-      const key = poolStateKey(pool)
-      poolStateCache.delete(key)
-      knownPoolStateKeys.add(key)
-    }
-    for (const state of refreshed) poolStateCache.set(poolStateKey(state.pool), state)
-  }
-  poolStateCacheReady = true
-
-  // Preserve manifest order so route tie-breaking remains deterministic.
-  return ARB_POOLS.map(pool => poolStateCache.get(poolStateKey(pool))).filter((state): state is PoolState => !!state)
-}
-
 // Several pools in POOLS are genuinely empty -- deployed with a real gauge
 // but never seeded, sitting at (or near) the 1000-wei locked-minimum floor
 // every new pool starts at (see contracts.ts's own "not enough to seed it"
@@ -1112,24 +781,6 @@ function cycleOut(amountIn: bigint, hops: HopCandidate[]): bigint {
   return amt
 }
 
-// Constant-product output is concave: if the fee-adjusted infinitesimal
-// exchange rate of a closed route is not above 1, no larger input can make
-// that route profitable. Reject it before the comparatively expensive
-// ternary sizer. This is exact integer ratio math, not a floating-point or
-// heuristic filter, so it cannot discard a profitable route under the same
-// reserve model used by cycleOut().
-function hasPositiveMarginalEdge(hops: HopCandidate[]): boolean {
-  let numerator = 1n
-  let denominator = 1n
-  for (const hop of hops) {
-    const feeFactor = 10_000n - hop.pool.effFeeBps
-    if (feeFactor <= 0n || hop.reserveIn <= 0n || hop.reserveOut <= 0n) return false
-    numerator *= hop.reserveOut * feeFactor
-    denominator *= hop.reserveIn * 10_000n
-  }
-  return numerator > denominator
-}
-
 // Generic ternary-search sizer -- works for any hop count, unlike a
 // closed-form 2-hop formula, so the same function sizes both 2-hop and
 // 3-hop cycles.
@@ -1170,15 +821,9 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
   let capped = false
 
   function tryOpp(hops: HopCandidate[]) {
-    const key = hops.map(h => poolStateKey(h.pool.pool)).join('>')
+    const key = hops.map(h => h.pool.pool.address).join('>')
     if (seen.has(key)) return
     seen.add(key)
-
-    if (!hasPositiveMarginalEdge(hops)) {
-      scanTelemetry.marginalPruned++
-      return
-    }
-    scanTelemetry.sizedRoutes++
 
     const poolCap = hops[0].reserveIn / sizingDivisor(hops[0].pool.pool.kind)
     const walletCap = (walletBalance * MAX_BALANCE_USAGE_BPS) / 10_000n
@@ -1210,7 +855,7 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
     for (const edge of graph.get(currentSym) ?? []) {
       // Never immediately reverse through the exact same pool -- that's a
       // guaranteed loss to fees, not a candidate worth sizing.
-      if (path.length > 0 && poolStateKey(edge.pool.pool) === poolStateKey(path[path.length - 1].pool.pool)) continue
+      if (path.length > 0 && edge.pool.pool.address === path[path.length - 1].pool.pool.address) continue
 
       if (edge.tokenOutSym === baseSym) {
         if (path.length > 0) tryOpp([...path, edge])
@@ -1228,7 +873,6 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
   }
 
   dfs(baseSym)
-  scanTelemetry.routeVisits += visits
   if (capped) console.warn(`[warn] cycle search from ${baseSym} hit its ${MAX_DFS_VISITS}-visit safety cap -- results may be incomplete this tick`)
 
   return opps
@@ -1260,7 +904,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
   const startPath = usdgPath(baseSym)
 
   function tryOpp(hops: HopCandidate[], endSym: string) {
-    const key = hops.map(h => poolStateKey(h.pool.pool)).join('>') + '=>' + endSym
+    const key = hops.map(h => h.pool.pool.address).join('>') + '=>' + endSym
     if (seen.has(key)) return
     seen.add(key)
     if (startPath === null) return
@@ -1310,7 +954,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
     if (++visits > MAX_DFS_VISITS) { capped = true; return }
 
     for (const edge of graph.get(currentSym) ?? []) {
-      if (path.length > 0 && poolStateKey(edge.pool.pool) === poolStateKey(path[path.length - 1].pool.pool)) continue
+      if (path.length > 0 && edge.pool.pool.address === path[path.length - 1].pool.pool.address) continue
       if (edge.tokenOutSym === baseSym) continue   // the cyclic case -- findArbs already covers it
 
       if ((SETTLEMENT_TOKENS as readonly string[]).includes(edge.tokenOutSym)) {
@@ -1343,14 +987,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
 // always means profitable after fees -- never just profitable on the swap
 // math alone.
 
-// This chain confirms in a fraction of a second, so a 30% surcharge rejected
-// many historically profitable routes after the exact pre-submit estimate.
-// Keep a small configurable buffer, but never allow less than 100% of the
-// fresh estimate: amountOutMin still enforces amountIn + estimated gas + 1.
-const configuredGasSafetyPct = BigInt(process.env.GAS_SAFETY_MULT_PCT ?? '105')
-const GAS_SAFETY_MULT_PCT = configuredGasSafetyPct < 100n
-  ? 100n
-  : configuredGasSafetyPct > 200n ? 200n : configuredGasSafetyPct
+const GAS_SAFETY_MULT_PCT = 130n   // require 1.30x the estimate -- buffer for gas price drift between quoting and inclusion
 const APPROVE_GAS_FALLBACK = 60_000n
 const EXEC_ARB_BASE_GAS = 100_000n
 const EXEC_ARB_GAS_PER_HOP = 70_000n
@@ -1490,22 +1127,20 @@ function computeMinGasReserveWei(gasPrice: bigint): bigint {
 async function fetchBalances(gasPrice: bigint): Promise<BalancesResult> {
   const distinctSymbols = Array.from(new Set(ARB_POOLS.flatMap(p => [p.token0, p.token1])))
   const balances: Record<string, bigint> = {}
-  const gasReserveWei = computeMinGasReserveWei(gasPrice)
-  const balanceCalls = distinctSymbols.map(sym => ({
-    address: TOKENS[sym as keyof typeof TOKENS].address,
-    abi: ERC20_ABI,
-    functionName: 'balanceOf' as const,
-    args: [account.address] as const,
+  await Promise.all(distinctSymbols.map(async sym => {
+    const t = TOKENS[sym as keyof typeof TOKENS]
+    try {
+      balances[sym] = await pub.readContract({ address: t.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address] }) as bigint
+    } catch { balances[sym] = 0n }
   }))
-  const [balanceResults, nativeEth] = await Promise.all([
-    chunkedMulticall(balanceCalls),
-    pub.getBalance({ address: account.address }).catch(() => 0n),
-  ])
-  for (let i = 0; i < distinctSymbols.length; i++) {
-    const result = balanceResults[i]
-    balances[distinctSymbols[i]] = result?.status === 'success' ? BigInt(result.result as bigint) : 0n
-  }
-  const availableEthForWrap = nativeEth > gasReserveWei ? nativeEth - gasReserveWei : 0n
+
+  let nativeEth = 0n
+  let availableEthForWrap = 0n
+  const gasReserveWei = computeMinGasReserveWei(gasPrice)
+  try {
+    nativeEth = await pub.getBalance({ address: account.address })
+    availableEthForWrap = nativeEth > gasReserveWei ? nativeEth - gasReserveWei : 0n
+  } catch { /* leave at 0 if this read fails -- WETH search balance just won't include it this tick */ }
 
   const searchBalances = { ...balances, WETH: (balances.WETH ?? 0n) + availableEthForWrap }
 
@@ -1544,12 +1179,10 @@ async function ensureWethBalance(needed: bigint, availableEthForWrap: bigint): P
 
   console.log(`   → wrapping ${formatEther(shortfall)} ETH into WETH to cover this trade...`)
   try {
-    // Route through writeContractTracked so the wrap uses the SAME monotonic
-    // nonce discipline as every other tx -- the raw path here was the source
-    // of the "nonce lower than current" failures that stopped WETH cycles.
-    await writeContractTracked({
+    const hWrap = await wal.writeContract({
       address: TOKENS.WETH.address, abi: WETH_ABI, functionName: 'deposit', value: shortfall,
-    }, 'wrap ETH->WETH')
+    })
+    await pub.waitForTransactionReceipt({ hash: hWrap })
     current = await pub.readContract({
       address: TOKENS.WETH.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
     }) as bigint
@@ -1563,29 +1196,26 @@ async function ensureWethBalance(needed: bigint, availableEthForWrap: bigint): P
 // against it), but the wallet should never REST holding it -- resting
 // capital belongs in USDG, native ETH, or AEON, so any WETH balance left
 // over once a tick's trading is done gets unwrapped back to ETH 1:1 (no
-// market swap, no slippage, no fee, just the unwrap gas). Checked from the
-// opening batched balance snapshot every trading tick, so it also catches
-// WETH that arrived some other way (a manual deposit, for instance).
-async function unwrapIdleWeth(knownBalance?: bigint): Promise<boolean> {
-  if (DRY_RUN) return false
-  const wethBal = knownBalance ?? await pub.readContract({
+// market swap, no slippage, no fee, just the unwrap gas). Called
+// unconditionally at the end of every tick, not just after a trade fires,
+// so it also catches WETH that arrived some other way (a manual deposit,
+// for instance).
+async function unwrapIdleWeth(): Promise<void> {
+  if (DRY_RUN) return
+  const wethBal = await pub.readContract({
     address: TOKENS.WETH.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
-  // Pool-liquidity dust (0.01 token) is far too large for a wallet balance:
-  // it left several dollars of WETH resting and prevented native-cycle
-  // sizing. Only ignore genuine transfer dust here (default 0.000001 WETH).
-  const unwrapDust = parseEther(process.env.WETH_UNWRAP_DUST_ETH ?? '0.000001')
-  if (wethBal < unwrapDust) return false
+  // Unwrap gas is a fixed cost regardless of amount -- skip true dust
+  // rather than spend real gas converting a negligible remainder.
+  if (wethBal < minRawUnits(TOKENS.WETH.decimals)) return
 
   console.log(`\n[${new Date().toISOString()}] Unwrapping idle WETH balance: ${formatEther(wethBal)} WETH → ETH`)
   try {
     await writeContractTracked({
       address: TOKENS.WETH.address, abi: WETH_ABI, functionName: 'withdraw', args: [wethBal],
     }, 'unwrap idle WETH')
-    return true
   } catch (err: any) {
     console.error(`   ⚠ Unwrap failed: ${err?.shortMessage ?? err?.message ?? err}`)
-    return false
   }
 }
 
@@ -1828,7 +1458,7 @@ function publishPendingTransaction() {
     const next = { ...prior, updatedAt: new Date().toISOString(), pendingTransaction }
     fs.writeFileSync(statusPath, JSON.stringify(next, null, 2))
     if (isBotStoreConfigured()) {
-      writeBotStatus(next, BOT_ID).catch(err => console.error(`[bot store error] failed to sync pending transaction: ${err?.message ?? err}`))
+      writeBotStatus(next).catch(err => console.error(`[bot store error] failed to sync pending transaction: ${err?.message ?? err}`))
     }
   } catch { /* the first full tick will create status.json */ }
 }
@@ -1851,123 +1481,7 @@ interface RouteHealth {
 const routeHealth = new Map<string, RouteHealth>()
 
 function routeKey(hops: HopCandidate[]): string {
-  return hops.map(h => `${h.tokenInSym}>${poolStateKey(h.pool.pool)}>${h.tokenOutSym}`).join('|')
-}
-
-interface RouteHistoryStats {
-  successes: number
-  failures: number
-  lastSuccessAt: number
-}
-
-// Learn from completed closed-cycle history across both keeper wallets. The
-// history is a ranking prior only: every configured pool and every new route
-// still gets searched, and a rotating exploration slot still exact-quotes
-// unproven families. This prevents a burst of attractive-but-unexecutable
-// new routes from crowding all historically productive families out of the
-// small exact-quote budget.
-const routeHistory = new Map<string, RouteHistoryStats>()
-const venueRouteHistory = new Map<string, RouteHistoryStats>()
-
-function tokenPathKey(label: string): string {
-  return (label.match(/[A-Z][A-Z0-9]*/g) ?? []).join('>')
-}
-
-function tokenPathKeyFromHops(hops: HopCandidate[]): string {
-  if (hops.length === 0) return ''
-  return [hops[0].tokenInSym, ...hops.map(h => h.tokenOutSym)].join('>')
-}
-
-function venueSequenceFromDescription(description: string): string {
-  const labels = description.match(/Uniswap V[234]|AEON CL|AEON DLMM|AEON DEX/gi) ?? []
-  return labels.map(label => {
-    const normalized = label.toLowerCase()
-    if (normalized === 'uniswap v2') return 'uniV2'
-    if (normalized === 'uniswap v3') return 'uniV3'
-    if (normalized === 'uniswap v4') return 'uniV4'
-    if (normalized === 'aeon cl') return 'CL'
-    if (normalized === 'aeon dlmm') return 'DLMM'
-    return 'vAMM'
-  }).join('>')
-}
-
-function venueSequenceFromHops(hops: HopCandidate[]): string {
-  return hops.map(hop => hop.pool.kind).join('>')
-}
-
-function venueSequenceAllowedForRole(sequence: string): boolean {
-  const kinds = sequence.split('>').filter(Boolean) as PoolKind[]
-  if (kinds.length === 0) return false
-  if (KEEPER_ROLE === 'aeon-only') return kinds.every(isAeonPoolKind)
-  if (KEEPER_ROLE === 'mirajane') return kinds.some(kind => !isAeonPoolKind(kind))
-  return true
-}
-
-function recordHistoricalOutcome(
-  pathKey: string,
-  venueSequence: string,
-  status: 'success' | 'failed',
-  time: string,
-) {
-  const record = (history: Map<string, RouteHistoryStats>, key: string) => {
-    const stats = history.get(key) ?? { successes: 0, failures: 0, lastSuccessAt: 0 }
-    if (status === 'success') {
-      stats.successes++
-      stats.lastSuccessAt = Math.max(stats.lastSuccessAt, Date.parse(time) || 0)
-    } else {
-      stats.failures++
-    }
-    history.set(key, stats)
-  }
-  record(routeHistory, pathKey)
-  if (venueSequence) record(venueRouteHistory, `${pathKey}|${venueSequence}`)
-}
-
-function loadRouteHistory() {
-  const siblingTrades = fileURLToPath(new URL('../keeper2/trades.log', import.meta.url))
-  for (const historyPath of [tradesLogPath, siblingTrades]) {
-    if (!fs.existsSync(historyPath)) continue
-    for (const line of fs.readFileSync(historyPath, 'utf-8').split(/\r?\n/)) {
-      if (!line.trim()) continue
-      try {
-        const trade = JSON.parse(line)
-        if (trade.status !== 'success' && trade.status !== 'failed') continue
-        const key = tokenPathKey(String(trade.pair ?? ''))
-        const tokens = key.split('>').filter(Boolean)
-        if (tokens.length < 3 || tokens[0] !== tokens[tokens.length - 1]) continue
-        const venueSequence = venueSequenceFromDescription(String(trade.venues ?? ''))
-        if (!venueSequenceAllowedForRole(venueSequence)) continue
-        recordHistoricalOutcome(
-          key,
-          venueSequence,
-          trade.status,
-          String(trade.time ?? ''),
-        )
-      } catch { /* ignore a partially written or legacy log line */ }
-    }
-  }
-}
-
-loadRouteHistory()
-
-function historicalStats(hops: HopCandidate[]): RouteHistoryStats {
-  const pathKey = tokenPathKeyFromHops(hops)
-  const venueStats = venueRouteHistory.get(`${pathKey}|${venueSequenceFromHops(hops)}`)
-  return venueStats ?? routeHistory.get(pathKey) ?? { successes: 0, failures: 0, lastSuccessAt: 0 }
-}
-
-function historicalExecutionFactor(hops: HopCandidate[]): number {
-  const stats = historicalStats(hops)
-  const attempts = stats.successes + stats.failures
-  if (stats.successes > 0) {
-    const completionRate = (stats.successes + 1) / (attempts + 2)
-    const evidenceBoost = Math.min(0.9, Math.log2(stats.successes + 1) * 0.16)
-    return 1 + evidenceBoost * completionRate
-  }
-  // No exclusion: an unproven family remains searchable/explorable. Repeated
-  // historical misses only stop it from monopolising execution priority.
-  if (stats.failures > 0) return Math.max(0.3, 1 / (1 + stats.failures * 0.08))
-  return 1
+  return hops.map(h => `${h.tokenInSym}>${h.pool.pool.address.toLowerCase()}>${h.tokenOutSym}`).join('|')
 }
 
 function decodeFailure(err: any): DecodedFailure {
@@ -2054,27 +1568,19 @@ function scoreOpportunity<T extends { hops: HopCandidate[]; amountIn: bigint; re
   const depthUsage = opp.hops[0].reserveIn > 0n ? Number(opp.amountIn * 10_000n / opp.hops[0].reserveIn) / 10_000 : 1
   const depthFactor = Math.max(0.45, 1 - depthUsage)
   const hopFactor = 1 / (1 + Math.max(0, opp.hops.length - 2) * 0.08)
-  const historyFactor = historicalExecutionFactor(opp.hops)
   opp.reliabilityPct = reliability * 100
-  return netUsd * reliability * depthFactor * hopFactor * historyFactor
+  return netUsd * reliability * depthFactor * hopFactor
 }
 
 // Resume counters across restarts instead of losing history every deploy/reboot.
 try {
   const prior = JSON.parse(fs.readFileSync(statusPath, 'utf-8'))
-  // Gas-estimate and simulation rejections never submitted a transaction and
-  // therefore are scanner diagnostics, not trades. Keep them out of Recent
-  // Activity after a restart while preserving the append-only trades.log.
-  recentArbs = (prior.recentArbs ?? []).filter((arb: ExecutedArb) => !(
-    arb.status === 'failed'
-      && (arb.failureStage === 'quote' || arb.failureStage === 'approval' || arb.failureStage === 'gas_estimate' || arb.failureStage === 'simulation')
-  ))
+  recentArbs = prior.recentArbs ?? []
   const knownVenuePaths: Record<string, string> = {
     '0xb9a383f6e144c898ad4255e2d2e2ed804c1043e773aabf428da0e6d3dee999d8': 'AEON DEX (AEON→WETH) → Uniswap V4 (WETH→CASHCAT) → AEON DEX (CASHCAT→AEON)',
     '0x0986a4a9dbd054f86b96600abbd18020c61057ce9dfe2bfd82551f055d982e84': 'Uniswap V4 (WETH→CASHCAT) → AEON DEX (CASHCAT→WETH)',
   }
   recentArbs = recentArbs.map(arb => ({ ...arb, venues: arb.venues ?? (arb.txHash ? knownVenuePaths[arb.txHash] : undefined) }))
-  recentArbs = recentArbs.filter(arb => venueSequenceAllowedForRole(venueSequenceFromDescription(arb.venues ?? '')))
   cumulativeProfit = prior.cumulativeProfit ?? {}
   totalExecuted = prior.totalArbsExecuted ?? 0
   totalFailed = prior.totalArbsFailed ?? 0
@@ -2090,13 +1596,6 @@ try {
 // enough to sync immediately rather than on the status-sync throttle below,
 // but a Redis hiccup must never block or fail real trading.
 function recordArb(arb: ExecutedArb) {
-  if (arb.status === 'success' || arb.status === 'failed') {
-    const pathKey = tokenPathKey(arb.pair)
-    const tokens = pathKey.split('>').filter(Boolean)
-    if (tokens.length >= 3 && tokens[0] === tokens[tokens.length - 1]) {
-      recordHistoricalOutcome(pathKey, venueSequenceFromDescription(arb.venues ?? ''), arb.status, arb.time)
-    }
-  }
   recentArbs = [arb, ...recentArbs].slice(0, 30)
   try {
     fs.appendFileSync(tradesLogPath, JSON.stringify(arb) + '\n')
@@ -2104,35 +1603,9 @@ function recordArb(arb: ExecutedArb) {
     console.error(`[trade log error] failed to append to trades.log: ${err?.message ?? err}`)
   }
   if (isBotStoreConfigured()) {
-    appendTrade(arb, BOT_ID).catch(err => console.error(`[bot store error] failed to sync trade: ${err?.message ?? err}`))
+    appendTrade(arb).catch(err => console.error(`[bot store error] failed to sync trade: ${err?.message ?? err}`))
   }
 }
-
-const scanTelemetry = {
-  lastBlock: '',
-  mode: 'full' as 'full' | 'incremental' | 'gas-only' | 'heartbeat',
-  changedPools: 0,
-  stateReadMs: 0,
-  balanceReadMs: 0,
-  localSearchMs: 0,
-  exactQuoteMs: 0,
-  exactSelected: 0,
-  exactChecked: 0,
-  exactValid: 0,
-  historyProvenSelected: 0,
-  historicalClosedSuccesses: [...routeHistory.values()].reduce((sum, stats) => sum + stats.successes, 0),
-  provenVenueRoutes: [...venueRouteHistory.values()].filter(stats => stats.successes > 0).length,
-  approximateCandidates: 0,
-  routeVisits: 0,
-  marginalPruned: 0,
-  sizedRoutes: 0,
-  eventSkippedBlocks: 0,
-  fullScans: 0,
-  incrementalScans: 0,
-  gasOnlyScans: 0,
-  inactivePools: [] as string[],
-}
-let lastStatusSnapshot: any = null
 
 async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number, rawBalances: Record<string, bigint>, nativeEth: bigint, gasReserveWei: bigint, gasReserveHealthy: boolean, graph: Map<string, HopCandidate[]>) {
   const balances: Record<string, string> = { ETH: formatEther(nativeEth) }
@@ -2143,17 +1616,11 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
   const status = {
     updatedAt: new Date().toISOString(),
     keeperAddress: account.address,
-    keeperRole: KEEPER_ROLE,
-    botId: BOT_ID ?? null,
     dryRun: DRY_RUN,
     intervalMs: INTERVAL_MS,
     tickMs,
-    scanTelemetry: { ...scanTelemetry },
     poolsMonitored: ARB_POOLS.length,
-    aeonPoolsMonitored: ARB_POOLS.filter(pool => isAeonPoolKind(pool.kind)).length,
-    externalPoolsMonitored: ARB_POOLS.filter(pool => !isAeonPoolKind(pool.kind)).length,
     rpcEndpointCount: RPC_URLS.length,
-    directSequencerSubmission: SUBMIT_RPC.includes('sequencer.'),
     gasReserve: {
       requiredEth: formatEther(gasReserveWei),
       availableEth: formatEther(nativeEth),
@@ -2198,7 +1665,6 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
     recentErrors: recentErrors.slice(0, 5),
   }
 
-  lastStatusSnapshot = status
   fs.writeFileSync(statusPath, JSON.stringify(status, null, 2))
 
   // Throttled, fire-and-forget push to the shared store -- status changes
@@ -2207,111 +1673,22 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
   // Upstash's free-tier command budget fast (86,400+/day at 1s intervals).
   if (isBotStoreConfigured() && Date.now() - lastRedisStatusSync >= REDIS_STATUS_SYNC_INTERVAL_MS) {
     lastRedisStatusSync = Date.now()
-    writeBotStatus(status, BOT_ID).catch(err => console.error(`[bot store error] failed to sync status: ${err?.message ?? err}`))
+    writeBotStatus(status).catch(err => console.error(`[bot store error] failed to sync status: ${err?.message ?? err}`))
   }
 }
 
 let lastRedisStatusSync = 0
 const REDIS_STATUS_SYNC_INTERVAL_MS = parseInt(process.env.REDIS_STATUS_SYNC_INTERVAL_MS ?? '15000')
 
-async function writeStatusHeartbeat(blockNumber: bigint): Promise<void> {
-  if (!lastStatusSnapshot) return
-  scanTelemetry.lastBlock = blockNumber.toString()
-  scanTelemetry.mode = 'heartbeat'
-  scanTelemetry.changedPools = 0
-  scanTelemetry.eventSkippedBlocks++
-  const status = {
-    ...lastStatusSnapshot,
-    updatedAt: new Date().toISOString(),
-    pendingTransaction,
-    scanTelemetry: { ...scanTelemetry },
-  }
-  lastStatusSnapshot = status
-  fs.writeFileSync(statusPath, JSON.stringify(status, null, 2))
-  if (isBotStoreConfigured() && Date.now() - lastRedisStatusSync >= REDIS_STATUS_SYNC_INTERVAL_MS) {
-    lastRedisStatusSync = Date.now()
-    writeBotStatus(status, BOT_ID).catch(err => console.error(`[bot store error] failed to sync heartbeat: ${err?.message ?? err}`))
-  }
-}
-
 // ─── Execution ────────────────────────────────────────────────────────────────
 
 type ExecResult = 'skipped' | 'attempted'
 
-// Monotonic nonce guard. With multiple RPC endpoints behind failover, a raw
-// getTransactionCount can land on an endpoint lagging behind our own
-// just-sent txs and hand back a nonce we already used -> "nonce lower than
-// the current nonce", which was silently killing every ETH->WETH wrap and
-// so starving all WETH-funded cycles. This keeps a high-water mark so we
-// never reissue a nonce, while still jumping forward if the chain's pending
-// count ever exceeds ours. A high-nonce response means a gap exists, so the
-// next write must deliberately resync DOWN from the confirmed count instead
-// of continuing to walk the local high-water upward.
-let nonceHighWater = -1
-let forceLatestNonceRead = false
-async function acquireNonce(): Promise<number> {
-  // walletRpc (single pinned endpoint), NOT pub (fallback) -- the nonce must
-  // be read from the SAME node the tx is submitted to, or the two disagree.
-  if (forceLatestNonceRead) {
-    const rpcLatest = await walletRpc.getTransactionCount({ address: account.address, blockTag: 'latest' })
-    forceLatestNonceRead = false
-    nonceHighWater = rpcLatest
-    return rpcLatest
-  }
-  const rpcPending = await walletRpc.getTransactionCount({ address: account.address, blockTag: 'pending' })
-  const n = rpcPending > nonceHighWater ? rpcPending : nonceHighWater + 1
-  nonceHighWater = n
-  return n
-}
-
-type NonceErrorKind = 'too-low' | 'too-high' | 'other' | null
-function classifyNonceError(err: any): NonceErrorKind {
-  const message = String(err?.shortMessage ?? err?.message ?? err).toLowerCase()
-  if (!message.includes('nonce')) return null
-  if (
-    message.includes('nonce too high')
-    || message.includes('nonce is too high')
-    || (message.includes('nonce provided') && message.includes('higher than'))
-    || message.includes('higher than the next one expected')
-  ) return 'too-high'
-  if (
-    message.includes('nonce too low')
-    || message.includes('nonce is too low')
-    || (message.includes('nonce provided') && message.includes('lower than'))
-    || message.includes('lower than the current nonce')
-    || message.includes('nonce has already been used')
-  ) return 'too-low'
-  return 'other'
-}
-
 async function writeContractTracked(args: any, label: string): Promise<{ hash: `0x${string}`; receipt: any }> {
-  const nonce = await acquireNonce()
+  const nonce = await pub.getTransactionCount({ address: account.address, blockTag: 'pending' })
   const currentGasPrice = await pub.getGasPrice()
   const initialMaxFeePerGas = (currentGasPrice * TX_FEE_HEADROOM_BPS) / 10_000n
-  // A sequencer endpoint is submit-only. Populate gas through the read RPC so
-  // viem can sign locally and make its sole sequencer call eth_sendRawTransaction.
-  const estimatedGas = args.gas ?? await pub.estimateContractGas({ ...args, account: account.address } as any)
-  const gas = (BigInt(estimatedGas) * TX_GAS_LIMIT_HEADROOM_BPS) / 10_000n + 1n
-  let hash: `0x${string}`
-  try {
-    hash = await submitPreparedContract({ ...args, gas, nonce, maxFeePerGas: initialMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
-  } catch (sendErr: any) {
-    // "nonce too low" => the chain is AHEAD of us (a lagging RPC handed back a
-    // stale pending count). Keep the high-water where acquireNonce left it so
-    // the NEXT attempt walks UP (+1) toward the real nonce -- re-reading the
-    // same lagging endpoint would just return the same too-low value and loop.
-    // A high nonce means a gap already exists. Force the next write to read
-    // the confirmed count and move DOWN. A non-nonce failure did not consume
-    // this nonce, so it is safe to reuse instead of manufacturing a gap.
-    const nonceError = classifyNonceError(sendErr)
-    if (nonceError === 'too-high') {
-      nonceHighWater = -1
-      forceLatestNonceRead = true
-    } else if (nonceError !== 'too-low') {
-      nonceHighWater = nonce - 1
-    }
-    throw sendErr
-  }
+  let hash = await wal.writeContract({ ...args, nonce, maxFeePerGas: initialMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
   const originalHash = hash
   pendingTransaction = { hash, label, nonce, submittedAt: new Date().toISOString(), replacements: 0 }
   publishPendingTransaction()
@@ -2335,7 +1712,7 @@ async function writeContractTracked(args: any, label: string): Promise<{ hash: `
     const bumpedMaxFeePerGas = initialMaxFeePerGas + (initialMaxFeePerGas * REPLACEMENT_GAS_BUMP_BPS) / 10_000n + 1n
     console.warn(`   Pending ${label} ${hash} exceeded ${PENDING_TX_TIMEOUT_MS}ms; replacing nonce ${nonce} with a ${Number(REPLACEMENT_GAS_BUMP_BPS) / 100}% gas bump`)
     try {
-      const replacementHash = await submitPreparedContract({ ...args, gas, nonce, maxFeePerGas: bumpedMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
+      const replacementHash = await wal.writeContract({ ...args, nonce, maxFeePerGas: bumpedMaxFeePerGas, maxPriorityFeePerGas: 0n } as any)
       hash = replacementHash
       pendingTransaction = { hash, label, nonce, submittedAt: new Date().toISOString(), replacements: 1 }
       publishPendingTransaction()
@@ -2416,34 +1793,6 @@ async function quoteMixedRouteExact(hops: HopCandidate[], amountIn: bigint): Pro
       )
       if (!quote) return 0n
       amount = quote.amountOut
-    } else if (hop.pool.pool.kind === 'CL') {
-      const quote = await pub.readContract({
-        address: ALGEBRA_CONTRACTS.quoterV2,
-        abi: ALGEBRA_QUOTER_ABI,
-        functionName: 'quoteExactInputSingle',
-        args: [{
-          tokenIn: getAddress(TOKENS[hop.tokenInSym as keyof typeof TOKENS].address),
-          tokenOut: getAddress(TOKENS[hop.tokenOutSym as keyof typeof TOKENS].address),
-          deployer: ZERO_ADDRESS,
-          amountIn: amount,
-          limitSqrtPrice: 0n,
-        }],
-      }) as readonly [bigint, bigint, bigint, number, bigint, number]
-      amount = BigInt(quote[0])
-    } else if (hop.pool.pool.kind === 'DLMM') {
-      if (amount > ((1n << 128n) - 1n)) return 0n
-      const quote = await pub.readContract({
-        address: DLMM_CONTRACTS.router,
-        abi: LB_ROUTER_ABI,
-        functionName: 'getSwapOut',
-        args: [
-          getAddress(hop.pool.pool.address),
-          amount,
-          hop.tokenInSym === hop.pool.pool.token0,
-        ],
-      }) as readonly [bigint, bigint, bigint]
-      if (BigInt(quote[0]) !== 0n) return 0n
-      amount = BigInt(quote[1])
     } else if (hop.pool.pool.kind === 'uniV4') {
       const ref = hop.pool.pool.v4PoolId ? uniswapV4Refs.get(hop.pool.pool.v4PoolId.toLowerCase()) : undefined
       if (!ref) return 0n
@@ -2461,19 +1810,6 @@ async function quoteMixedRouteExact(hops: HopCandidate[], amountIn: bigint): Pro
     if (amount <= 0n) return 0n
   }
   return amount
-}
-
-async function exactValueInUsdg(tokenSym: string, amount: bigint, graph: Map<string, HopCandidate[]>): Promise<bigint> {
-  if (amount <= 0n) return 0n
-  if (tokenSym === 'USDG') return amount
-  const path = findConversionPath(graph, tokenSym, 'USDG')
-  if (!path) return 0n
-  return quoteMixedRouteExact(path, amount)
-}
-
-function ceilDiv(numerator: bigint, denominator: bigint): bigint {
-  if (denominator <= 0n) return 0n
-  return (numerator + denominator - 1n) / denominator
 }
 
 // Cyclic routes (same start/end token) that include a CL or DLMM hop can't
@@ -2498,15 +1834,11 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
 
   console.log(`\n🔄 ARB (CL/DLMM route, via UniversalRouter): ${pairLabel}  profit ${profitPct.toFixed(3)}%  in ${formatUnits(amountIn, tokenIn.decimals)} ${tokenIn.symbol}`)
 
-  // WETH-settled cycles use native ETH directly: the executor wraps, routes,
-  // unwraps and returns ETH in one transaction. Fall back to the ERC20 path
-  // only when this tick lacks enough ETH above the protected gas reserve.
-  const useNativeCycle = tokenIn.symbol === 'WETH' && availableEthForWrap >= amountIn
-  const allowance = useNativeCycle ? amountIn : await pub.readContract({
+  const allowance = await pub.readContract({
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'allowance',
     args: [account.address, CONTRACTS.UniversalRouter],
   }) as bigint
-  const needsApproval = !useNativeCycle && allowance < amountIn
+  const needsApproval = allowance < amountIn
   const gasFloor = await gasCostFloorInToken(tokenIn.symbol, tokenIn.address, hopCandidates.length, graph, needsApproval)
   if (gasFloor === null) {
     console.warn(`   ⚠ No live WETH price path for ${tokenIn.symbol} -- can't verify profit clears gas cost, skipping for safety`)
@@ -2531,13 +1863,13 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     return 'attempted'
   }
 
-  let balIn = useNativeCycle ? await pub.getBalance({ address: account.address }) : await pub.readContract({
+  let balIn = await pub.readContract({
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
-  if (!useNativeCycle && balIn < amountIn && tokenIn.symbol === 'WETH') {
+  if (balIn < amountIn && tokenIn.symbol === 'WETH') {
     balIn = await ensureWethBalance(amountIn, availableEthForWrap)
   }
-  if (!useNativeCycle && balIn < amountIn) {
+  if (balIn < amountIn) {
     balIn = await ensureBaseTokenFunded(tokenIn.symbol as keyof typeof TOKENS, amountIn, graph)
   }
   if (balIn < amountIn) {
@@ -2569,22 +1901,16 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     const finalQuotedProfit = finalQuotedOut > amountIn ? finalQuotedOut - amountIn : 0n
     if (finalQuotedProfit < requiredProfit) {
       console.log('   Fresh executable quote no longer clears gas; not submitting')
-      return 'skipped'
+      return needsApproval ? 'attempted' : 'skipped'
     }
 
     failureStage = 'gas_estimate'
     const gasPrice = await pub.getGasPrice()
-    const executionGas = useNativeCycle
-      ? await pub.estimateContractGas({
-          account: account.address,
-          address: CONTRACTS.NativeArbExecutor, abi: AEON_NATIVE_ARB_EXECUTOR_ABI, functionName: 'executeNativeCycle',
-          args: [hops, amountOutMin, account.address, deadline], value: amountIn,
-        })
-      : await pub.estimateContractGas({
-          account: account.address,
-          address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-          args: [hops, amountIn, amountOutMin, account.address, deadline],
-        })
+    const executionGas = await pub.estimateContractGas({
+      account: account.address,
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
+    })
     const bufferedGasWei = approvalGasWei + (executionGas * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
     const exactGasInToken = weiToToken(tokenIn.symbol, bufferedGasWei, graph)
     if (exactGasInToken === null) throw new Error(`cannot convert exact gas cost into ${tokenIn.symbol}`)
@@ -2593,50 +1919,34 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     if (finalQuotedProfit < requiredProfit) {
       console.log('   Exact gas estimate removed profitability; not submitting')
       outcomeCounters.belowGas++
-      return 'skipped'
+      return 'attempted'
     }
 
-    console.log(useNativeCycle ? '   → simulate atomic ETH→WETH→route→WETH→ETH...' : '   → simulate swapExactTokensForTokens...')
+    console.log('   → simulate swapExactTokensForTokens...')
     failureStage = 'simulation'
-    const simulation = useNativeCycle
-      ? await pub.simulateContract({
-          account,
-          address: CONTRACTS.NativeArbExecutor, abi: AEON_NATIVE_ARB_EXECUTOR_ABI, functionName: 'executeNativeCycle',
-          args: [hops, amountOutMin, account.address, deadline], value: amountIn,
-        })
-      : await pub.simulateContract({
-          account,
-          address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-          args: [hops, amountIn, amountOutMin, account.address, deadline],
-        })
+    const simulation = await pub.simulateContract({
+      account,
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
+    })
     if (typeof simulation.result === 'bigint' && simulation.result < amountOutMin) {
       throw new Error('final simulation returned less than amountOutMin')
     }
 
     failureStage = 'submission'
-    console.log(useNativeCycle ? '   → execute native atomic cycle...' : '   → swapExactTokensForTokens...')
-    const { hash: hSwap, receipt } = useNativeCycle
-      ? await writeContractTracked({
-          address: CONTRACTS.NativeArbExecutor, abi: AEON_NATIVE_ARB_EXECUTOR_ABI, functionName: 'executeNativeCycle',
-          args: [hops, amountOutMin, account.address, deadline], value: amountIn,
-        }, `native arb ${pairLabel}`)
-      : await writeContractTracked({
-          address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-          args: [hops, amountIn, amountOutMin, account.address, deadline],
-        }, `arb ${pairLabel}`)
+    console.log('   → swapExactTokensForTokens...')
+    const { hash: hSwap, receipt } = await writeContractTracked({
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
+    }, `arb ${pairLabel}`)
     failureStage = 'confirmation'
 
     if (receipt.status === 'success') {
+      const balanceAfter = await pub.readContract({
+        address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
+      }) as bigint
+      const realizedGross = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n
       const totalGasWei = approvalGasWei + BigInt(receipt.gasUsed) * BigInt(receipt.effectiveGasPrice)
-      const balanceAfter = useNativeCycle
-        ? await pub.getBalance({ address: account.address })
-        : await pub.readContract({
-            address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
-          }) as bigint
-      // Native balance delta already includes transaction gas. Add it back
-      // here to recover gross route profit, then subtract it once below.
-      const grossAdjustedAfter = useNativeCycle ? balanceAfter + totalGasWei : balanceAfter
-      const realizedGross = grossAdjustedAfter > balanceBefore ? grossAdjustedAfter - balanceBefore : 0n
       const actualGasInToken = weiToToken(tokenIn.symbol, totalGasWei, graph) ?? 0n
       const realizedNet = realizedGross > actualGasInToken ? realizedGross - actualGasInToken : 0n
       const realizedNetPct = amountIn > 0n ? Number(realizedNet * 10000n / amountIn) / 100 : 0
@@ -2665,29 +1975,23 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
     countFailureOutcome(failure, failureStage)
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
     registerRouteFailure(hopCandidates, failure)
-    const reachedSubmission = failureStage === 'submission' || failureStage === 'confirmation'
-    console.error(reachedSubmission
-      ? `   ARB TRANSACTION FAILED (atomic revert): ${message}`
-      : `   Candidate rejected before submission (no transaction, no gas spent): ${message}`)
+    console.error(`   ❌ ARB FAILED (no funds lost -- amountOutMin reverts atomically): ${message}`)
+    totalFailed++
     // Route-local failures are isolated by their own cooldown and must not
     // pause unrelated routes through the global circuit breaker.
-    if (reachedSubmission && !failure.routeScoped) consecutiveFailures++
+    if (!failure.routeScoped) consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
     }
     recentErrors.unshift({ time: new Date().toISOString(), message })
     recentErrors = recentErrors.slice(0, 5)
-    if (reachedSubmission) {
-      totalFailed++
-      recordArb({
-        time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
-        amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
-        failureCategory: failure.category, failureStage, route: 'internal', venues,
-      })
-      return 'attempted'
-    }
-    return 'skipped'
+    recordArb({
+      time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
+      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
+      failureCategory: failure.category, failureStage, route: 'internal', venues,
+    })
+    return 'attempted'
   }
 }
 
@@ -2700,7 +2004,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
 
   // AeonArbKeeper (below) is vAMM/UniV2-only -- any route touching a CL or
   // DLMM pool needs the separate UniversalRouter-based path instead.
-  if (hasNonVammHop(hopCandidates) || tokenIn.symbol === 'WETH') {
+  if (hasNonVammHop(hopCandidates)) {
     return executeArbViaUniversalRouter(opp, graph, availableEthForWrap)
   }
 
@@ -2789,7 +2093,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     if (profitRaw < requiredProfit) {
       console.log('   Exact gas estimate removed profitability; not submitting')
       outcomeCounters.belowGas++
-      return 'skipped'
+      return needsApproval ? 'attempted' : 'skipped'
     }
 
     // Re-run the complete call against the latest chain state after the
@@ -2848,27 +2152,21 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
     countFailureOutcome(failure, failureStage)
     const message = `[${failure.category}/${failureStage}] ${failure.message}`
     registerRouteFailure(hopCandidates, failure)
-    const reachedSubmission = failureStage === 'submission' || failureStage === 'confirmation'
-    console.error(reachedSubmission
-      ? `   ARB TRANSACTION FAILED (atomic revert): ${message}`
-      : `   Candidate rejected before submission (no transaction, no gas spent): ${message}`)
-    if (reachedSubmission && !failure.routeScoped) consecutiveFailures++
+    console.error(`   ❌ ARB FAILED (no funds lost -- the contract reverts atomically): ${message}`)
+    totalFailed++
+    if (!failure.routeScoped) consecutiveFailures++
     if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
       pausedUntil = Date.now() + FAILURE_PAUSE_MS
       console.error(`   Circuit breaker paused execution until ${new Date(pausedUntil).toISOString()}`)
     }
     recentErrors.unshift({ time: new Date().toISOString(), message })
     recentErrors = recentErrors.slice(0, 5)
-    if (reachedSubmission) {
-      totalFailed++
-      recordArb({
-        time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
-        amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
-        failureCategory: failure.category, failureStage, route: 'internal', venues,
-      })
-      return 'attempted'
-    }
-    return 'skipped'
+    recordArb({
+      time: new Date().toISOString(), pair: pairLabel, tokenIn: tokenIn.symbol,
+      amountIn: formatUnits(amountIn, tokenIn.decimals), profit: '0', profitPct, status: 'failed', error: message,
+      failureCategory: failure.category, failureStage, route: 'internal', venues,
+    })
+    return 'attempted'
   }
 }
 
@@ -2891,10 +2189,6 @@ const SETTLEMENT_SWAP_GAS_PER_HOP = EXEC_ARB_GAS_PER_HOP
 async function executeSettlementSwap(
   opp: SettlementOpp, graph: Map<string, HopCandidate[]>, availableEthForWrap: bigint,
 ): Promise<ExecResult> {
-  // Kept only so old records/types remain readable. Cross-settlement execution
-  // is intentionally disabled: unlike a closed cycle, its P&L depends on a
-  // separate conversion price and cannot be enforced as an exact token gain.
-  if (SAME_TOKEN_ONLY) return 'skipped'
   if (Date.now() < pausedUntil) return 'skipped'
   const { tokenIn, tokenOut, hops: hopCandidates, amountIn, label } = opp
   if (routeCooldownRemaining(hopCandidates) > 0) return 'skipped'
@@ -2910,16 +2204,11 @@ async function executeSettlementSwap(
     return 'skipped'
   }
 
-  // When spare native ETH covers a WETH-starting settlement, the native
-  // executor wraps and routes it in one transaction. No standalone WETH
-  // wrap or ERC20 approval is needed, so the opportunity cannot disappear
-  // between funding and execution.
-  const useNativeSettlement = tokenIn.symbol === 'WETH' && availableEthForWrap >= amountIn
-  const allowance = useNativeSettlement ? amountIn : await pub.readContract({
+  const allowance = await pub.readContract({
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'allowance',
     args: [account.address, CONTRACTS.UniversalRouter],
   }) as bigint
-  const needsApproval = !useNativeSettlement && allowance < amountIn
+  const needsApproval = allowance < amountIn
 
   const gasPrice = await pub.getGasPrice()
   let approveGasEstimate = 0n
@@ -2937,30 +2226,10 @@ async function executeSettlementSwap(
   const gasUsdg = valueInUsdg('WETH', gasWei, graph)
   console.log(`   Est. gas cost: ~${formatUnits(gasUsdg, TOKENS.USDG.decimals)} USDG`)
 
-  let inUsdgValue = 0n
-  let exactOut = 0n
-  let exactOutUsdg = 0n
-  let amountOutMin = 0n
-  const refreshExecutableFloor = async (): Promise<boolean> => {
-    exactOut = await quoteMixedRouteExact(hopCandidates, amountIn)
-    if (exactOut <= 0n) return false
-    inUsdgValue = await exactValueInUsdg(tokenIn.symbol, amountIn, graph)
-    exactOutUsdg = await exactValueInUsdg(tokenOut.symbol, exactOut, graph)
-    const requiredOutUsdg = inUsdgValue + gasUsdg + 1n
-    if (inUsdgValue <= 0n || exactOutUsdg <= requiredOutUsdg) return false
-
-    // Convert the required USDG floor into output-token units using the
-    // current executable quote itself. The old fee-free spot conversion is
-    // what made AEON routes look profitable and then revert on-chain.
-    amountOutMin = ceilDiv(exactOut * requiredOutUsdg, exactOutUsdg)
-    if (amountOutMin <= 0n || exactOut < amountOutMin) return false
-    opp.amountOut = exactOut
-    opp.profitUsdg = exactOutUsdg - inUsdgValue
-    opp.profitPct = Number(opp.profitUsdg * 10_000n / inUsdgValue) / 100
-    return true
-  }
-
-  if (!(await refreshExecutableFloor())) {
+  const inUsdgValue = tokenIn.symbol === 'USDG' ? amountIn : convertSpot(amountIn, inUsdgPath)
+  const requiredOutUsdg = inUsdgValue + gasUsdg + 1n
+  const amountOutMin = tokenOut.symbol === 'USDG' ? requiredOutUsdg : convertSpotReverse(requiredOutUsdg, outUsdgPath)
+  if (amountOutMin <= 0n || opp.amountOut < amountOutMin) {
     console.log('   Profit does not clear the estimated gas cost, skipping')
     return 'skipped'
   }
@@ -2976,13 +2245,13 @@ async function executeSettlementSwap(
     return 'attempted'
   }
 
-  let balIn = useNativeSettlement ? await pub.getBalance({ address: account.address }) : await pub.readContract({
+  let balIn = await pub.readContract({
     address: tokenIn.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
   }) as bigint
-  if (!useNativeSettlement && balIn < amountIn && tokenIn.symbol === 'WETH') {
+  if (balIn < amountIn && tokenIn.symbol === 'WETH') {
     balIn = await ensureWethBalance(amountIn, availableEthForWrap)
   }
-  if (!useNativeSettlement && balIn < amountIn) {
+  if (balIn < amountIn) {
     balIn = await ensureBaseTokenFunded(tokenIn.symbol as keyof typeof TOKENS, amountIn, graph)
   }
   if (balIn < amountIn) {
@@ -3005,50 +2274,22 @@ async function executeSettlementSwap(
         address: tokenIn.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.UniversalRouter, MAX_UINT256],
       }, 'settlement approval')
       approvalGasWei = (approveReceipt.gasUsed as bigint) * (approveReceipt.effectiveGasPrice as bigint)
-      failureStage = 'quote'
-      if (!(await refreshExecutableFloor())) {
-        console.log('   Fresh executable quote no longer clears gas; not submitting')
-        return 'attempted'
-      }
-    }
-    if (!needsApproval && !(await refreshExecutableFloor())) {
-      console.log('   Fresh executable quote no longer clears gas; not submitting')
-      return 'skipped'
     }
 
     console.log('   → simulate swapExactTokensForTokens...')
     failureStage = 'simulation'
-    if (useNativeSettlement) {
-      await pub.simulateContract({
-        account,
-        address: CONTRACTS.NativeArbExecutor,
-        abi: AEON_NATIVE_ARB_EXECUTOR_ABI,
-        functionName: 'executeNativeSettlement',
-        args: [hops, amountOutMin, account.address, deadline],
-        value: amountIn,
-      })
-    } else {
-      await pub.simulateContract({
-        account,
-        address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-        args: [hops, amountIn, amountOutMin, account.address, deadline],
-      })
-    }
+    await pub.simulateContract({
+      account,
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
+    })
 
     console.log('   → swapExactTokensForTokens...')
     failureStage = 'submission'
-    const { hash: hSwap, receipt } = useNativeSettlement
-      ? await writeContractTracked({
-          address: CONTRACTS.NativeArbExecutor,
-          abi: AEON_NATIVE_ARB_EXECUTOR_ABI,
-          functionName: 'executeNativeSettlement',
-          args: [hops, amountOutMin, account.address, deadline],
-          value: amountIn,
-        }, 'atomic native settlement')
-      : await writeContractTracked({
-          address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
-          args: [hops, amountIn, amountOutMin, account.address, deadline],
-        }, 'cross-settlement swap')
+    const { hash: hSwap, receipt } = await writeContractTracked({
+      address: CONTRACTS.UniversalRouter, abi: AEON_UNIVERSAL_ROUTER_ABI, functionName: 'swapExactTokensForTokens',
+      args: [hops, amountIn, amountOutMin, account.address, deadline],
+    }, 'cross-settlement swap')
     failureStage = 'confirmation'
 
     if (receipt.status === 'success') {
@@ -3056,10 +2297,7 @@ async function executeSettlementSwap(
         address: tokenOut.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [account.address],
       }) as bigint
       const realizedOut = balanceAfterOut > balanceBeforeOut ? balanceAfterOut - balanceBeforeOut : 0n
-      let realizedOutUsdg = await exactValueInUsdg(tokenOut.symbol, realizedOut, graph)
-      if (realizedOutUsdg <= 0n) {
-        realizedOutUsdg = tokenOut.symbol === 'USDG' ? realizedOut : convertSpot(realizedOut, outUsdgPath)
-      }
+      const realizedOutUsdg = tokenOut.symbol === 'USDG' ? realizedOut : convertSpot(realizedOut, outUsdgPath)
       const totalGasWei = approvalGasWei + (receipt.gasUsed as bigint) * (receipt.effectiveGasPrice as bigint)
       const gasUsdgActual = valueInUsdg('WETH', totalGasWei, graph)
       const realizedGrossUsdg = realizedOutUsdg > inUsdgValue ? realizedOutUsdg - inUsdgValue : 0n
@@ -3757,42 +2995,17 @@ async function executeCashcatV3Arb(opp: CashcatV3Opp, graph: Map<string, HopCand
 // before the second leg, holding the intermediate token rather than force a
 // losing trade if it's no longer profitable after re-quote.
 
-// Do not hard-code intermediate tokens here. The atomic pool-graph scanner
-// above has always considered every connected token, and this slower
-// aggregator fallback must follow the same rule. Derive candidates from the
-// external pools Mirajane currently monitors, so a newly configured token
-// (PONS, another meme token, etc.) becomes eligible automatically as soon as
-// at least one executable external pool for it has been discovered.
-//
-// Aggregator public APIs are rate limited, so scan a rotating batch rather
-// than issuing requests for every token in the same tick. This changes only
-// cadence, not coverage: every eligible token gets a turn without CASHCAT or
-// VIRTUAL receiving special treatment.
-const EXTERNAL_ARB_CANDIDATES_PER_SCAN = Math.max(1, parseInt(process.env.EXTERNAL_ARB_CANDIDATES_PER_SCAN ?? '4'))
-let externalArbCandidateCursor = 0
-
-function externalArbMidCandidates(): (keyof typeof TOKENS)[] {
-  const eligible = new Set<keyof typeof TOKENS>()
-  for (const pool of ARB_POOLS) {
-    if (isAeonPoolKind(pool.kind)) continue
-    for (const sym of [pool.token0, pool.token1]) {
-      if (sym === 'ETH') continue
-      if ((SETTLEMENT_TOKENS as readonly string[]).includes(String(sym))) continue
-      if (UNISWAP_UNSUPPORTED_TOKENS.has(sym)) continue
-      eligible.add(sym)
-    }
-  }
-
-  const all = [...eligible].sort((a, b) => String(a).localeCompare(String(b)))
-  if (all.length <= EXTERNAL_ARB_CANDIDATES_PER_SCAN) return all
-
-  const selected: (keyof typeof TOKENS)[] = []
-  for (let i = 0; i < EXTERNAL_ARB_CANDIDATES_PER_SCAN; i++) {
-    selected.push(all[(externalArbCandidateCursor + i) % all.length])
-  }
-  externalArbCandidateCursor = (externalArbCandidateCursor + selected.length) % all.length
-  return selected
-}
+// Only the two tokens with the STRONGEST confirmed external liquidity (see
+// contracts.ts's own comments on each -- VIRTUAL has real, verified
+// WETH/VIRTUAL and USDG/VIRTUAL pools; CASHCAT trades elsewhere on this
+// chain at ~$88M/24h volume) -- deliberately a short, curated list, not
+// every non-AEON-exclusive token. OpenOcean's public tier hard-caps at 1
+// request/second with a 1-HOUR lockout on exceeding it (see aggregators.ts's
+// throttleOpenOcean) -- every extra candidate here is real request budget
+// taken from that shared, global limit, so this stays intentionally small.
+// A single size fraction for the same reason (halves the request count
+// versus trying multiple sizes per pair).
+const EXTERNAL_ARB_MID_CANDIDATES: (keyof typeof TOKENS)[] = ['VIRTUAL', 'CASHCAT']
 const EXTERNAL_ARB_SIZE_FRACTIONS = [0.10]
 
 interface ExternalArbOpp {
@@ -3811,14 +3024,13 @@ async function scanExternalToExternalArbs(
   balances: Record<string, bigint>, bases: (keyof typeof TOKENS)[],
 ): Promise<ExternalArbOpp[]> {
   const opps: ExternalArbOpp[] = []
-  const midCandidates = externalArbMidCandidates()
 
   for (const baseSym of bases) {
     const walletBal = balances[baseSym] ?? 0n
     if (walletBal <= 0n) continue
     const tokenBase = TOKENS[baseSym]
 
-    for (const midSym of midCandidates) {
+    for (const midSym of EXTERNAL_ARB_MID_CANDIDATES) {
       if (midSym === baseSym) continue
       const tokenMid = TOKENS[midSym]
 
@@ -4085,191 +3297,13 @@ async function distributeMultiGaugeRewards() {
   }
 }
 
-type RankedInternalCandidate =
-  | { kind: 'cycle'; opp: ArbOpp }
-  | { kind: 'settlement'; opp: SettlementOpp }
-
-function sortRankedCandidates(candidates: RankedInternalCandidate[]) {
-  candidates.sort((a, b) => {
-    const scoreDiff = (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
-    if (scoreDiff !== 0) return scoreDiff
-    const outputA = a.kind === 'settlement' ? a.opp.tokenOut.symbol : a.opp.tokenIn.symbol
-    const outputB = b.kind === 'settlement' ? b.opp.tokenOut.symbol : b.opp.tokenIn.symbol
-    return (SETTLEMENT_PRIORITY[outputA] ?? 99) - (SETTLEMENT_PRIORITY[outputB] ?? 99)
-  })
-}
-
-// Exact quoter calls are materially more expensive than the virtual-reserve
-// graph scan. Validate a small, diverse shortlist (including candidates for
-// every settlement input token) before anything reaches the dashboard or
-// executor. This removes false-positive WETH rows and prevents the fallback
-// loop from appearing to prefer AEON merely because those failures were the
-// only attempts recorded in Recent Activity.
-const EXACT_QUOTE_CANDIDATES_PER_TICK = Math.max(4, Math.min(32, parseInt(process.env.EXACT_QUOTE_CANDIDATES ?? '12')))
-// Six independent routes per wave stays fast without the 12-route RPC burst
-// that triggered a 60-second public-endpoint rate limit in production.
-const EXACT_QUOTE_CONCURRENCY = Math.max(2, Math.min(32, parseInt(process.env.EXACT_QUOTE_CONCURRENCY ?? '6')))
-const MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION = Math.min(6, EXACT_QUOTE_CANDIDATES_PER_TICK)
-let explorationCursor = 0
-
-async function revalidateCandidateExact(
-  candidate: RankedInternalCandidate,
-  graph: Map<string, HopCandidate[]>,
-  rankingGasPrice: bigint,
-): Promise<boolean> {
-  try {
-    const { opp } = candidate
-    const exactOut = await quoteMixedRouteExact(opp.hops, opp.amountIn)
-    if (exactOut <= 0n) return false
-
-    const gasUnits = (candidate.kind === 'settlement' ? SETTLEMENT_SWAP_GAS_BASE : EXEC_ARB_BASE_GAS)
-      + (candidate.kind === 'settlement' ? SETTLEMENT_SWAP_GAS_PER_HOP : EXEC_ARB_GAS_PER_HOP) * BigInt(opp.hops.length)
-    const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
-    const gasUsdg = await exactValueInUsdg('WETH', gasWei, graph)
-    if (gasUsdg <= 0n) return false
-
-    if (candidate.kind === 'cycle') {
-      const profitRaw = exactOut > opp.amountIn ? exactOut - opp.amountIn : 0n
-      if (profitRaw <= 0n) return false
-      const grossUsdg = await exactValueInUsdg(opp.tokenIn.symbol, profitRaw, graph)
-      if (grossUsdg <= 0n) return false
-      opp.profitRaw = profitRaw
-      opp.profitPct = Number(profitRaw * 10_000n / opp.amountIn) / 100
-      opp.gasCostUsd = Number(formatUnits(gasUsdg, TOKENS.USDG.decimals))
-      opp.expectedNetUsd = Number(formatUnits(grossUsdg - gasUsdg, TOKENS.USDG.decimals))
-      opp.routeScore = scoreOpportunity(opp, opp.expectedNetUsd)
-      return true
-    }
-
-    const inUsdg = await exactValueInUsdg(opp.tokenIn.symbol, opp.amountIn, graph)
-    const outUsdg = await exactValueInUsdg(opp.tokenOut.symbol, exactOut, graph)
-    if (inUsdg <= 0n || outUsdg <= inUsdg) return false
-    const profitUsdg = outUsdg - inUsdg
-    opp.amountOut = exactOut
-    opp.profitUsdg = profitUsdg
-    opp.profitPct = Number(profitUsdg * 10_000n / inUsdg) / 100
-    opp.gasCostUsd = Number(formatUnits(gasUsdg, TOKENS.USDG.decimals))
-    opp.expectedNetUsd = Number(formatUnits(profitUsdg - gasUsdg, TOKENS.USDG.decimals))
-    opp.routeScore = scoreOpportunity(opp, opp.expectedNetUsd)
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function exactRankedShortlist(
-  approximate: RankedInternalCandidate[],
-  graph: Map<string, HopCandidate[]>,
-  rankingGasPrice: bigint,
-): Promise<RankedInternalCandidate[]> {
-  const quoteStartedAt = Date.now()
-  const selected: RankedInternalCandidate[] = []
-  const selectedSet = new Set<RankedInternalCandidate>()
-  const add = (candidate: RankedInternalCandidate | undefined) => {
-    if (!candidate || selected.length >= EXACT_QUOTE_CANDIDATES_PER_TICK || selectedSet.has(candidate)) return
-    selected.push(candidate)
-    selectedSet.add(candidate)
-  }
-
-  // A route on cooldown already failed the real executor and must not consume
-  // another scarce exact-quote slot. It remains in the graph and is eligible
-  // again as soon as its short route-local cooldown expires.
-  const eligible = approximate.filter(candidate => routeCooldownRemaining(candidate.opp.hops) <= 0)
-  const proven = eligible
-    .filter(candidate => historicalStats(candidate.opp.hops).successes > 0)
-    .sort((a, b) => {
-      const ah = historicalStats(a.opp.hops), bh = historicalStats(b.opp.hops)
-      const aRate = (ah.successes + 1) / (ah.successes + ah.failures + 2)
-      const bRate = (bh.successes + 1) / (bh.successes + bh.failures + 2)
-      return (bh.successes * bRate) - (ah.successes * aRate)
-        || (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
-    })
-
-  // Net profit wins first. Then explicitly diversify across funded inputs and
-  // venue families before history is allowed to fill the remaining budget.
-  // That prevents yesterday's AEON/CASHCAT winners from starving a new V2/V3
-  // edge while still retaining the useful evidence in completed trades.
-  for (const candidate of eligible.slice(0, 3)) add(candidate)
-  for (const symbol of SETTLEMENT_TOKENS) {
-    add(eligible.find(candidate => candidate.opp.tokenIn.symbol === symbol))
-  }
-  if (KEEPER_ROLE === 'mirajane') {
-    add(eligible.find(candidate => candidate.opp.hops.every(hop => !isAeonPoolKind(hop.pool.pool.kind))))
-    add(eligible.find(candidate => {
-      const internal = candidate.opp.hops.some(hop => isAeonPoolKind(hop.pool.pool.kind))
-      const external = candidate.opp.hops.some(hop => !isAeonPoolKind(hop.pool.pool.kind))
-      return internal && external
-    }))
-    for (const kind of ['uniV2', 'uniV3', 'uniV4'] as PoolKind[]) {
-      add(eligible.find(candidate => candidate.opp.hops.some(hop => hop.pool.pool.kind === kind)))
-    }
-  } else if (KEEPER_ROLE === 'aeon-only') {
-    for (const kind of ['vAMM', 'CL', 'DLMM'] as PoolKind[]) {
-      add(eligible.find(candidate => candidate.opp.hops.some(hop => hop.pool.pool.kind === kind)))
-    }
-  }
-
-  // One rotating exploration candidate guarantees that an unproven family
-  // can establish its own success history instead of being permanently
-  // buried behind known routes.
-  const unproven = eligible.filter(candidate => historicalStats(candidate.opp.hops).successes === 0)
-  if (unproven.length > 0) {
-    const explorationSlots = Math.min(3, unproven.length)
-    for (let i = 0; i < explorationSlots; i++) {
-      add(unproven[(explorationCursor + i) % unproven.length])
-    }
-    explorationCursor += explorationSlots
-  }
-  for (const candidate of proven) add(candidate)
-  for (const candidate of eligible) add(candidate)
-
-  scanTelemetry.exactSelected = selected.length
-  scanTelemetry.historyProvenSelected = selected.filter(candidate => historicalStats(candidate.opp.hops).successes > 0).length
-  scanTelemetry.exactChecked = 0
-  scanTelemetry.exactValid = 0
-  const valid: RankedInternalCandidate[] = []
-  for (let i = 0; i < selected.length; i += EXACT_QUOTE_CONCURRENCY) {
-    const batch = selected.slice(i, i + EXACT_QUOTE_CONCURRENCY)
-    const results = await Promise.all(batch.map(candidate => revalidateCandidateExact(candidate, graph, rankingGasPrice)))
-    for (let j = 0; j < batch.length; j++) if (results[j]) valid.push(batch[j])
-    const checked = i + batch.length
-    scanTelemetry.exactChecked = checked
-    scanTelemetry.exactValid = valid.length
-    if (
-      checked >= MIN_EXACT_CANDIDATES_BEFORE_EARLY_EXECUTION
-        && valid.some(candidate => (candidate.opp.expectedNetUsd ?? -Infinity) > 0)
-    ) break
-  }
-  sortRankedCandidates(valid)
-  scanTelemetry.exactQuoteMs = Date.now() - quoteStartedAt
-  return valid
-}
-
-// Bounds how many already-exact candidates are attempted per tick.
+// Bounds how many candidates get a real gas-floor check (each costs RPC
+// calls) before giving up for the tick -- sorted descending by profitPct,
+// so this only matters when the top few all fail to clear gas.
 const EXECUTION_CANDIDATES_PER_TICK = 10
 
-async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
+async function tick() {
   const t0 = Date.now()
-  scanTelemetry.lastBlock = observedBlock?.toString() ?? scanTelemetry.lastBlock
-  scanTelemetry.mode = changedPoolKeys
-    ? (changedPoolKeys.size > 0 ? 'incremental' : 'gas-only')
-    : 'full'
-  scanTelemetry.changedPools = changedPoolKeys?.size ?? ARB_POOLS.length
-  scanTelemetry.stateReadMs = 0
-  scanTelemetry.balanceReadMs = 0
-  scanTelemetry.localSearchMs = 0
-  scanTelemetry.exactQuoteMs = 0
-  scanTelemetry.exactSelected = 0
-  scanTelemetry.exactChecked = 0
-  scanTelemetry.exactValid = 0
-  scanTelemetry.historyProvenSelected = 0
-  scanTelemetry.approximateCandidates = 0
-  scanTelemetry.routeVisits = 0
-  scanTelemetry.marginalPruned = 0
-  scanTelemetry.sizedRoutes = 0
-  if (!changedPoolKeys) scanTelemetry.fullScans++
-  else if (changedPoolKeys.size > 0) scanTelemetry.incrementalScans++
-  else scanTelemetry.gasOnlyScans++
 
   try {
     cachedGasPrice = await pub.getGasPrice()
@@ -4284,34 +3318,25 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     recentErrors = recentErrors.slice(0, 5)
   }
 
-  if (!poolDiscoveryInFlight && Date.now() - lastPoolRefresh >= POOL_REFRESH_INTERVAL_MS) {
+  if (Date.now() - lastPoolRefresh >= POOL_REFRESH_INTERVAL_MS) {
     lastPoolRefresh = Date.now()
-    poolDiscoveryInFlight = true
-    const refreshStartedAt = Date.now()
-    void (async () => {
+    try {
       const before = ARB_POOLS.length
       const counts = await refreshPoolDiscovery()
       const added = ARB_POOLS.length - before
       if (added > 0) {
-        poolStateCacheReady = false
         console.log(`\n[${new Date().toISOString()}] Pool discovery refresh: +${added} new pools (now ${ARB_POOLS.length} monitored) -- uniV2:${counts.uniswapV2} uniV3:${counts.uniswapV3} uniV4:${counts.uniswapV4} CL:${counts.cl} DLMM:${counts.dlmm}`)
       }
-      console.log(`[pool discovery refresh complete] ${Date.now() - refreshStartedAt}ms`)
-    })().catch((err: any) => {
+    } catch (err: any) {
       const message = err?.message ?? String(err)
       console.error(`[pool discovery refresh error] ${message}`)
       recentErrors.unshift({ time: new Date().toISOString(), message })
       recentErrors = recentErrors.slice(0, 5)
-    }).finally(() => { poolDiscoveryInFlight = false })
+    }
   }
   let states: PoolState[]
-  const stateReadStartedAt = Date.now()
   try {
-    states = await fetchAllStates(changedPoolKeys)
-    scanTelemetry.stateReadMs = Date.now() - stateReadStartedAt
-    scanTelemetry.inactivePools = ARB_POOLS
-      .filter(pool => !poolStateCache.has(poolStateKey(pool)))
-      .map(pool => pool.name)
+    states = await fetchAllStates()
   } catch (err: any) {
     const message = err?.message ?? String(err)
     console.error(`[RPC error] ${message}`)
@@ -4320,54 +3345,25 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     return
   }
 
-  // Reuse the opening-tick gas price. Fetching it again here added another
-  // RPC round trip without improving freshness inside the same block.
-  const rankingGasPrice = cachedGasPrice ?? await pub.getGasPrice()
+  const rankingGasPrice = await pub.getGasPrice()
   const graph = buildGraph(states)
-  const balanceReadStartedAt = Date.now()
   let balanceSnapshot = await fetchBalances(rankingGasPrice)
-  // Reuse the batched balance snapshot rather than issuing a separate WETH
-  // balance RPC every block. Refresh balances only if an unwrap actually ran.
-  if (await unwrapIdleWeth(balanceSnapshot.balances.WETH ?? 0n)) {
-    balanceSnapshot = await fetchBalances(rankingGasPrice)
-  }
   if (!balanceSnapshot.gasReserveHealthy) {
     const refilled = await ensureNativeGasReserve(balanceSnapshot.nativeEth, balanceSnapshot.gasReserveWei, rankingGasPrice, graph)
     if (refilled) balanceSnapshot = await fetchBalances(rankingGasPrice)
   }
-  scanTelemetry.balanceReadMs = Date.now() - balanceReadStartedAt
   const { balances, searchBalances, nativeEth, availableEthForWrap, gasReserveWei, gasReserveHealthy } = balanceSnapshot
   const bases = candidateBaseTokens(searchBalances)
-  const localSearchStartedAt = Date.now()
   // Signed, NOT floored at zero -- this feeds the dashboard's "net est."
   // figure too, and a trade that doesn't clear gas needs to show as
   // negative there, not as a misleading "$0.0000" sitting next to a
   // positive-looking gross profit number.
-  // There are normally hundreds of approximate routes but only three
-  // settlement currencies and a handful of hop counts. Cache the identical
-  // spot-conversion work instead of running a BFS twice for every route.
-  const usdgConversionPaths = new Map<string, HopCandidate[] | null>()
-  const usdgPathFor = (tokenSym: string): HopCandidate[] | null => {
-    if (!usdgConversionPaths.has(tokenSym)) {
-      usdgConversionPaths.set(tokenSym, tokenSym === 'USDG' ? [] : findConversionPath(graph, tokenSym, 'USDG'))
-    }
-    return usdgConversionPaths.get(tokenSym)!
-  }
-  const valueInUsdgCached = (tokenSym: string, amount: bigint): bigint => {
-    const path = usdgPathFor(tokenSym)
-    return path ? convertSpot(amount, path) : 0n
-  }
-  const gasUsdgByHopCount = new Map<number, bigint>()
   const gasUsdgFor = (opp: ArbOpp) => {
-    const cached = gasUsdgByHopCount.get(opp.hops.length)
-    if (cached !== undefined) return cached
     const gasUnits = EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * BigInt(opp.hops.length)
     const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
-    const gasUsdg = valueInUsdgCached('WETH', gasWei)
-    gasUsdgByHopCount.set(opp.hops.length, gasUsdg)
-    return gasUsdg
+    return valueInUsdg('WETH', gasWei, graph)
   }
-  const expectedNetUsdg = (opp: ArbOpp) => valueInUsdgCached(opp.tokenIn.symbol, opp.profitRaw) - gasUsdgFor(opp)
+  const expectedNetUsdg = (opp: ArbOpp) => valueInUsdg(opp.tokenIn.symbol, opp.profitRaw, graph) - gasUsdgFor(opp)
   const opps = bases.flatMap(baseSym => findArbs(graph, baseSym, searchBalances[baseSym] ?? 0n))
   for (const opp of opps) {
     const netUsd = Number(formatUnits(expectedNetUsdg(opp), TOKENS.USDG.decimals))
@@ -4391,23 +3387,20 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     opp.routeScore = scoreOpportunity(opp, netUsd)
   }
 
-  let approximateCandidates: RankedInternalCandidate[] = [
+  type RankedInternalCandidate =
+    | { kind: 'cycle'; opp: ArbOpp }
+    | { kind: 'settlement'; opp: SettlementOpp }
+  const rankedCandidates: RankedInternalCandidate[] = [
     ...opps.map(opp => ({ kind: 'cycle' as const, opp })),
     ...settlementOpps.map(opp => ({ kind: 'settlement' as const, opp })),
-  ].filter(candidate => routeAllowedForRole(candidate.opp.hops))
-  // On an event-driven scan, a route whose pools did not change cannot have
-  // developed a new reserve edge. Restricting the expensive exact-quote wave
-  // to routes touching the changed pool is the defender's main latency win.
-  // Full and gas-only scans still consider every role-eligible route.
-  if (changedPoolKeys && changedPoolKeys.size > 0) {
-    approximateCandidates = approximateCandidates.filter(candidate =>
-      candidate.opp.hops.some(hop => changedPoolKeys.has(poolStateKey(hop.pool.pool))),
-    )
-  }
-  scanTelemetry.approximateCandidates = approximateCandidates.length
-  sortRankedCandidates(approximateCandidates)
-  scanTelemetry.localSearchMs = Date.now() - localSearchStartedAt
-  const rankedCandidates = await exactRankedShortlist(approximateCandidates, graph, rankingGasPrice)
+  ]
+  rankedCandidates.sort((a, b) => {
+    const scoreDiff = (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
+    if (scoreDiff !== 0) return scoreDiff
+    const outputA = a.kind === 'settlement' ? a.opp.tokenOut.symbol : a.opp.tokenIn.symbol
+    const outputB = b.kind === 'settlement' ? b.opp.tokenOut.symbol : b.opp.tokenIn.symbol
+    return (SETTLEMENT_PRIORITY[outputA] ?? 99) - (SETTLEMENT_PRIORITY[outputB] ?? 99)
+  })
   outcomeCounters.detected += rankedCandidates.length
   const tickMs = Date.now() - t0
 
@@ -4428,32 +3421,16 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     for (const { opp: o } of rankedCandidates.slice(0, 5)) {
       console.log(`  ${o.label}  ${o.profitPct.toFixed(3)}%  (in: ${formatUnits(o.amountIn, o.tokenIn.decimals)} ${o.tokenIn.symbol})`)
     }
-    // Fire EVERY net-positive opportunity this tick that is independent of the
-    // ones already fired -- i.e. shares no pool (so reserves it read are still
-    // valid) and no input token (so the balance it was sized from isn't already
-    // committed). Previously the bot stopped after the first attempt and
-    // rescanned, leaving disjoint, independently-profitable trades on the table
-    // every tick. Each attempt is still simulated first, so a stale one costs
-    // zero gas -- this only adds fills, never risk.
-    const touchedPools = new Set<string>()
-    const committedInputs = new Set<string>()
     for (const candidate of rankedCandidates.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
       const { opp } = candidate
-      const finalToken = opp.hops.at(-1)?.tokenOutSym
-      if (candidate.kind !== 'cycle' || finalToken !== opp.tokenIn.symbol) {
-        console.error(`   BLOCKED non-closing route: ${opp.label}`)
-        continue
-      }
       if ((opp.expectedNetUsd ?? -Infinity) <= 0 || opp.profitPct < MIN_PROFIT_PCT) continue
       if (routeCooldownRemaining(opp.hops) > 0) continue
-      const inSym = opp.tokenIn.symbol
-      const poolsUsed = opp.hops.map(h => poolStateKey(h.pool.pool))
-      if (committedInputs.has(inSym) || poolsUsed.some(p => touchedPools.has(p))) continue
-      const result = await executeArb(candidate.opp, graph, availableEthForWrap)
+      const result = candidate.kind === 'cycle'
+        ? await executeArb(candidate.opp, graph, availableEthForWrap)
+        : await executeSettlementSwap(candidate.opp, graph, availableEthForWrap)
       if (result === 'attempted') {
         anyAttempted = true
-        committedInputs.add(inSym)
-        for (const p of poolsUsed) touchedPools.add(p)
+        break
       }
     }
   }
@@ -4461,10 +3438,7 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
   // Cross-venue (OpenOcean / 1inch) scan runs on its own slower cadence --
   // reuses this tick's already-fetched states/graph/balances, only adding
   // aggregator API calls, not extra pool or balance reads.
-  // The optional aggregator paths are non-atomic. Under atomic-only safety
-  // they cannot execute, so do not spend ~20-30 seconds blocking the primary
-  // graph scanner merely to produce scan-only quotes.
-  if (!anyAttempted && gasReserveHealthy && ENABLE_CROSS_VENUE && !ATOMIC_ONLY && Date.now() - lastAggregatorScan >= AGGREGATOR_SCAN_INTERVAL_MS) {
+  if (!anyAttempted && gasReserveHealthy && ENABLE_CROSS_VENUE && Date.now() - lastAggregatorScan >= AGGREGATOR_SCAN_INTERVAL_MS) {
     lastAggregatorScan = Date.now()
     let aggAttempted = false
     try {
@@ -4522,11 +3496,11 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     }
   }
 
+  await unwrapIdleWeth()
   await writeStatus(rankedCandidates.map(candidate => candidate.opp), tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
 }
 
 interface DiscoveryCounts {
-  aeonVamm: number
   uniswapV2: number
   uniswapV3: number
   uniswapV4: number
@@ -4534,111 +3508,22 @@ interface DiscoveryCounts {
   dlmm: number
 }
 
-async function refreshPoolDiscovery(includeRemoteExternal = true): Promise<DiscoveryCounts> {
-  const aeonVamm = await discoverAeonVammPools()
-  const { cl, dlmm } = await discoverClAndDlmmPools()
-  enforceMirajanePoolCap()
-  if (KEEPER_ROLE === 'aeon-only') {
-    enforcePoolUniverseForRole()
-    return { aeonVamm, uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl, dlmm }
-  }
-  if (POOL_ALLOWLIST_ACTIVE) {
-    // Allowlist mode: skip every remote external discovery (the slow part).
-    // Still run the local CL/DLMM registration so any allowlisted CL/DLMM
-    // pool gets its proper (Algebra / LB) quoting path, then hard-filter
-    // ARB_POOLS down to exactly the allowlist.
-    applyPoolAllowlist()
-    return { aeonVamm, uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl, dlmm }
-  }
-  // The curated Mirajane manifest is a fast seed, not a permanent blindfold.
-  // Validate its V3 entries and then discover newly live external venues too.
-  await validateMirajaneV3Pools()
-  if (!includeRemoteExternal) {
-    return { aeonVamm, uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl, dlmm }
-  }
-  // Once full, recurring refreshes still register new AEON/CL/DLMM pools
-  // above, but avoid remote expansion that cannot retain another pool.
-  if (MIRAJANE_MODE && MAX_MONITORED_POOLS > 0 && ARB_POOLS.length >= MAX_MONITORED_POOLS) {
-    return { aeonVamm, uniswapV2: 0, uniswapV3: 0, uniswapV4: 0, cl, dlmm }
-  }
+async function refreshPoolDiscovery(): Promise<DiscoveryCounts> {
   const uniswapV2 = await discoverUniswapPools()
   const uniswapV3 = await discoverHighVolumeUniswapV3Pools()
   const uniswapV4 = await discoverHighVolumeUniswapV4Pools()
-  enforceMirajanePoolCap()
-  return { aeonVamm, uniswapV2, uniswapV3, uniswapV4, cl, dlmm }
+  const { cl, dlmm } = await discoverClAndDlmmPools()
+  return { uniswapV2, uniswapV3, uniswapV4, cl, dlmm }
 }
 
 let lastPoolRefresh = 0
-let poolDiscoveryInFlight = false
-
-let eventWatchPoolCount = -1
-let directEventPoolKeys = new Map<string, string[]>()
-let v4EventPoolKeys = new Map<string, string>()
-let eventWatchAddresses: `0x${string}`[] = []
-let lastEventScanWarning = 0
-
-function rebuildEventWatchIndex() {
-  if (eventWatchPoolCount === ARB_POOLS.length) return
-  directEventPoolKeys = new Map()
-  v4EventPoolKeys = new Map()
-  for (const pool of ARB_POOLS) {
-    const key = poolStateKey(pool)
-    if (pool.kind === 'uniV4' && pool.v4PoolId) {
-      v4EventPoolKeys.set(pool.v4PoolId.toLowerCase(), key)
-      continue
-    }
-    const address = pool.address.toLowerCase()
-    const keys = directEventPoolKeys.get(address) ?? []
-    keys.push(key)
-    directEventPoolKeys.set(address, keys)
-  }
-  eventWatchAddresses = [
-    ...Array.from(directEventPoolKeys.keys()).map(address => getAddress(address)),
-    UNISWAP_V4.poolManager,
-  ]
-  eventWatchPoolCount = ARB_POOLS.length
-}
-
-// Returns null when the log query itself is unavailable; callers respond by
-// doing a conservative full refresh rather than trusting incomplete state.
-async function detectChangedPoolKeys(fromBlock: bigint, toBlock: bigint): Promise<Set<string> | null> {
-  rebuildEventWatchIndex()
-  try {
-    const logs = await pub.getLogs({
-      address: eventWatchAddresses as any,
-      fromBlock,
-      toBlock,
-    } as any)
-    const changed = new Set<string>()
-    const poolManager = UNISWAP_V4.poolManager.toLowerCase()
-    for (const log of logs as any[]) {
-      const address = String(log.address ?? '').toLowerCase()
-      if (address === poolManager) {
-        const id = String(log.topics?.[1] ?? '').toLowerCase()
-        const key = v4EventPoolKeys.get(id)
-        if (key) changed.add(key)
-        continue
-      }
-      for (const key of directEventPoolKeys.get(address) ?? []) changed.add(key)
-    }
-    return changed
-  } catch (err: any) {
-    if (Date.now() - lastEventScanWarning > 30_000) {
-      lastEventScanWarning = Date.now()
-      console.warn(`[event scan fallback] ${err?.shortMessage ?? err?.message ?? err} -- performing full state refresh`)
-    }
-    return null
-  }
-}
 
 async function main() {
   let discoveryCounts: DiscoveryCounts | null = null
   let retryDelayMs = 1000
   while (!discoveryCounts) {
     try {
-      // Mirajane already has a validated curated seed. Remote factory/API
-      // expansion runs later in the background and must never block startup.
-      discoveryCounts = await refreshPoolDiscovery(KEEPER_ROLE !== 'mirajane')
+      discoveryCounts = await refreshPoolDiscovery()
     } catch (err: any) {
       const message = err?.message ?? String(err)
       console.error(`[startup discovery error] ${message}; retrying in ${retryDelayMs}ms`)
@@ -4646,13 +3531,11 @@ async function main() {
       retryDelayMs = Math.min(30_000, retryDelayMs * 2)
     }
   }
-  const { aeonVamm: aeonVammPools, uniswapV2: uniswapPools, uniswapV3: uniswapV3Pools, uniswapV4: uniswapV4Pools, cl: clPools, dlmm: dlmmPools } = discoveryCounts
+  const { uniswapV2: uniswapPools, uniswapV3: uniswapV3Pools, uniswapV4: uniswapV4Pools, cl: clPools, dlmm: dlmmPools } = discoveryCounts
   lastPoolRefresh = Date.now()
   console.log(`AEON Arb Keeper`)
   console.log(`  Keeper address: ${account.address}`)
-  console.log(`  Keeper role: ${KEEPER_ROLE}`)
   console.log(`  RPC endpoints with automatic failover: ${RPC_URLS.length}`)
-  console.log(`  Direct sequencer submission: ${SUBMIT_RPC}`)
   console.log(`  Max wallet balance per opportunity: ${Number(MAX_BALANCE_USAGE_BPS) / 100}%`)
   console.log(`  Route cooldown: after ${ROUTE_FAILURE_THRESHOLD} failures, ${ROUTE_COOLDOWN_MS}ms base`)
   console.log(`  Settlement tokens: ${BASE_TOKEN_OVERRIDE || SETTLEMENT_TOKENS.join(', ')} (AEON preferred on equal net profit)`)
@@ -4660,28 +3543,13 @@ async function main() {
   console.log(`  Atomic execution only: ${ATOMIC_ONLY}`)
   console.log(`  Max hops per cycle: ${MAX_HOPS}`)
   console.log(`  Pools monitored: ${ARB_POOLS.length}`)
-  if (MIRAJANE_MODE) {
-    const byKind = ARB_POOLS.reduce((m, p) => (m[p.kind] = (m[p.kind] || 0) + 1, m), {} as Record<string, number>)
-    console.log(`  MIRAJANE MODE -- curated seed plus live external discovery; AEON-only routes excluded: ${JSON.stringify(byKind)}`)
-    for (const p of ARB_POOLS) console.log(`    - ${p.name} [${p.kind}]${p.v3Fee ? ' fee ' + p.v3Fee : ''}${p.v4Native ? ' [native]' : ''}`)
-  } else if (POOL_ALLOWLIST_ACTIVE) {
-    console.log(`  Pool allowlist ACTIVE (${POOL_ALLOWLIST.size} pools) -- external discovery disabled:`)
-    for (const p of ARB_POOLS) console.log(`    - ${p.name} [${p.kind}] ${p.address}`)
-  }
-  console.log(`  AEON factory vAMM pools discovered: ${aeonVammPools}`)
   console.log(`  Uniswap V2 pools discovered: ${uniswapPools}`)
   console.log(`  Uniswap V3 pools above $${MIN_EXTERNAL_VOLUME_USD.toLocaleString()} volume discovered: ${uniswapV3Pools}`)
   console.log(`  Uniswap V4 pools above $${MIN_EXTERNAL_VOLUME_USD.toLocaleString()} volume discovered: ${uniswapV4Pools}`)
   console.log(`  AEON CL pools discovered: ${clPools}  |  AEON DLMM pools discovered: ${dlmmPools}`)
   console.log(`  Pool discovery refresh interval: ${POOL_REFRESH_INTERVAL_MS}ms`)
-  console.log(`  Mirajane pool ceiling: ${MIRAJANE_MODE && MAX_MONITORED_POOLS > 0 ? MAX_MONITORED_POOLS : 'disabled'}`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
-  console.log(`  Exact gas safety margin: ${Number(GAS_SAFETY_MULT_PCT) / 100}x`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
-  console.log(`  Block-aware scanning: enabled (at most one full scan per observed block)`)
-  console.log(`  Event-driven pool refresh: ${EVENT_DRIVEN_SCANNING ? `enabled (${FULL_STATE_REFRESH_MS}ms safety refresh, ${GAS_ONLY_RECHECK_MS}ms gas recheck)` : 'disabled'}`)
-  console.log(`  Exact quote wave: up to ${EXACT_QUOTE_CANDIDATES_PER_TICK} candidates / ${EXACT_QUOTE_CONCURRENCY} concurrent`)
-  console.log(`  Historical learning: ${scanTelemetry.historicalClosedSuccesses} closed-cycle successes across ${scanTelemetry.provenVenueRoutes} proven venue routes`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)
   console.log(`  Cross-venue scan: ${ENABLE_CROSS_VENUE ? 'enabled' : 'disabled'}`)
   console.log(`  Non-atomic cross-venue execution: ${ENABLE_CROSS_VENUE && !ATOMIC_ONLY ? 'enabled' : 'disabled'}`)
@@ -4690,55 +3558,9 @@ async function main() {
   console.log(`  Status file: ${statusPath}`)
   console.log()
 
-  let lastScannedBlock: bigint | null = null
-  let lastFullStateRefresh = 0
-  let lastGasOnlyRecheck = 0
   while (true) {
-    try {
-      const blockNumber = await pub.getBlockNumber()
-      if (lastScannedBlock !== null && blockNumber === lastScannedBlock) {
-        await new Promise(r => setTimeout(r, INTERVAL_MS))
-        continue
-      }
-      const previousBlock = lastScannedBlock
-      lastScannedBlock = blockNumber
-      const now = Date.now()
-      const forceFull = !EVENT_DRIVEN_SCANNING
-        || !poolStateCacheReady
-        || now - lastFullStateRefresh >= FULL_STATE_REFRESH_MS
-
-      if (forceFull) {
-        lastFullStateRefresh = now
-        lastGasOnlyRecheck = now
-        await tick(undefined, blockNumber).catch(e => console.error('[tick error]', e))
-      } else {
-        // A shallow reorg can lower the observed head. Query the replacement
-        // block directly instead of constructing an invalid inverted range.
-        const fromBlock = previousBlock === null || blockNumber <= previousBlock
-          ? blockNumber
-          : previousBlock + 1n
-        const changed = await detectChangedPoolKeys(fromBlock, blockNumber)
-        if (changed === null) {
-          lastFullStateRefresh = now
-          lastGasOnlyRecheck = now
-          await tick(undefined, blockNumber).catch(e => console.error('[tick error]', e))
-        } else if (changed.size > 0) {
-          lastGasOnlyRecheck = now
-          await tick(changed, blockNumber).catch(e => console.error('[tick error]', e))
-        } else if (now - lastGasOnlyRecheck >= GAS_ONLY_RECHECK_MS) {
-          lastGasOnlyRecheck = now
-          await tick(changed, blockNumber).catch(e => console.error('[tick error]', e))
-        } else {
-          await writeStatusHeartbeat(blockNumber)
-        }
-      }
-      // Do not add a fixed delay after a slow scan or transaction. If a new
-      // block arrived while it was running, rescan immediately; otherwise
-      // the same-block branch above applies the configured poll interval.
-    } catch (e) {
-      console.error('[block poll error]', e)
-      await new Promise(r => setTimeout(r, INTERVAL_MS))
-    }
+    await tick().catch(e => console.error('[tick error]', e))
+    await new Promise(r => setTimeout(r, INTERVAL_MS))
   }
 }
 

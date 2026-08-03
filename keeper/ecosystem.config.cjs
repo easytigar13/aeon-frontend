@@ -13,13 +13,12 @@
 module.exports = {
   apps: [
     {
-      // Load tsx inside PM2's managed Node process. Pointing PM2 at tsx's CLI
-      // creates a child worker that can survive restarts and keep running stale
-      // trading logic beside the replacement process.
+      // Calls tsx's own entry point directly instead of going through `npx` --
+      // pm2 on Windows can't execute the npx.cmd shim as a script (it tries to
+      // parse the batch file as JavaScript and fails immediately).
       name: 'aeon-arb-keeper',
-      script: './index.ts',
-      interpreter: 'node',
-      node_args: '--import tsx',
+      script: './node_modules/tsx/dist/cli.mjs',
+      args: 'index.ts',
       cwd: __dirname,
       autorestart: true,
       restart_delay: 5000,

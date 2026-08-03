@@ -66,6 +66,7 @@ interface BotStatus {
   keeperAddress?: string
   dryRun?: boolean
   intervalMs?: number
+  tickMs?: number
   poolsMonitored?: number
   poolsLiveThisTick?: number
   venueBreakdown?: Record<string, { total: number; live: number }>
@@ -234,6 +235,60 @@ function BotPageInner() {
                 and cannot move these funds.
               </p>
             </GlowPanel>
+
+            {/* Live Diagnostics & Reason Banner */}
+            {isOnline && (
+              <GlowPanel accent="aeon" className="p-6 mb-6">
+                <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                  <div className="flex items-center gap-2 text-text-primary font-mono text-sm font-semibold uppercase tracking-wider">
+                    <Activity size={16} className="text-aeon-400 animate-pulse" /> Live Scanner Diagnostics
+                  </div>
+                  <div className="text-xs font-mono text-text-muted">
+                    Updated {Math.round((Date.now() - new Date(status.updatedAt!).getTime()) / 1000)}s ago
+                    {status.tickMs ? ` · Tick time ${status.tickMs}ms` : ''}
+                  </div>
+                </div>
+
+                {status.lastOpportunities && status.lastOpportunities.length > 0 ? (
+                  (() => {
+                    const topOpp = status.lastOpportunities[0]
+                    const isNetLoss = topOpp.expectedNetUsd != null && topOpp.expectedNetUsd < 0
+                    return (
+                      <div className="rounded-xl bg-bg-base/80 border border-bg-border p-4 text-sm">
+                        <div className="flex items-start gap-3">
+                          {isNetLoss ? (
+                            <AlertTriangle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                          ) : (
+                            <Zap size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+                          )}
+                          <div>
+                            <div className="font-semibold text-text-primary mb-1">
+                              {isNetLoss ? 'Opportunities Detected — Filtered by Gas Floor' : 'Profitable Trade Executable'}
+                            </div>
+                            <p className="text-text-secondary text-xs leading-relaxed">
+                              Top route <code className="font-mono text-aeon-400">{topOpp.pair}</code> shows gross yield of{' '}
+                              <span className="font-mono text-emerald-400">+{topOpp.profitPct}%</span>
+                              {topOpp.grossProfitUsd != null && <> ($\sim${topOpp.grossProfitUsd.toFixed(4)})</>}.
+                              {isNetLoss && topOpp.gasCostUsd != null && (
+                                <>
+                                  {' '}Estimated gas cost ($\sim${topOpp.gasCostUsd.toFixed(4)}) exceeds gross gain.
+                                  Net yield is <span className="font-mono text-red-400 font-bold">-${Math.abs(topOpp.expectedNetUsd!).toFixed(4)}</span>.
+                                  The bot automatically filters out net-negative trades to preserve wallet funds.
+                                </>
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()
+                ) : (
+                  <div className="text-xs text-text-muted font-mono">
+                    Scanning active block-by-block. No candidate opportunities clearing gas cost right now.
+                  </div>
+                )}
+              </GlowPanel>
+            )}
 
             {/* Stat row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">

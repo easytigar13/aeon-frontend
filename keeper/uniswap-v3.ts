@@ -15,10 +15,6 @@ export const UNISWAP_V3_FACTORY_ABI = [{
 }] as const
 
 export const UNISWAP_V3_POOL_ABI = [
-  { name: 'factory', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
-  { name: 'fee', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint24' }] },
-  { name: 'token0', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
-  { name: 'token1', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'address' }] },
   { name: 'liquidity', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint128' }] },
   { name: 'slot0', type: 'function', stateMutability: 'view', inputs: [], outputs: [
     { name: 'sqrtPriceX96', type: 'uint160' }, { name: 'tick', type: 'int24' },
@@ -97,3 +93,4 @@ export async function quoteUniswapV3ExactInput(
     return null
   }
 }
+
