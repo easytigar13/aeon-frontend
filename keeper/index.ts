@@ -3827,6 +3827,7 @@ async function exactRankedShortlist(
 
 // Bounds how many already-exact candidates are attempted per tick.
 const EXECUTION_CANDIDATES_PER_TICK = 10
+let lastReportedCandidateOpps: (ArbOpp | SettlementOpp)[] = []
 
 async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
   const t0 = Date.now()
@@ -4086,9 +4087,12 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     }
   }
 
+  if (approximateCandidates.length > 0) {
+    lastReportedCandidateOpps = approximateCandidates.slice(0, 5).map(c => c.opp)
+  }
   const reportedOpps = rankedCandidates.length > 0
     ? rankedCandidates.map(candidate => candidate.opp)
-    : approximateCandidates.slice(0, 5).map(candidate => candidate.opp)
+    : lastReportedCandidateOpps
 
   await writeStatus(reportedOpps, tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
 }
