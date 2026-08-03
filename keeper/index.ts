@@ -3508,7 +3508,10 @@ async function tick() {
   }
 
   await unwrapIdleWeth()
-  await writeStatus(rankedCandidates.map(candidate => candidate.opp), tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
+  const liveOpps = rankedCandidates
+    .filter(c => routeCooldownRemaining(c.opp.hops) === 0)
+    .map(c => c.opp)
+  await writeStatus(liveOpps, tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
 }
 
 interface DiscoveryCounts {
