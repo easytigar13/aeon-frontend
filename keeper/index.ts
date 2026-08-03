@@ -128,7 +128,7 @@ const ENABLE_CROSS_VENUE = process.env.ENABLE_CROSS_VENUE === 'true'
 // three assets. They still execute every hop atomically and enforce a live
 // USDG-equivalent output floor above input value + gas. Set true to restore
 // the stricter same-token-only mode.
-const SAME_TOKEN_ONLY = process.env.SAME_TOKEN_ONLY === 'true'
+const SAME_TOKEN_ONLY = process.env.SAME_TOKEN_ONLY !== 'false'
 const ATOMIC_ONLY = process.env.ATOMIC_ONLY !== 'false'
 
 // Re-run idempotent venue discovery so newly created pools and pools that
@@ -811,7 +811,7 @@ function sizingDivisor(kind: PoolKind): bigint {
 // Safety valve on the DFS below -- bails out rather than block the tick loop
 // indefinitely if the pool graph ever grows dense enough for exhaustive
 // simple-cycle enumeration up to MAX_HOPS to blow up combinatorially.
-const MAX_DFS_VISITS = 200_000
+const MAX_DFS_VISITS = 20_000
 
 function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKENS, walletBalance: bigint): ArbOpp[] {
   const opps: ArbOpp[] = []
