@@ -4086,7 +4086,11 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     }
   }
 
-  await writeStatus(rankedCandidates.map(candidate => candidate.opp), tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
+  const reportedOpps = rankedCandidates.length > 0
+    ? rankedCandidates.map(candidate => candidate.opp)
+    : approximateCandidates.slice(0, 5).map(candidate => candidate.opp)
+
+  await writeStatus(reportedOpps, tickMs, balances, nativeEth, gasReserveWei, gasReserveHealthy, graph)
 }
 
 interface DiscoveryCounts {
