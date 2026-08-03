@@ -3396,20 +3396,68 @@ async function tick() {
     opp.routeScore = scoreOpportunity(opp, netUsd)
   }
 
+async function revalidateCandidateExact(
+  candidate: RankedInternalCandidate,
+  graph: Map<string, HopCandidate[]>,
+  rankingGasPrice: bigint,
+): Promise<boolean> {
+  const { opp } = candidate
+  if (routeCooldownRemaining(opp.hops) > 0) return false
+
+  const deadline = BigInt(Math.floor(Date.now() / 1000) + 120)
+  const hops = opp.hops.map(h => ({
+    pool: getAddress(h.pool.pool.address),
+    tokenIn: getAddress(TOKENS[h.tokenInSym as keyof typeof TOKENS].address),
+    tokenOut: getAddress(TOKENS[h.tokenOutSym as keyof typeof TOKENS].address),
+    isUniV2: h.pool.pool.isUniV2,
+    feeBps: Number(h.pool.pool.feeBps),
+  }))
+
+  try {
+    const simulation = await pub.simulateContract({
+      account,
+      address: CONTRACTS.ArbKeeper, abi: ARB_KEEPER_ABI, functionName: 'executeArb',
+      args: [hops, opp.amountIn, 1n, deadline],
+    })
+    const realizedOut = simulation.result as bigint
+    if (realizedOut <= opp.amountIn) return false
+    const exactProfit = realizedOut - opp.amountIn
+    opp.profitRaw = exactProfit
+    opp.profitPct = Number(exactProfit * 10000n / opp.amountIn) / 100
+    const grossUsdg = valueInUsdg(opp.tokenIn.symbol, exactProfit, graph)
+    const gasUnits = EXEC_ARB_BASE_GAS + EXEC_ARB_GAS_PER_HOP * BigInt(opp.hops.length)
+    const gasWei = (gasUnits * rankingGasPrice * GAS_SAFETY_MULT_PCT) / 100n
+    const gasUsdg = valueInUsdg('WETH', gasWei, graph)
+    opp.gasCostUsd = Number(formatUnits(gasUsdg, TOKENS.USDG.decimals))
+    opp.expectedNetUsd = Number(formatUnits(grossUsdg > gasUsdg ? grossUsdg - gasUsdg : 0n, TOKENS.USDG.decimals))
+    return exactProfit > 0n
+  } catch {
+    return false
+  }
+}
+
   type RankedInternalCandidate =
     | { kind: 'cycle'; opp: ArbOpp }
     | { kind: 'settlement'; opp: SettlementOpp }
-  const rankedCandidates: RankedInternalCandidate[] = [
+  const approximateCandidates: RankedInternalCandidate[] = [
     ...opps.map(opp => ({ kind: 'cycle' as const, opp })),
     ...settlementOpps.map(opp => ({ kind: 'settlement' as const, opp })),
   ]
-  rankedCandidates.sort((a, b) => {
+  approximateCandidates.sort((a, b) => {
     const scoreDiff = (b.opp.routeScore ?? -Infinity) - (a.opp.routeScore ?? -Infinity)
     if (scoreDiff !== 0) return scoreDiff
     const outputA = a.kind === 'settlement' ? a.opp.tokenOut.symbol : a.opp.tokenIn.symbol
     const outputB = b.kind === 'settlement' ? b.opp.tokenOut.symbol : b.opp.tokenIn.symbol
     return (SETTLEMENT_PRIORITY[outputA] ?? 99) - (SETTLEMENT_PRIORITY[outputB] ?? 99)
   })
+
+  const rankedCandidates: RankedInternalCandidate[] = []
+  for (const candidate of approximateCandidates.slice(0, 10)) {
+    if (await revalidateCandidateExact(candidate, graph, rankingGasPrice)) {
+      rankedCandidates.push(candidate)
+    }
+  }
+
   outcomeCounters.detected += rankedCandidates.length
   const tickMs = Date.now() - t0
 
