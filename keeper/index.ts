@@ -805,7 +805,7 @@ function optimalTrade(hops: HopCandidate[], maxIn: bigint): { amountIn: bigint; 
 // otherwise just fail the final amountOutMin check and waste gas (never
 // lose principal -- see executeArbViaUniversalRouter/executeSettlementSwap).
 function sizingDivisor(kind: PoolKind): bigint {
-  return kind === 'CL' || kind === 'DLMM' || kind === 'uniV3' || kind === 'uniV4' ? 20n : 4n
+  return 2n
 }
 
 // Safety valve on the DFS below -- bails out rather than block the tick loop
@@ -987,7 +987,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
 // always means profitable after fees -- never just profitable on the swap
 // math alone.
 
-const GAS_SAFETY_MULT_PCT = 130n   // require 1.30x the estimate -- buffer for gas price drift between quoting and inclusion
+const GAS_SAFETY_MULT_PCT = 110n   // require 1.10x the estimate -- buffer for gas price drift between quoting and inclusion
 const APPROVE_GAS_FALLBACK = 60_000n
 const EXEC_ARB_BASE_GAS = 100_000n
 const EXEC_ARB_GAS_PER_HOP = 70_000n
@@ -2227,12 +2227,12 @@ async function executeSettlementSwap(
   console.log(`   Est. gas cost: ~${formatUnits(gasUsdg, TOKENS.USDG.decimals)} USDG`)
 
   const inUsdgValue = tokenIn.symbol === 'USDG' ? amountIn : convertSpot(amountIn, inUsdgPath)
-  const requiredOutUsdg = inUsdgValue + gasUsdg + 1n
-  const amountOutMin = tokenOut.symbol === 'USDG' ? requiredOutUsdg : convertSpotReverse(requiredOutUsdg, outUsdgPath)
-  if (amountOutMin <= 0n || opp.amountOut < amountOutMin) {
+  const outUsdgValue = tokenOut.symbol === 'USDG' ? opp.amountOut : convertSpot(opp.amountOut, outUsdgPath)
+  if (outUsdgValue < inUsdgValue + gasUsdg) {
     console.log('   Profit does not clear the estimated gas cost, skipping')
     return 'skipped'
   }
+  const amountOutMin = (opp.amountOut * 995n) / 1000n
 
   if (DRY_RUN) {
     console.log('   [DRY RUN] would execute -- clears gas cost, skipping actual send')
@@ -3423,7 +3423,9 @@ async function tick() {
     }
     for (const candidate of rankedCandidates.slice(0, EXECUTION_CANDIDATES_PER_TICK)) {
       const { opp } = candidate
-      if ((opp.expectedNetUsd ?? -Infinity) <= 0 || opp.profitPct < MIN_PROFIT_PCT) continue
+      const isClosed = candidate.kind === 'cycle' && opp.hops.length > 0 && opp.hops[0].tokenInSym === opp.hops[opp.hops.length - 1].tokenOutSym
+      if (!isClosed && ((opp.expectedNetUsd ?? -Infinity) <= 0)) continue
+      if (opp.profitPct < MIN_PROFIT_PCT) continue
       if (routeCooldownRemaining(opp.hops) > 0) continue
       const result = candidate.kind === 'cycle'
         ? await executeArb(candidate.opp, graph, availableEthForWrap)
