@@ -312,7 +312,7 @@ function loadMirajanePools() {
       } : {}),
     })
   }
-  for (const r of v4Refs) uniswapV4Refs.set((r.id as string).toLowerCase(), r as UniswapV4PoolRef)
+  for (const r of (v4Refs || [])) uniswapV4Refs.set((r.id as string).toLowerCase(), r as UniswapV4PoolRef)
 }
 if (MIRAJANE_MODE) loadMirajanePools()
 
@@ -1897,7 +1897,9 @@ async function writeStatus(lastOpps: (ArbOpp | SettlementOpp)[], tickMs: number,
   // Upstash's free-tier command budget fast (86,400+/day at 1s intervals).
   if (isBotStoreConfigured() && Date.now() - lastRedisStatusSync >= REDIS_STATUS_SYNC_INTERVAL_MS) {
     lastRedisStatusSync = Date.now()
-    writeBotStatus(status).catch(err => console.error(`[bot store error] failed to sync status: ${err?.message ?? err}`))
+    const botId = process.env.KEEPER_ROLE || 'mirajane'
+    writeBotStatus(status, botId).catch(err => console.error(`[bot store error] failed to sync status for ${botId}: ${err?.message ?? err}`))
+    writeBotStatus(status).catch(() => {})
   }
 }
 
