@@ -999,12 +999,21 @@ const MAX_UINT256 = (1n << 256n) - 1n
 // here since this sizes a safety threshold, not a trade.
 function findConversionPath(graph: Map<string, HopCandidate[]>, fromSym: string, toSym: string, maxHops = 3): HopCandidate[] | null {
   if (fromSym === toSym) return []
+  const edges = graph.get(fromSym) ?? []
+  const direct = edges.filter(e => e.tokenOutSym === toSym && e.reserveIn > 0n)
+  if (direct.length > 0) {
+    direct.sort((a, b) => (b.reserveIn > a.reserveIn ? 1 : b.reserveIn < a.reserveIn ? -1 : 0))
+    return [direct[0]]
+  }
+
   const queue: { sym: string; path: HopCandidate[] }[] = [{ sym: fromSym, path: [] }]
   const visited = new Set([fromSym])
   while (queue.length > 0) {
     const { sym, path } = queue.shift()!
     if (path.length >= maxHops) continue
-    for (const edge of graph.get(sym) ?? []) {
+    const currEdges = [...(graph.get(sym) ?? [])]
+    currEdges.sort((a, b) => (b.reserveIn > a.reserveIn ? 1 : b.reserveIn < a.reserveIn ? -1 : 0))
+    for (const edge of currEdges) {
       if (visited.has(edge.tokenOutSym)) continue
       const nextPath = [...path, edge]
       if (edge.tokenOutSym === toSym) return nextPath

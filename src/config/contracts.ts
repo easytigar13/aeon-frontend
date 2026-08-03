@@ -682,7 +682,7 @@ export const UNISWAP_POOLS = [
   { name: 'WETH/VIRTUAL',  token0: 'WETH', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0xd95e8e2Cd04c207625C6F23c974d365a5F3A91D3' as `0x${string}` },
   { name: 'WETH/VIRTUAL',  token0: 'WETH', token1: 'VIRTUAL', type: 'UniV2', fee: '0.25%', address: '0xD65870Dc303b9CA01e07528B220C76d5fE917126' as `0x${string}` },
   { name: 'USDG/VIRTUAL',  token0: 'USDG', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D' as `0x${string}` },
-  { name: 'VEX/VIRTUAL',   token0: 'VEX', token1: 'VIRTUAL', type: 'UniV2', fee: '0.3%', address: '0x817f16F5D8da83d1B089B082c0172af3923618dA' as `0x${string}` },
+  { name: 'VEX/VIRTUAL',   token0: 'VEX', token1: 'VIRTUAL', type: 'UniV2', fee: '1.3%', address: '0x817f16F5D8da83d1B089B082c0172af3923618dA' as `0x${string}` },
   { name: 'WETH/ROBINFUN', token0: 'WETH', token1: 'ROBINFUN', type: 'UniV2', fee: '0.3%', address: '0xE53377eB912D08e1B0160E5Ea0c626CF162870fF' as `0x${string}` },
   { name: 'UniV3 CASHCAT/WETH', token0: 'CASHCAT', token1: 'WETH', type: 'UniV3', fee: '0.2%', address: '0x8607Cb6c6F48850A4B605F044eB699ffa854CD84' as `0x${string}` },
 ]
