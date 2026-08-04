@@ -161,7 +161,13 @@ export default function SwapPage() {
   // crosses pool types; otherwise the plain vAMM-only router, unchanged
   // from before.
   const swapTokenInAddr = needsWrapStep ? WETH_ADDR : TOKENS[tokenIn].address
-  const swapSpender     = use1inch ? ONEINCH_ROUTER : needsUnwrapStep ? CONTRACTS.SwapUnwrapHelper : hasNonVammHop ? CONTRACTS.UniversalRouter : CONTRACTS.AeonRouter
+  const swapSpender     = use1inch
+    ? ONEINCH_ROUTER
+    : needsUnwrapStep
+    ? CONTRACTS.SwapUnwrapHelper
+    : (route?.split || hasNonVammHop)
+    ? CONTRACTS.UniversalRouter
+    : CONTRACTS.AeonRouter
 
   const { data: allowance, refetch: refetchAllowance } = useReadContract({
     address: swapTokenInAddr,
