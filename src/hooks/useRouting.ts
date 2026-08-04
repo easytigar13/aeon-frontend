@@ -341,7 +341,7 @@ export function useRouting(
           // leg (rather than dropping it, or sending a doomed second leg).
           if (remainderAmt > 0n) {
             const dustCheck = search(allPools, remainderAmt)
-            if (!dustCheck || dustCheck.amountOut === 0n) {
+            if (!dustCheck || dustCheck.amountOut === 0n || dustCheck.steps.length === 0) {
               finalAeonAmt = amountIn
               remainderAmt = 0n
             }
@@ -350,7 +350,11 @@ export function useRouting(
           const aeonOut  = amtOut(finalAeonAmt, aeonReserves.rIn, aeonReserves.rOut, aeonFee)
           const aeonStep: RouteStep = { poolAddress: aeonPool.address, tokenIn: tkIn, tokenOut: tkOut, feeBps: aeonFee, poolType: aeonPool.poolType, binStep: aeonPool.binStep }
 
-          if (remainderAmt === 0n) {
+          const remainderRoute  = remainderAmt > 0n ? search(allPools, remainderAmt) : null
+          const remainderSteps  = remainderRoute?.steps ?? []
+          const remainderOut    = remainderRoute?.amountOut ?? 0n
+
+          if (remainderAmt === 0n || remainderSteps.length === 0 || remainderOut === 0n) {
             // Whole trade fits within tolerance on our own pool alone.
             best = {
               steps: [aeonStep],
@@ -360,21 +364,28 @@ export function useRouting(
               via: aeonPool.name,
             }
           } else {
-            const remainderRoute  = search(allPools, remainderAmt)
-            const remainderSteps  = remainderRoute?.steps ?? []
-            const remainderOut    = remainderRoute?.amountOut ?? 0n
-            const blended         = aeonOut + remainderOut
-            const aeonPct         = Math.round(Number(aeonAmt) * 100 / Number(amountIn))
-            best = {
-              steps: [aeonStep, ...remainderSteps],
-              amountOut: blended,
-              priceImpact: bestOut > 0n ? Math.max(0, Number(bestOut - blended) / Number(bestOut) * 100) : 0,
-              label: `${tkIn} → ${tkOut}`,
-              via: `${aeonPool.name} (${aeonPct}%) + ${remainderRoute?.via ?? '?'} (${100 - aeonPct}%)`,
-              split: {
-                aeonStep, aeonAmountIn: aeonAmt, aeonAmountOut: aeonOut,
-                remainderSteps, remainderAmountIn: remainderAmt, remainderAmountOut: remainderOut,
-              },
+            const blended  = aeonOut + remainderOut
+            const aeonPct  = Math.round(Number(finalAeonAmt) * 100 / Number(amountIn))
+            if (aeonPct >= 100 || 100 - aeonPct <= 0) {
+              best = {
+                steps: [aeonStep],
+                amountOut: aeonOut,
+                priceImpact: bestOut > 0n ? Math.max(0, Number(bestOut - aeonOut) / Number(bestOut) * 100) : 0,
+                label: `${tkIn} → ${tkOut}`,
+                via: aeonPool.name,
+              }
+            } else {
+              best = {
+                steps: [aeonStep, ...remainderSteps],
+                amountOut: blended,
+                priceImpact: bestOut > 0n ? Math.max(0, Number(bestOut - blended) / Number(bestOut) * 100) : 0,
+                label: `${tkIn} → ${tkOut}`,
+                via: `${aeonPool.name} (${aeonPct}%) + ${remainderRoute?.via ?? '?'} (${100 - aeonPct}%)`,
+                split: {
+                  aeonStep, aeonAmountIn: finalAeonAmt, aeonAmountOut: aeonOut,
+                  remainderSteps, remainderAmountIn: remainderAmt, remainderAmountOut: remainderOut,
+                },
+              }
             }
           }
         }
