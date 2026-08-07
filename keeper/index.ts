@@ -4303,6 +4303,9 @@ async function main() {
       // the same-block branch above applies the configured poll interval.
     } catch (e) {
       console.error('[block poll error]', e)
+      // Keep the dashboard timestamp alive while retrying so transient RPC
+      // downtime doesn't immediately flip the UI to "Offline".
+      if (lastScannedBlock !== null) await writeStatusHeartbeat(lastScannedBlock).catch(() => {})
       await new Promise(r => setTimeout(r, INTERVAL_MS))
     }
   }
