@@ -1774,6 +1774,8 @@ function scoreOpportunity<T extends { hops: HopCandidate[]; amountIn: bigint; re
 }
 
 // Resume counters across restarts instead of losing history every deploy/reboot.
+// Also immediately refresh updatedAt in the status file/Redis so the dashboard
+// doesn't show "Offline" while the discovery loop runs on startup.
 try {
   const prior = JSON.parse(fs.readFileSync(statusPath, 'utf-8'))
   recentArbs = prior.recentArbs ?? []
@@ -1786,7 +1788,16 @@ try {
   totalExecuted = prior.totalArbsExecuted ?? 0
   totalFailed = prior.totalArbsFailed ?? 0
   Object.assign(outcomeCounters, prior.outcomeCounters ?? {})
-} catch { /* no prior status file -- fresh start */ }
+  // Stamp a fresh updatedAt so the dashboard stays "Online" during the slow
+  // initial pool-discovery pass rather than immediately showing "Offline".
+  const startupStatus = { ...prior, updatedAt: new Date().toISOString(), keeperAddress: account.address }
+  fs.writeFileSync(statusPath, JSON.stringify(startupStatus, null, 2))
+  if (isBotStoreConfigured()) {
+    const botId = process.env.KEEPER_ROLE || 'mirajane'
+    writeBotStatus(startupStatus, botId).catch(() => {})
+    writeBotStatus(startupStatus).catch(() => {})
+  }
+} catch { /* no prior status file -- fresh start, first tick will create it */ }
 
 // Records a trade in the capped in-memory list (what status.json shows for
 // the live view), as one line appended to trades.log (the never-truncated
@@ -3894,6 +3905,10 @@ async function tick(changedPoolKeys?: Set<string>, observedBlock?: bigint) {
     console.error(`[RPC error] ${message}`)
     recentErrors.unshift({ time: new Date().toISOString(), message })
     recentErrors = recentErrors.slice(0, 5)
+    // Keep the dashboard timestamp alive so a transient RPC failure doesn't
+    // flip the UI to "Offline". The process is still running; only this tick's
+    // state fetch failed.
+    if (observedBlock) await writeStatusHeartbeat(observedBlock).catch(() => {})
     return
   }
 
@@ -4288,6 +4303,9 @@ async function main() {
       // the same-block branch above applies the configured poll interval.
     } catch (e) {
       console.error('[block poll error]', e)
+      // Keep the dashboard timestamp alive while retrying so transient RPC
+      // downtime doesn't immediately flip the UI to "Offline".
+      if (lastScannedBlock !== null) await writeStatusHeartbeat(lastScannedBlock).catch(() => {})
       await new Promise(r => setTimeout(r, INTERVAL_MS))
     }
   }
