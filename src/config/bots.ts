@@ -40,6 +40,7 @@ export const BOTS: BotConfig[] = [
   // the exact mechanism that stranded ERZA's inventory. Keep the distinction in
   // the copy; conflating them is what made the old subtitle wrong.
   { slug: 'mirajane', botId: undefined, dir: 'keeper',  name: 'Mirajane', subtitle: 'Atomic cross-venue cycles — AEON pools + Uniswap V3/V4' },
+  { slug: 'aeon', botId: 'aeon', dir: 'keeper2', name: 'Keeper2', subtitle: 'Atomic same-token cycles - AEON-listed pools' },
 ]
 
 export const DEFAULT_BOT = BOTS[0]
