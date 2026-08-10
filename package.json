@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "bots:status": "bash tools/bots-status.sh",
+    "bots:restart": "bash tools/restart-all-bots.sh"
   },
   "dependencies": {
     "@rainbow-me/rainbowkit": "^2.1.0",
