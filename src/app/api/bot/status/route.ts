@@ -22,8 +22,23 @@ export async function GET(request: Request) {
     try {
       const status = await readBotStatus(bot.botId)
       if (status) return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } })
-    } catch { /* fall through to local file */ }
+    } catch { /* fall through to GitHub raw / local file */ }
   }
+
+  // GitHub-raw source: the bot pushes its status.json to the `bot-status` branch
+  // (see keeper/publish-status.mjs). This works from Vercel (no disk access to
+  // the bot's machine) and needs no rate-limited third-party store. Cache-busted
+  // so the CDN can't pin a stale copy for long.
+  try {
+    const raw = await fetch(
+      `https://raw.githubusercontent.com/easytigar13/aeon-frontend/bot-status/${bot.dir}.json?t=${Date.now()}`,
+      { cache: 'no-store' },
+    )
+    if (raw.ok) {
+      const status = await raw.json()
+      if (status) return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } })
+    }
+  } catch { /* fall through to local file */ }
 
   const statusPath = path.join(process.cwd(), bot.dir, 'status.json')
   try {
