@@ -18,17 +18,12 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const bot = getBotBySlug(searchParams.get('bot'))
 
-  if (isBotStoreConfigured()) {
-    try {
-      const status = await readBotStatus(bot.botId)
-      if (status) return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } })
-    } catch { /* fall through to GitHub raw / local file */ }
-  }
-
-  // GitHub-raw source: the bot pushes its status.json to the `bot-status` branch
-  // (see keeper/publish-status.mjs). This works from Vercel (no disk access to
-  // the bot's machine) and needs no rate-limited third-party store. Cache-busted
-  // so the CDN can't pin a stale copy for long.
+  // PRIMARY source: GitHub `bot-status` branch, force-pushed by the live bot
+  // every ~2 min (see keeper/publish-status.mjs). Always fresh, works from
+  // Vercel (no disk access to the bot's machine), no rate-limited third party.
+  // This is tried FIRST because the Upstash free tier is exhausted and its
+  // read still intermittently returns a FROZEN old value -- serving that stale
+  // poison is worse than nothing, so GitHub wins. Cache-busted per request.
   try {
     const raw = await fetch(
       `https://raw.githubusercontent.com/easytigar13/aeon-frontend/bot-status/${bot.dir}.json?t=${Date.now()}`,
@@ -38,7 +33,15 @@ export async function GET(request: Request) {
       const status = await raw.json()
       if (status) return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } })
     }
-  } catch { /* fall through to local file */ }
+  } catch { /* fall through to Upstash / local file */ }
+
+  // Secondary: shared Upstash store (only useful if its quota ever recovers).
+  if (isBotStoreConfigured()) {
+    try {
+      const status = await readBotStatus(bot.botId)
+      if (status) return NextResponse.json(status, { headers: { 'Cache-Control': 'no-store' } })
+    } catch { /* fall through to local file */ }
+  }
 
   const statusPath = path.join(process.cwd(), bot.dir, 'status.json')
   try {
