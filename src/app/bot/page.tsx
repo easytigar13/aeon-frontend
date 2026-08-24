@@ -87,9 +87,11 @@ interface BotStatus {
 
 type ProfitRange = 'today' | 'sevenDays' | 'month' | 'all'
 
-// A full 93-pool scan plus final simulation can legitimately exceed 15s.
-// Treat that as busy, not offline; PM2/process failures still age out quickly.
-const STALE_AFTER_MS = 60_000
+// Status now reaches the site via the GitHub bot-status branch (published every
+// ~60s) plus GitHub's raw CDN, so end-to-end latency is a couple of minutes even
+// when the bot is perfectly healthy. Allow for that before calling it offline; a
+// truly dead bot/publisher still ages out within this window.
+const STALE_AFTER_MS = 300_000
 
 export default function BotPage() {
   return (
