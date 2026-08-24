@@ -36,6 +36,29 @@ const STOCK_LOGOS: Record<string, string> = {
   USAR:  'https://s3-symbol-logo.tradingview.com/usa-rare-earth--big.svg',
 }
 
+// DexScreener-hosted logos for the independently-deployed Robinhood-chain
+// tokens (memecoins, protocol tokens) that have no curated stock/trustwallet
+// logo and whose GeckoTerminal imageUrl comes back empty. Pulled from the
+// DexScreener token API (chainId "robinhood"); these are the same icons shown
+// on dexscreener.com. Tokens with no DexScreener image (USDG, SLEEP, SHERWOOD)
+// intentionally fall through to the colored letter avatar below.
+const DEXSCREENER_LOGOS: Record<string, string> = {
+  VIRTUAL:    'https://cdn.dexscreener.com/cms/images/bkl7Ue-EfiCazhHg?width=800&height=800&quality=95&format=auto',
+  ROBINFUN:   'https://cdn.dexscreener.com/cms/images/bFyRNIIQPL8g8Snc?width=800&height=800&quality=95&format=auto',
+  CASHCAT:    'https://cdn.dexscreener.com/cms/images/Lq7a3pS9Wn8EuGp0?width=800&height=800&quality=95&format=auto',
+  INDEX:      'https://cdn.dexscreener.com/cms/images/LTfdhAlnWijozhDa?width=800&height=800&quality=95&format=auto',
+  PONS:       'https://cdn.dexscreener.com/cms/images/dkmXs8KYMyMXjuU1?width=800&height=800&quality=95&format=auto',
+  AI:         'https://cdn.dexscreener.com/cms/images/U6RIzs8Fm7Jar6GE?width=800&height=800&quality=95&format=auto',
+  FRONG:      'https://cdn.dexscreener.com/cms/images/sb8NxFYZy_lfgbXO?width=800&height=800&quality=95&format=auto',
+  TENDIES:    'https://cdn.dexscreener.com/cms/images/j8K5uOi-9TVXuWFJ?width=800&height=800&quality=95&format=auto',
+  MARIAN:     'https://cdn.dexscreener.com/cms/images/lWKxBmLc4OdlQb2E?width=800&height=800&quality=95&format=auto',
+  VEX:        'https://cdn.dexscreener.com/cms/images/dbR0nWyawKyvw7sI?width=800&height=800&quality=95&format=auto',
+  JUGGERNAUT: 'https://cdn.dexscreener.com/cms/images/usHPD9u49cr88jb0?width=800&height=800&quality=95&format=auto',
+  VAULTS:     'https://cdn.dexscreener.com/cms/images/ElM6guhw17ehP5FZ?width=800&height=800&quality=95&format=auto',
+  HOODIE:     'https://cdn.dexscreener.com/cms/images/lPw_YhoFA-ThjIWZ?width=800&height=800&quality=95&format=auto',
+  NASDAQ:     'https://cdn.dexscreener.com/cms/images/apY4EJ8dg5snBOY8?width=800&height=800&quality=95&format=auto',
+}
+
 const AVATAR_COLORS: Record<string, string> = {
   AEON:     '#FFB800',
   ETH:      '#627EEA',
@@ -88,7 +111,7 @@ export function TokenIcon({
   size?: number
   imageUrl?: string | null
 }) {
-  const candidates = [STOCK_LOGOS[symbol], TRUSTWALLET_LOGOS[symbol], symbol === 'AEON' ? '/logo.jpg' : null, imageUrl].filter(
+  const candidates = [STOCK_LOGOS[symbol], TRUSTWALLET_LOGOS[symbol], symbol === 'AEON' ? '/logo.jpg' : null, DEXSCREENER_LOGOS[symbol], imageUrl].filter(
     (u): u is string => !!u
   )
   const [failedCount, setFailedCount] = useState(0)
