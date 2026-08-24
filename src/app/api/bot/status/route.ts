@@ -4,6 +4,12 @@ import path from 'path'
 import { readBotStatus, isBotStoreConfigured } from '@/lib/botStore'
 import { getBotBySlug } from '@/config/bots'
 
+// Force this route to run on every request. Without it Vercel caches the
+// handler's response at the edge for minutes, serving stale status even though
+// the GitHub source is fresh -- which read as a permanent "Offline" badge.
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 // Prefers the shared Upstash store (the bot process pushes to it every ~15s)
 // so this works even when the bot runs on a different machine than this
 // website -- Vercel's serverless functions have no access to that machine's
