@@ -21,22 +21,39 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'invalid body' }, { status: 400 })
   }
-  try {
-    const upstream = await fetch(UPSTREAM, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      cache: 'no-store',
-    })
-    const text = await upstream.text()
-    return new NextResponse(text, {
-      status: upstream.status,
-      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
-    })
-  } catch (e: unknown) {
-    return NextResponse.json(
-      { error: 'upstream RPC unreachable', detail: e instanceof Error ? e.message : String(e) },
-      { status: 502 },
-    )
+  // The free node rate-limits (429) under the dashboard's read bursts. Retry
+  // server-side with backoff so the browser gets a complete 200 instead of a
+  // partial failure -- a 429 reaching the client drops part of a multicall and
+  // makes the derived totals (TVL, volume, fees) flicker between refreshes.
+  const MAX = 5
+  let lastText = ''
+  let lastStatus = 502
+  for (let attempt = 0; attempt < MAX; attempt++) {
+    try {
+      const upstream = await fetch(UPSTREAM, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        cache: 'no-store',
+      })
+      lastStatus = upstream.status
+      lastText = await upstream.text()
+      // 429 (rate limit) or 5xx (transient) -> back off and retry
+      if ((upstream.status === 429 || upstream.status >= 500) && attempt < MAX - 1) {
+        await new Promise(r => setTimeout(r, 250 * (attempt + 1)))
+        continue
+      }
+      return new NextResponse(lastText, {
+        status: upstream.status,
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+      })
+    } catch (e: unknown) {
+      lastText = JSON.stringify({ error: 'upstream RPC unreachable', detail: e instanceof Error ? e.message : String(e) })
+      if (attempt < MAX - 1) { await new Promise(r => setTimeout(r, 250 * (attempt + 1))); continue }
+    }
   }
+  return new NextResponse(lastText, {
+    status: lastStatus,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+  })
 }
