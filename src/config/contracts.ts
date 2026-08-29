@@ -322,6 +322,11 @@ export const DLMM_GAUGES: Record<string, `0x${string}`> = {
 // token is a CURRENT pool -- so after withdrawing, LP can be re-staked in the
 // live gauge. Standard AeonGauge interface: withdraw(uint256)/getReward(address).
 export const LEGACY_GAUGES: { gauge: `0x${string}`; pool: `0x${string}`; token0: string; token1: string }[] = [
+  // FRONG/AEON was accidentally created through the pre-fee-accounting
+  // factory. Its LP remains user-owned and withdrawable, but its gauge can
+  // never collect swap fees. Keep it in the recovery UI after routing and
+  // voting move to the fee-enabled FactoryV2 replacement.
+  { gauge: '0x8f932bcf0e7728cA2C7Daecf3F77929976C8567f', pool: '0x2f8CBA007598cBb15FfABE7a826a9cC8576ed6be', token0: 'FRONG', token1: 'AEON' },
   { gauge: '0xfae70b39b28e4c6a4ced518d394000884e7e5b4e', pool: '0x3c643f22f0b24795710638cdef2296ea12896317', token0: 'HOODIE',   token1: 'AEON' },
   { gauge: '0x586414a2b52fff772307499e9904c2cfe911a3ca', pool: '0x8ca7acde0218b5a905dc29cc9d650fadc706fd9e', token0: 'CASHCAT',  token1: 'ROBINFUN' },
   { gauge: '0x5dad710f2f13e3d211b66c03697e0d225eba429e', pool: '0xbf5fcff8e5604b3ba404a4cb5be49ef230e0da76', token0: 'NASDAQ',   token1: 'AEON' },
@@ -452,7 +457,12 @@ export const POOLS = [
   // deploying. Real gauges created for all 9. Empty until LP migrates over
   // from the corresponding (Old) pool above.
   { name: 'VIRTUAL/AEON', token0: 'VIRTUAL', token1: 'AEON', type: 'vAMM', fee: '1%',   address: '0x67B2da1742187Aa09b427082b06ACDC5bBCA2D99' as `0x${string}` },
-  { name: 'FRONG/AEON', token0: 'FRONG', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x2f8CBA007598cBb15FfABE7a826a9cC8576ed6be' as `0x${string}` },
+  // Replaced 2026-08-09 after live provenance proved the previous address
+  // came from the legacy factory and had no poolFees()/claimFees() path.
+  // This replacement has a nonzero fee vault, live V3 gauge, staked LP, and
+  // a passing collectFees() simulation.
+  { name: 'FRONG/AEON', token0: 'FRONG', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x693Bf3EeCb4110c777BEc13D6c11d139BF84e2E1' as `0x${string}` },
+  { name: 'FRONG/ETH', token0: 'FRONG', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x2c07F05D5111da590D8749A091974285FcacDf0D' as `0x${string}` },
   { name: 'ROBINFUN/AEON', token0: 'ROBINFUN', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xeB638e1FA253E5526C2be76626dE26F02E4bdaba' as `0x${string}` },
   { name: 'CASHCAT/AEON', token0: 'CASHCAT', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x22d76bf4e8d2c1DfCca7de6c9dC46Ec2a8Ed7Eb7' as `0x${string}` },
   { name: 'CASHCAT/ETH',  token0: 'CASHCAT', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x3DC6b6c354fB1e9CFdaA8A36ff845728f7176f4e' as `0x${string}` },
@@ -532,6 +542,7 @@ export const POOLS = [
 export const HIDDEN_POOLS: `0x${string}`[] = [
   '0x77FE92Da859e6d9cfdD948CF8900A3AF147b8cE4', // SLEEP/AEON (new factory)
   '0xDF769bF01Ee70e2F86adC0417E0717D32c4586be', // SLEEP/AEON (Old, empty, never had liquidity)
+  '0x2f8CBA007598cBb15FfABE7a826a9cC8576ed6be', // FRONG/AEON (legacy factory; no fee accounting)
 ]
 
 // Algebra Integral (algebra.finance) concentrated-liquidity pools — same 3

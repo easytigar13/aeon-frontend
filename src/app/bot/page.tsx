@@ -20,6 +20,8 @@ interface Opportunity {
   venues?: string
   routeScore?: number
   reliabilityPct?: number
+  validation?: 'discovery' | 'exact-valid' | 'preflight-rejected' | 'cooldown'
+  rejectionReason?: string
 }
 
 interface ExecutedArb {
@@ -34,7 +36,7 @@ interface ExecutedArb {
   gasCost?: string
   gasCostEth?: string
   txHash?: string
-  status: 'success' | 'failed' | 'dry-run'
+  status: 'success' | 'failed' | 'rejected' | 'dry-run'
   error?: string
   route?: 'internal' | 'openocean' | '1inch'
   venues?: string
@@ -60,6 +62,30 @@ interface MonitoredPool {
   reserves: Record<string, string> | null
 }
 
+interface PoolActivityEntry {
+  name: string
+  address: string
+  kind: string
+  token0: string
+  token1: string
+  lastActivityAt: string | null
+  inactiveHours: number
+  flagged: boolean
+  state: 'active' | 'inactive' | 'unknown'
+  error?: string
+}
+
+interface PoolActivityReport {
+  checkedAt: string | null
+  nextCheckAt: string | null
+  inactiveAfterHours: number
+  checkIntervalHours: number
+  auditRunning: boolean
+  pools: PoolActivityEntry[]
+  flagged: PoolActivityEntry[]
+  unknown: PoolActivityEntry[]
+}
+
 interface BotStatus {
   online?: false
   reason?: string
@@ -68,6 +94,18 @@ interface BotStatus {
   dryRun?: boolean
   intervalMs?: number
   tickMs?: number
+  scanTelemetry?: {
+    mode: string
+    stateReadMs: number
+    balanceReadMs: number
+    localSearchMs: number
+    exactQuoteMs: number
+    approximateCandidates: number
+    exactSelected: number
+    exactChecked: number
+    exactValid: number
+    lastBlock: string | null
+  }
   poolsMonitored?: number
   poolsLiveThisTick?: number
   venueBreakdown?: Record<string, { total: number; live: number }>
@@ -83,7 +121,8 @@ interface BotStatus {
   pausedUntil?: string | null
   gasReserve?: { requiredEth: string; availableEth: string; healthy: boolean }
   pendingTransaction?: { hash: string; label: string; nonce: number; submittedAt: string; replacements: number } | null
-  outcomeCounters?: Record<'detected' | 'executed' | 'belowGas' | 'insufficientBalance' | 'simulationFailed' | 'staleQuote' | 'reverted', number>
+  outcomeCounters?: Record<'detected' | 'executed' | 'belowGas' | 'insufficientBalance' | 'simulationFailed' | 'preflightRejected' | 'staleQuote' | 'reverted', number>
+  poolActivity?: PoolActivityReport
 }
 
 type ProfitRange = 'today' | 'sevenDays' | 'month' | 'all'
@@ -303,8 +342,31 @@ function BotPageInner() {
               />
               <StatCard label="Arbs Executed" value={String(status.totalArbsExecuted ?? 0)} />
               <StatCard label="Arbs Failed" value={String(status.totalArbsFailed ?? 0)} />
-              <StatCard label="Scan Interval" value={status.intervalMs ? `${status.intervalMs}ms` : '—'} />
+              <StatCard label="Poll Gap" value={status.intervalMs ? `${status.intervalMs}ms` : '—'} />
             </div>
+
+            {status.scanTelemetry && (
+              <GlowPanel accent="blue" className="p-6 mb-6">
+                <div className="text-text-secondary text-sm font-mono uppercase tracking-wider mb-4">Scanner Hot Path</div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+                  {[
+                    ['Block', status.scanTelemetry.lastBlock ?? '—'],
+                    ['Mode', status.scanTelemetry.mode],
+                    ['Pool reads', `${status.scanTelemetry.stateReadMs}ms`],
+                    ['Balances', `${status.scanTelemetry.balanceReadMs}ms`],
+                    ['Local search', `${status.scanTelemetry.localSearchMs}ms`],
+                    ['Exact checks', `${status.scanTelemetry.exactChecked}/${status.scanTelemetry.exactSelected}`],
+                    ['Exact quoting', `${status.scanTelemetry.exactQuoteMs}ms`],
+                    ['Executable', String(status.scanTelemetry.exactValid)],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-xl border border-bg-border bg-bg-raised/60 p-3">
+                      <div className="text-2xs text-text-muted uppercase font-mono">{label}</div>
+                      <div className="text-sm text-text-primary font-mono mt-1 break-all">{value}</div>
+                    </div>
+                  ))}
+                </div>
+              </GlowPanel>
+            )}
 
             {status.pausedUntil && new Date(status.pausedUntil).getTime() > Date.now() && (
               <div className="card p-4 mb-6 border-red-500/30 text-red-400 text-sm">
@@ -324,14 +386,62 @@ function BotPageInner() {
               </div>
             )}
 
+            {status.poolActivity && (
+              <GlowPanel accent={status.poolActivity.flagged.length > 0 ? 'red' : 'emerald'} className="p-6 mb-6">
+                <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+                  <div className="flex items-center gap-2 text-text-primary font-mono text-sm font-semibold uppercase tracking-wider">
+                    <AlertTriangle size={16} className={status.poolActivity.flagged.length > 0 ? 'text-amber-400' : 'text-emerald-400'} />
+                    Pool Activity Review
+                  </div>
+                  <div className="text-xs font-mono text-text-muted">
+                    {status.poolActivity.auditRunning
+                      ? 'On-chain check running now'
+                      : status.poolActivity.checkedAt
+                        ? `Checked ${new Date(status.poolActivity.checkedAt).toLocaleString()}`
+                        : 'Waiting for first check'}
+                  </div>
+                </div>
+                <p className="text-xs text-text-secondary mb-4">
+                  Checked every {status.poolActivity.checkIntervalHours} hours. Pools with no on-chain event for {status.poolActivity.inactiveAfterHours} hours are flagged for manual review; Keeper2 never removes them automatically.
+                </p>
+                {status.poolActivity.flagged.length > 0 ? (
+                  <div className="space-y-2 max-h-72 overflow-y-auto">
+                    {status.poolActivity.flagged.map(pool => (
+                      <div key={`${pool.kind}-${pool.address}`} className="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono text-text-primary">{pool.token0}/{pool.token1}</span>
+                            <span className="px-1.5 py-0.5 rounded text-2xs font-mono uppercase text-violet-400 bg-violet-500/10 border border-violet-500/20">{pool.kind}</span>
+                          </div>
+                          <div className="font-mono text-2xs text-text-muted break-all mt-1">{pool.address}</div>
+                        </div>
+                        <div className="text-amber-400 font-mono text-xs sm:text-right">
+                          No activity in {Math.floor(pool.inactiveHours)}+ hours
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-emerald-400">
+                    {status.poolActivity.checkedAt ? 'No inactive pools are currently flagged.' : 'The first activity review will appear here when complete.'}
+                  </div>
+                )}
+                {status.poolActivity.unknown.length > 0 && (
+                  <div className="mt-3 text-xs text-amber-400">
+                    {status.poolActivity.unknown.length} pool(s) could not be checked because the RPC did not return a complete result. They were not marked inactive.
+                  </div>
+                )}
+              </GlowPanel>
+            )}
+
             {status.outcomeCounters && (
               <GlowPanel accent="blue" className="p-6 mb-6">
                 <div className="text-text-secondary text-sm font-mono uppercase tracking-wider mb-4">Execution Funnel</div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
                   {([
-                    ['Detected', 'detected'], ['Executed', 'executed'], ['Below gas', 'belowGas'],
+                    ['Candidates/tick', 'detected'], ['Executed', 'executed'], ['Below gas', 'belowGas'],
                     ['No balance', 'insufficientBalance'], ['Simulation', 'simulationFailed'],
-                    ['Stale quote', 'staleQuote'], ['Reverted', 'reverted'],
+                    ['Preflight rejected', 'preflightRejected'], ['Stale quote', 'staleQuote'], ['Reverted', 'reverted'],
                   ] as const).map(([label, key]) => (
                     <div key={key} className="rounded-xl border border-bg-border bg-bg-raised/60 p-3">
                       <div className="text-2xs text-text-muted uppercase font-mono">{label}</div>
@@ -405,8 +515,23 @@ function BotPageInner() {
               {status.lastOpportunities && status.lastOpportunities.length > 0 ? (
                 <div className="space-y-2">
                   {status.lastOpportunities.slice(0, 5).map((o, i) => (
-                    <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center text-sm py-1.5 border-b border-bg-border last:border-0">
-                      <span className="font-mono text-text-primary">{o.pair}</span>
+                    <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-center text-sm py-2 border-b border-bg-border last:border-0">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-text-primary">{o.pair}</span>
+                          {o.validation && (
+                            <span className={clsx(
+                              'px-1.5 py-0.5 rounded text-2xs font-mono uppercase border',
+                              o.validation === 'exact-valid'
+                                ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                                : o.validation === 'preflight-rejected'
+                                  ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                                  : 'text-violet-400 bg-violet-500/10 border-violet-500/20',
+                            )}>{o.validation}</span>
+                          )}
+                        </div>
+                        {o.rejectionReason && <div className="text-2xs text-amber-400/80 font-mono mt-1 max-w-xl">{o.rejectionReason}</div>}
+                      </div>
                       {o.venues && <span className="text-violet-400 font-mono text-xs">{o.venues}{o.reliabilityPct != null ? ` · ${o.reliabilityPct.toFixed(0)}% reliable` : ''}</span>}
                       <span className="text-text-secondary">{o.amountIn} {o.tokenIn}</span>
                       <span className={clsx('font-mono', o.expectedNetUsd != null && o.expectedNetUsd < 0 ? 'text-red-400' : 'text-emerald-400')}>
@@ -417,7 +542,7 @@ function BotPageInner() {
                     </div>
                   ))}
                 </div>
-              ) : <div className="text-text-muted text-sm">No profitable opportunities right now — that's normal, arbitrage is transient.</div>}
+              ) : <div className="text-text-muted text-sm">No candidate routes were seen in the latest completed scan.</div>}
             </GlowPanel>
 
             {/* Recent arbs */}
@@ -435,7 +560,7 @@ function BotPageInner() {
                       <div className="flex items-center gap-2">
                         <span className={clsx(
                           'w-1.5 h-1.5 rounded-full shrink-0',
-                          a.status === 'success' ? 'bg-emerald-400' : a.status === 'dry-run' ? 'bg-aeon-400' : 'bg-red-400'
+                          a.status === 'success' ? 'bg-emerald-400' : a.status === 'dry-run' ? 'bg-aeon-400' : a.status === 'rejected' ? 'bg-amber-400' : 'bg-red-400'
                         )} />
                         <span className="font-mono text-text-primary">{a.pair}</span>
                         {a.venues && (
@@ -514,8 +639,8 @@ function StatCard({ label, value }: { label: string; value: string }) {
   const visuals: Record<string, { detail: string; icon: React.ReactNode; accent: ProtocolAccent }> = {
     'Pools Live / Total': { detail: 'current route graph', icon: <Layers size={16} />, accent: 'blue' },
     'Arbs Executed': { detail: 'confirmed cycles', icon: <CheckCircle size={16} />, accent: 'emerald' },
-    'Arbs Failed': { detail: 'atomic reverts', icon: <XCircle size={16} />, accent: 'red' },
-    'Scan Interval': { detail: 'continuous scanning', icon: <Clock size={16} />, accent: 'violet' },
+    'Arbs Failed': { detail: 'confirmed reverts', icon: <XCircle size={16} />, accent: 'red' },
+    'Poll Gap': { detail: 'delay after completed scan', icon: <Clock size={16} />, accent: 'violet' },
   }
   const v = visuals[label] ?? { detail: 'live metric', icon: <Activity size={16} />, accent: 'aeon' as const }
   return <MetricCard label={label} value={value} detail={v.detail} icon={v.icon} accent={v.accent} />
