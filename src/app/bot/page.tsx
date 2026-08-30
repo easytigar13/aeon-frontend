@@ -51,6 +51,7 @@ function isClosedTrade(pair: string) {
 interface MonitoredPool {
   name: string
   address: string
+  poolId?: string | null
   kind: string
   token0: string
   token1: string
@@ -294,7 +295,12 @@ function BotPageInner() {
 
             {/* Stat row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-              <StatCard label="Pools Monitored" value={String(status.poolsMonitored ?? '—')} />
+              <StatCard
+                label="Pools Live / Total"
+                value={status.poolsMonitored != null
+                  ? `${status.poolsLiveThisTick ?? status.monitoredPools?.filter(pool => pool.live).length ?? '—'} / ${status.poolsMonitored}`
+                  : '—'}
+              />
               <StatCard label="Arbs Executed" value={String(status.totalArbsExecuted ?? 0)} />
               <StatCard label="Arbs Failed" value={String(status.totalArbsFailed ?? 0)} />
               <StatCard label="Scan Interval" value={status.intervalMs ? `${status.intervalMs}ms` : '—'} />
@@ -480,7 +486,7 @@ function BotPageInner() {
                   {[...status.monitoredPools]
                     .sort((a, b) => Number(b.live) - Number(a.live) || a.kind.localeCompare(b.kind))
                     .map((p) => (
-                    <div key={p.address} className="grid grid-cols-1 sm:grid-cols-[auto_1fr_auto] gap-2 items-center text-sm py-1.5 border-b border-bg-border last:border-0">
+                    <div key={`${p.kind}:${p.poolId ?? p.address}:${p.name}`} className="grid grid-cols-1 sm:grid-cols-[auto_1fr_auto] gap-2 items-center text-sm py-1.5 border-b border-bg-border last:border-0">
                       <div className="flex items-center gap-2">
                         <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', p.live ? 'bg-emerald-400' : 'bg-text-muted/40')} title={p.live ? 'priced live this tick' : 'not reachable this tick'} />
                         <span className="px-1.5 py-0.5 rounded text-2xs font-mono uppercase text-violet-400 bg-violet-500/10 border border-violet-500/20 shrink-0">{p.kind}</span>
@@ -506,7 +512,7 @@ function BotPageInner() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   const visuals: Record<string, { detail: string; icon: React.ReactNode; accent: ProtocolAccent }> = {
-    'Pools Monitored': { detail: 'live route graph', icon: <Layers size={16} />, accent: 'blue' },
+    'Pools Live / Total': { detail: 'current route graph', icon: <Layers size={16} />, accent: 'blue' },
     'Arbs Executed': { detail: 'confirmed cycles', icon: <CheckCircle size={16} />, accent: 'emerald' },
     'Arbs Failed': { detail: 'atomic reverts', icon: <XCircle size={16} />, accent: 'red' },
     'Scan Interval': { detail: 'continuous scanning', icon: <Clock size={16} />, accent: 'violet' },
