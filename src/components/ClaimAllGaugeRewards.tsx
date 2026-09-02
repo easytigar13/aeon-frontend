@@ -5,7 +5,7 @@ import { Coins, Loader2, CheckCircle2 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContracts, useWriteContract, usePublicClient } from 'wagmi'
 import { formatUnits } from 'viem'
-import { POOLS, CL_GAUGES, DLMM_GAUGES, LEGACY_GAUGES, CONTRACTS } from '@/config/contracts'
+import { POOLS, CL_GAUGES, DLMM_GAUGES, CONTRACTS } from '@/config/contracts'
 import { VOTER_ABI, GAUGE_ABI, CL_GAUGE_ABI, DLMM_GAUGE_ABI } from '@/config/abis'
 
 const ZERO = '0x0000000000000000000000000000000000000000'
@@ -29,19 +29,13 @@ export function ClaimAllGaugeRewards() {
     .map(r => (r.status === 'success' ? (r.result as `0x${string}`) : null))
     .filter((g): g is `0x${string}` => !!g && g.toLowerCase() !== ZERO)
 
-  // 2. Query earned(address) on all gauges
-  const legacyGauges = LEGACY_GAUGES.map(g => g.gauge)
+  // 2. Query earned(address) on active live gauges
   const clGauges = Object.values(CL_GAUGES)
   const dlmmGauges = Object.values(DLMM_GAUGES)
 
   const { data: vammEarned, refetch: refetchVamm } = useReadContracts({
     contracts: vammGauges.map(g => ({ address: g, abi: GAUGE_ABI, functionName: 'earned' as const, args: [address ?? ZERO] })),
     query: { enabled: !!address && vammGauges.length > 0 },
-  })
-
-  const { data: legacyEarned, refetch: refetchLegacy } = useReadContracts({
-    contracts: legacyGauges.map(g => ({ address: g, abi: GAUGE_ABI, functionName: 'earned' as const, args: [address ?? ZERO] })),
-    query: { enabled: !!address },
   })
 
   const { data: clEarned, refetch: refetchCl } = useReadContracts({
@@ -61,13 +55,6 @@ export function ClaimAllGaugeRewards() {
     const r = vammEarned?.[i]
     if (r && r.status === 'success' && (r.result as bigint) > 0n) {
       claimableTargets.push({ address: g, abi: GAUGE_ABI, earnedWei: r.result as bigint })
-    }
-  })
-
-  legacyGauges.forEach((g, i) => {
-    const r = legacyEarned?.[i]
-    if (r && r.status === 'success' && (r.result as bigint) > 0n) {
-      claimableTargets.push({ address: g as `0x${string}`, abi: GAUGE_ABI, earnedWei: r.result as bigint })
     }
   })
 
@@ -112,7 +99,6 @@ export function ClaimAllGaugeRewards() {
       setClaimStatus('All gauge rewards claimed successfully!')
       setSuccess(true)
       refetchVamm()
-      refetchLegacy()
       refetchCl()
       refetchDlmm()
     } catch (e: any) {

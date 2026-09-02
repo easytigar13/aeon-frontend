@@ -6,7 +6,7 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, DLMM_GAUGES, CONTRACTS, TOKENS, NATIVE_SENTINEL, LEGACY_AEON_VOTER } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, DLMM_GAUGES, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
 import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, DLMM_GAUGE_ABI, FURNACE_ABI, VOTING_ESCROW_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
@@ -15,7 +15,6 @@ import { useClPositions, type ClPosition } from '@/hooks/useClPositions'
 import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { useVeNftPositions } from '@/hooks/useVeNftPositions'
 import { usePendingRewards } from '@/hooks/usePendingRewards'
-import { LegacyPositions } from '@/components/LegacyPositions'
 import { ClaimAllGaugeRewards } from '@/components/ClaimAllGaugeRewards'
 import { TokenIcon } from '@/components/TokenIcon'
 import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
@@ -259,39 +258,11 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
 
   const poolPrice = usePoolPrice(pool)
 
-  // Migration cut over 2026-07-16: AeonVoterV3 (CONTRACTS.AeonVoter) is now
-  // the live, emitting voter. LEGACY_AEON_VOTER's gauges no longer receive
-  // new emissions but still allow withdraw() any time -- default to 'new' so
-  // anyone staking now goes straight to the live system; 'old' is only for
-  // unstaking whatever's left behind.
-  const [gaugeVersion, setGaugeVersion] = useState<'old' | 'new'>('new')
-  const voterAddress = gaugeVersion === 'old' ? LEGACY_AEON_VOTER : CONTRACTS.AeonVoter
-
-  // No refetchInterval before meant a pool with no gauge yet at first expand
-  // stayed "Gauge not yet deployed" forever for that session, even after a
-  // gauge was created moments later elsewhere -- happened for real with
-  // CASHCAT/ROBINFUN and SLEEP/AEON, both gauge'd after the page was already
-  // loaded. Refetching periodically means a newly created gauge shows up
-  // without the user needing a hard refresh.
   const { data: gaugeAddr } = useReadContract({
-    address: voterAddress, abi: VOTER_ABI, functionName: 'gauges',
-    args: [pool.address], query: { enabled: expanded, refetchInterval: 20000 },
+    address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'gauges',
+    args: [pool.address], query: { enabled: expanded, refetchInterval: 60000 },
   })
   const gauge = gaugeAddr && gaugeAddr !== '0x0000000000000000000000000000000000000000' ? gaugeAddr : undefined
-
-  // Old-gauge staked balance is checked regardless of which tab is active,
-  // so the "you still have X staked in the old gauge" nudge can show even
-  // while viewing the New tab.
-  const { data: oldGaugeAddr } = useReadContract({
-    address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'gauges',
-    args: [pool.address], query: { enabled: expanded, refetchInterval: 20000 },
-  })
-  const oldGauge = oldGaugeAddr && oldGaugeAddr !== '0x0000000000000000000000000000000000000000' ? oldGaugeAddr : undefined
-  const { data: oldStakedRaw } = useReadContract({
-    address: oldGauge, abi: GAUGE_ABI, functionName: 'balanceOf',
-    args: wallet ? [wallet] : undefined, query: { enabled: !!oldGauge && !!wallet && gaugeVersion === 'new' },
-  })
-  const oldStaked = (oldStakedRaw as bigint | undefined) ?? 0n
 
   const { data: lpBalRaw, refetch: refetchLP } = useReadContract({
     address: pool.address, abi: ERC20_ABI, functionName: 'balanceOf',
@@ -1134,8 +1105,6 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
           </div>
         )}
       </div>
-
-      <LegacyPositions wallet={wallet} />
 
       <div>
         <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">Token Balances</div>

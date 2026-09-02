@@ -5,8 +5,8 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, usePublicClient } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG, LEGACY_AEON_VOTER, LEGACY_FEE_DISTRIBUTOR, LEGACY_GAUGES } from '@/config/contracts'
-import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI, FEE_DISTRIBUTOR_ABI, LEGACY_FEE_DISTRIBUTOR_ABI, GAUGE_ABI } from '@/config/abis'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
+import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI, FEE_DISTRIBUTOR_ABI, GAUGE_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
@@ -821,23 +821,23 @@ const UNIQUE_MULTI_VOTE_POOLS = [...CL_POOLS, ...DLMM_POOLS]
   .filter((p, i, arr) => arr.findIndex(x => x.address === p.address) === i)
 
 function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; mode: VoteMode; epoch: bigint | undefined }) {
-  const { data: legacyData } = useReadContracts({
+  const { data: vammData } = useReadContracts({
     contracts: UNIQUE_VOTE_POOLS.map(p => ({
       address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'getVotes' as const,
       args: tokenId !== undefined ? [tokenId, p.address] as const : undefined,
     })),
-    query: { enabled: mode === 'vAMM' && tokenId !== undefined, refetchInterval: 15000 },
+    query: { enabled: mode === 'vAMM' && tokenId !== undefined, refetchInterval: 30000 },
   })
   const { data: multiData } = useReadContracts({
     contracts: UNIQUE_MULTI_VOTE_POOLS.map(p => ({
       address: CONTRACTS.MultiGaugeController, abi: MULTI_GAUGE_CONTROLLER_ABI, functionName: 'votes' as const,
       args: tokenId !== undefined && epoch !== undefined ? [epoch, tokenId, p.address] as const : undefined,
     })),
-    query: { enabled: mode === 'CL_DLMM' && tokenId !== undefined && epoch !== undefined, refetchInterval: 15000 },
+    query: { enabled: mode === 'CL_DLMM' && tokenId !== undefined && epoch !== undefined, refetchInterval: 30000 },
   })
 
   const votePools = mode === 'vAMM' ? UNIQUE_VOTE_POOLS : UNIQUE_MULTI_VOTE_POOLS
-  const data = mode === 'vAMM' ? legacyData : multiData
+  const data = mode === 'vAMM' ? vammData : multiData
 
   const rows = votePools
     .map((pool, i) => ({ pool, weight: data?.[i]?.status === 'success' ? data[i].result as bigint : 0n }))
@@ -862,164 +862,6 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
           </div>
         </div>
       ))}
-    </div>
-  )
-}
-
-// Cutover (2026-07-16) happened mid-epoch. The real fees collected during
-// that epoch (~700 AEON as of cutover) live in the OLD FeeDistributor,
-// tagged to vote weights that live entirely on LEGACY_AEON_VOTER -- that
-// pairing is self-contained and unaffected by the voter/engine cutover
-// (pure wall-clock epoch math, immutable reference to the old voter's
-// still-intact storage). This shows + claims that one legacy epoch's money
-// so it doesn't just sit unclaimed once the new Claim Fees button (which
-// only knows about the new, empty-so-far FeeDistributor) can't see it.
-// The ONLY vAMM pools that hold pre-migration fees (verified on-chain: these
-// 14 have non-zero legacy poolTotalWeight in epochs 1783555200/1784160000; the
-// other 40 vAMM pools -- all the stock pairs -- have zero). Querying only these
-// keeps the weight multicall small (14x2 instead of 54x2) so it doesn't blow
-// the RPC limit and silently return nothing (which hid the whole claim section).
-const LEGACY_FEE_POOLS = [
-  { address: '0xD215650cb628113A64D938164Ee5CD72293F9ea6' as `0x${string}`, name: 'AEON/ETH' },
-  { address: '0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288' as `0x${string}`, name: 'AEON/USDG' },
-  { address: '0x2732E1312e5Bba5729534E9d94D44c090b200F14' as `0x${string}`, name: 'ETH/USDG' },
-  { address: '0x67B2da1742187Aa09b427082b06ACDC5bBCA2D99' as `0x${string}`, name: 'VIRTUAL/AEON' },
-  { address: '0xeB638e1FA253E5526C2be76626dE26F02E4bdaba' as `0x${string}`, name: 'ROBINFUN/AEON' },
-  { address: '0x22d76bf4e8d2c1DfCca7de6c9dC46Ec2a8Ed7Eb7' as `0x${string}`, name: 'CASHCAT/AEON' },
-  { address: '0x3DC6b6c354fB1e9CFdaA8A36ff845728f7176f4e' as `0x${string}`, name: 'CASHCAT/ETH' },
-  { address: '0x82203a764428Fbf826DCd1CE48Fdd57655b604f2' as `0x${string}`, name: 'CASHCAT/USDG' },
-  { address: '0x625fcD4CA1cA34Eb8ac74883748419De037d78DF' as `0x${string}`, name: 'ROBINFUN/ETH' },
-  { address: '0xB60d3Dea956204c6731cA22622bE2b8bEFac4029' as `0x${string}`, name: 'ROBINFUN/USDG' },
-  { address: '0x8Ca7acDe0218B5A905dC29CC9d650fadC706Fd9E' as `0x${string}`, name: 'CASHCAT/ROBINFUN' },
-  { address: '0xB4692A778E33fBA0B97Feaa863377C6322c83AA4' as `0x${string}`, name: 'SHERWOOD/AEON' },
-  { address: '0x3C643F22F0b24795710638CdEf2296eA12896317' as `0x${string}`, name: 'HOODIE/AEON' },
-  { address: '0xbf5FCFF8e5604b3ba404a4Cb5Be49EF230e0dA76' as `0x${string}`, name: 'NASDAQ/AEON' },
-] as const
-
-function LegacyClaim({ wallet }: { wallet: `0x${string}` }) {
-  // Pre-migration fees sit in TWO now-closed epochs (verified on-chain:
-  // 1783555200 + 1784160000 both hold real fees AND votes). This USED to
-  // compute the CURRENT week and broke the instant the epoch rolled over --
-  // it queried the new, empty epoch, found zero weight, and rendered nothing
-  // (people thought their money vanished). These epochs are historical/fixed.
-  const LEGACY_EPOCHS = [1783555200n, 1784160000n] as const
-  const PAIRS = LEGACY_FEE_POOLS.flatMap(pool => LEGACY_EPOCHS.map(epoch => ({ pool, epoch })))
-  const keyOf = (poolAddr: string, epoch: bigint) => `${poolAddr}-${epoch}`
-
-  // The claiming contract (LEGACY_FEE_DISTRIBUTOR, immutable, pre-cutover)
-  // hardcodes msg.sender -> voter.lastVotedTokenId(msg.sender) -- it can
-  // only ever pay out through THIS ONE tokenId, no matter which of the
-  // wallet's other veNFTs also has real weight. poke() never updates that
-  // mapping (only vote() does), so a wallet that poked one NFT and voted
-  // fresh with another can have its "active" tokenId pointing at the wrong
-  // one -- surfaced below so it's visible instead of just silently showing
-  // nothing.
-  const { data: activeTokenIdRaw } = useReadContract({
-    address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'lastVotedTokenId', args: [wallet],
-  })
-  const activeTokenId = activeTokenIdRaw as bigint | undefined
-
-  const { owned: ownedTokenIds } = useOwnedVeNFTs(wallet)
-
-  // Epoch-specific vote-weight snapshot -- NOT getVotes() (reflects the
-  // ongoing/current allocation, not what was actually locked in for this
-  // epoch) and NOT derived from lastVoted() (poke() never updates that
-  // timestamp -- caused a real bug here: pointed at an old, already-fully-
-  // processed epoch instead of the one actually holding the pre-cutover fees).
-  const { data: activeWeightData } = useReadContracts({
-    contracts: PAIRS.map(q => ({
-      address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'poolVoteWeight' as const,
-      args: activeTokenId !== undefined ? [activeTokenId, q.pool.address, q.epoch] as const : undefined,
-    })),
-    query: { enabled: activeTokenId !== undefined && activeTokenId > 0n, refetchInterval: 15000 },
-  })
-
-  // Sum of every OTHER owned tokenId's weight, per tokenId, so we can flag
-  // "you own #X with real weight but it isn't your active claiming NFT."
-  const otherTokenIds = ownedTokenIds.filter(id => id !== activeTokenId)
-  const { data: otherWeightData } = useReadContracts({
-    contracts: otherTokenIds.flatMap(id =>
-      PAIRS.map(q => ({
-        address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'poolVoteWeight' as const,
-        args: [id, q.pool.address, q.epoch] as const,
-      }))
-    ),
-    query: { enabled: otherTokenIds.length > 0, refetchInterval: 15000 },
-  })
-
-  const publicClient = usePublicClient()
-  const { writeContractAsync } = useWriteContract()
-  const [claimedKeys, setClaimedKeys] = useState<Set<string>>(new Set())
-  const [claimingIndex, setClaimingIndex] = useState<number | null>(null)
-  const [claimError, setClaimError] = useState('')
-
-  if (!activeTokenId || activeTokenId === 0n) return null
-  const rows = PAIRS
-    .map((q, i) => ({ ...q, weight: activeWeightData?.[i]?.status === 'success' ? activeWeightData[i].result as bigint : 0n }))
-    .filter(r => r.weight > 0n)
-
-  const otherIdsWithWeight = otherTokenIds.filter((id, idx) => {
-    const start = idx * PAIRS.length
-    return PAIRS.some((_, j) => otherWeightData?.[start + j]?.status === 'success' && (otherWeightData[start + j].result as bigint) > 0n)
-  })
-
-  if (rows.length === 0 && otherIdsWithWeight.length === 0) return null
-
-  const pending = rows.filter(r => !claimedKeys.has(keyOf(r.pool.address, r.epoch)))
-  const isClaiming = claimingIndex !== null
-
-  async function handleClaimAll() {
-    setClaimError('')
-    for (let i = 0; i < pending.length; i++) {
-      setClaimingIndex(i)
-      try {
-        const hash = await writeContractAsync({
-          address: LEGACY_FEE_DISTRIBUTOR, abi: LEGACY_FEE_DISTRIBUTOR_ABI, functionName: 'claimAllFees',
-          args: [pending[i].pool.address, pending[i].epoch],
-        })
-        await publicClient?.waitForTransactionReceipt({ hash })
-        setClaimedKeys(prev => new Set(prev).add(keyOf(pending[i].pool.address, pending[i].epoch)))
-      } catch (e: any) {
-        setClaimError((e.shortMessage ?? e.message ?? 'Claim failed').slice(0, 150))
-        break
-      }
-    }
-    setClaimingIndex(null)
-  }
-
-  return (
-    <div className="space-y-1 pt-1 border-t border-amber-500/20 mt-1">
-      <div className="text-2xs text-amber-400 uppercase tracking-wider pt-1">Pre-migration rewards (veNFT #{activeTokenId.toString()})</div>
-      {rows.map(({ pool, epoch }) => (
-        <div key={keyOf(pool.address, epoch)} className="flex justify-between items-center text-xs">
-          <span className="text-text-secondary">{pool.name} <span className="text-text-muted text-2xs">({epoch === 1783555200n ? 'wk1' : 'wk2'})</span></span>
-          <span className={clsx('font-mono text-2xs', claimedKeys.has(keyOf(pool.address, epoch)) ? 'text-emerald-400' : 'text-text-muted')}>
-            {claimedKeys.has(keyOf(pool.address, epoch)) ? 'Claimed ✓' : 'Pending'}
-          </span>
-        </div>
-      ))}
-      {rows.length === 0 && (
-        <p className="text-2xs text-text-muted">veNFT #{activeTokenId.toString()} has no pre-migration weight.</p>
-      )}
-      {pending.length > 0 && (
-        <button
-          onClick={handleClaimAll}
-          disabled={isClaiming}
-          className="btn-primary w-full mt-2 flex items-center justify-center gap-2 text-sm py-2 disabled:opacity-60"
-        >
-          {isClaiming && <Loader2 size={14} className="animate-spin" />}
-          {isClaiming ? `Claiming ${claimingIndex! + 1}/${pending.length}…` : `Claim All (${pending.length})`}
-        </button>
-      )}
-      {claimError && <p className="text-2xs text-red-400 pt-1 break-all">{claimError}</p>}
-      {otherIdsWithWeight.length > 0 && (
-        <p className="text-2xs text-orange-400 pt-1 leading-relaxed">
-          You also own veNFT {otherIdsWithWeight.map(id => `#${id}`).join(', ')} with real weight this epoch, but only
-          #{activeTokenId.toString()} can claim right now -- the old contract only pays out through whichever veNFT you
-          last called Vote with (poking doesn't count). Call Vote here with {otherIdsWithWeight.map(id => `#${id}`).join('/')} to
-          make it active, then come back to claim its share too.
-        </p>
-      )}
     </div>
   )
 }
