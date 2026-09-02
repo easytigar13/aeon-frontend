@@ -634,10 +634,6 @@ export default function VotePage() {
                   </div>
                 )}
 
-                {/* Wallet-level, independent of which veNFT is selected above --
-                    reads the wallet's pre-cutover vote directly. */}
-                {address && <LegacyClaim wallet={address} />}
-
                 {!loadingOwned && ownedTokenIds.length === 0 && furnaceWeight > 0n && (
                   <div className="p-3 rounded-xl bg-orange-400/5 border border-orange-400/20 space-y-2">
                     <div className="flex items-center gap-1.5 text-xs font-medium text-orange-400">
