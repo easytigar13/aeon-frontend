@@ -112,9 +112,21 @@ export function usePrices(): PriceMap {
     if (symbol === 'USDG' || symbol === 'AEON' || symbol === 'WETH') continue
     prices[symbol] = pickPrice(symbol, liquidAnchors)
   }
+
   // ETH is the native-gas sentinel, not its own pool -- always priced
   // identically to WETH.
   prices.ETH = prices.WETH ?? null
+
+  if (prices.AEON !== null && prices.AEON > 0) lastKnownPrices.AEON = prices.AEON
+  if (prices.WETH !== null && prices.WETH > 0) {
+    lastKnownPrices.WETH = prices.WETH
+    lastKnownPrices.ETH = prices.WETH
+  }
+  for (const symbol of PRICED_SYMBOLS) {
+    if (prices[symbol] !== null && (prices[symbol] as number) > 0) {
+      lastKnownPrices[symbol] = prices[symbol]
+    }
+  }
 
   return prices
 }
