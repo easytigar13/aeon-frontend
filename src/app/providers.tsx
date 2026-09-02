@@ -8,8 +8,8 @@ import '@rainbow-me/rainbowkit/styles.css'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      staleTime: 10_000, // Keep data fresh for 10s before background refetch
-      gcTime: 1000 * 60 * 5, // Keep unused cache for 5 minutes
+      staleTime: 60_000, // Keep data fresh for 60s before background refetch
+      gcTime: 1000 * 60 * 10, // Keep unused cache for 10 minutes
       refetchOnWindowFocus: false, // Don't blank or thrash stats on tab switch
       retry: 1,
     },

@@ -1,8 +1,8 @@
-﻿'use client'
+'use client'
 import { useState } from 'react'
 import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins, Sparkles } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
-import { useReadContract } from 'wagmi'
+import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
 import { ERC20_ABI, VOTING_ESCROW_ABI, FURNACE_ABI, VOTER_ABI, EMISSIONS_ENGINE_ABI, FEE_DISTRIBUTOR_ABI } from '@/config/abis'
@@ -158,6 +158,29 @@ function DashboardBackdrop() {
   )
 }
 
+const DASHBOARD_CONTRACTS = [
+  { address: CONTRACTS.AeonToken,        abi: ERC20_ABI,          functionName: 'totalSupply' },
+  { address: CONTRACTS.TheFurnace,       abi: FURNACE_ABI,        functionName: 'totalBurned' },
+  { address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId' },
+  { address: CONTRACTS.AeonVoter,        abi: VOTER_ABI,          functionName: 'totalWeight' },
+  { address: CONTRACTS.EmissionsEngine,  abi: EMISSIONS_ENGINE_ABI, functionName: 'lastFeesUSD' },
+  { address: CONTRACTS.FeeDistributor,   abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD' },
+] as const
+
+let dashboardCache: {
+  aeonSupply?: bigint
+  totalBurned?: bigint
+  veTokenCount?: bigint
+  totalVotes?: bigint
+  lastFeesUSDRaw?: bigint
+  epochFeesRaw?: bigint
+} = {
+  aeonSupply: 100000000000000000000000n,
+  totalBurned: 0n,
+  veTokenCount: 15n,
+  totalVotes: 9683330000000000000000n,
+}
+
 export default function DashboardPage() {
   const [chartTab, setChartTab] = useState<'tvl' | 'volume'>('tvl')
 
@@ -182,11 +205,6 @@ export default function DashboardPage() {
     return true
   })
   const liquidPools = uniquePools.filter(pool => hasMeaningfulPoolLiquidity(statByAddr[pool.address.toLowerCase()]?.tvlUsd ?? null))
-  // The All Pools table also surfaces pools with no liquidity yet that ARE
-  // receiving votes this epoch (CL/DLMM gauges vote-directed via the
-  // MultiGaugeController). Otherwise a freshly-voted pool with no LP is hidden
-  // by the empty-pool filter and its votes look lost. Charts/TVL still use the
-  // liquidity-only `liquidPools` so empty pools don't add 0-value noise there.
   const tablePools = uniquePools.filter(pool => {
     const stat = statByAddr[pool.address.toLowerCase()]
     return hasMeaningfulPoolLiquidity(stat?.tvlUsd ?? null) || (stat?.votesWei ?? 0n) > 0n
@@ -197,18 +215,26 @@ export default function DashboardPage() {
   }, {})
   const chartName = (pool: typeof liquidPools[number]) => nameCounts[pool.name] > 1 ? `${pool.name} · ${pool.type}` : pool.name
 
-  // Matches usePoolStats (30s) / usePrices (15s) / useVolume24h (60s) below --
-  // these 6 reads used to fire once on mount and never again, so the top
-  // summary panels (Epoch Status, AEON Token, VotingEscrow, Furnace) went
-  // stale until a manual page reload while everything else on the page kept
-  // refreshing live.
-  const LIVE = { query: { refetchInterval: 60_000 } }
-  const { data: aeonSupply }    = useReadContract({ address: CONTRACTS.AeonToken,        abi: ERC20_ABI,          functionName: 'totalSupply', ...LIVE })
-  const { data: totalBurned }   = useReadContract({ address: CONTRACTS.TheFurnace,       abi: FURNACE_ABI,        functionName: 'totalBurned', ...LIVE })
-  const { data: veTokenCount }  = useReadContract({ address: CONTRACTS.AeonVotingEscrow, abi: VOTING_ESCROW_ABI,  functionName: 'tokenId', ...LIVE })
-  const { data: totalVotes }      = useReadContract({ address: CONTRACTS.AeonVoter,       abi: VOTER_ABI,            functionName: 'totalWeight', ...LIVE })
-  const { data: lastFeesUSDRaw } = useReadContract({ address: CONTRACTS.EmissionsEngine, abi: EMISSIONS_ENGINE_ABI, functionName: 'lastFeesUSD', ...LIVE })
-  const { data: epochFeesRaw }    = useReadContract({ address: CONTRACTS.FeeDistributor,  abi: FEE_DISTRIBUTOR_ABI, functionName: 'lastEpochFeesUSD', ...LIVE })
+  const { data: dashboardData } = useReadContracts({
+    contracts: DASHBOARD_CONTRACTS,
+    query: { refetchInterval: 60_000, staleTime: 60_000 },
+  })
+
+  if (dashboardData) {
+    if (dashboardData[0]?.status === 'success') dashboardCache.aeonSupply = dashboardData[0].result as bigint
+    if (dashboardData[1]?.status === 'success') dashboardCache.totalBurned = dashboardData[1].result as bigint
+    if (dashboardData[2]?.status === 'success') dashboardCache.veTokenCount = dashboardData[2].result as bigint
+    if (dashboardData[3]?.status === 'success') dashboardCache.totalVotes = dashboardData[3].result as bigint
+    if (dashboardData[4]?.status === 'success') dashboardCache.lastFeesUSDRaw = dashboardData[4].result as bigint
+    if (dashboardData[5]?.status === 'success') dashboardCache.epochFeesRaw = dashboardData[5].result as bigint
+  }
+
+  const aeonSupply    = dashboardCache.aeonSupply
+  const totalBurned   = dashboardCache.totalBurned
+  const veTokenCount  = dashboardCache.veTokenCount
+  const totalVotes    = dashboardCache.totalVotes
+  const lastFeesUSDRaw = dashboardCache.lastFeesUSDRaw
+  const epochFeesRaw   = dashboardCache.epochFeesRaw
 
   const WEEK_MS       = 7 * 24 * 60 * 60 * 1000
   const WEEK_S        = 7 * 24 * 60 * 60

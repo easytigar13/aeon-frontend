@@ -27,15 +27,17 @@ const POOL_TOKEN0_FIRST = POOLS.map(p => {
   return addr0 < addr1
 })
 
+const POOL_STATS_CACHE = new Map<string, PoolStat>()
+
 export function usePoolStats(prices: PriceMap): PoolStat[] {
-  const { data } = useReadContracts({ contracts: POOL_STAT_CONTRACTS, query: { refetchInterval: 30000 } })
+  const { data } = useReadContracts({ contracts: POOL_STAT_CONTRACTS, query: { refetchInterval: 30000, staleTime: 60000 } })
 
   return POOLS.map((pool, i) => {
     const base = i * 2
     const reserves = data?.[base]?.status === 'success'   ? data[base].result   as readonly [bigint, bigint, number] : undefined
     const votes    = data?.[base+1]?.status === 'success' ? data[base+1].result as bigint : 0n
 
-    let tvlUsd: number | null = null
+    let tvlUsd: number | null = POOL_STATS_CACHE.get(pool.address)?.tvlUsd ?? null
 
     if (reserves) {
       const [r0, r1] = reserves
@@ -57,12 +59,16 @@ export function usePoolStats(prices: PriceMap): PoolStat[] {
       else if (rA === 0n && rB === 0n) tvlUsd = 0
     }
 
-    return {
+    const stat: PoolStat = {
       address: pool.address,
       tvlUsd,
-      votesWei: votes,
-      votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : '0',
+      votesWei: votes > 0n ? votes : (POOL_STATS_CACHE.get(pool.address)?.votesWei ?? 0n),
+      votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : (POOL_STATS_CACHE.get(pool.address)?.votesFormatted ?? '0'),
     }
+    if (tvlUsd !== null || stat.votesWei > 0n) {
+      POOL_STATS_CACHE.set(pool.address, stat)
+    }
+    return stat
   })
 }
 
@@ -150,8 +156,10 @@ const CL_POOL_STAT_CONTRACTS = CL_POOLS.flatMap(p => ([
   { address: TOKENS[p.token1 as keyof typeof TOKENS]?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [p.address] } as const,
 ]))
 
+const CL_STATS_CACHE = new Map<string, PoolStat>()
+
 export function useClPoolStats(prices: PriceMap): PoolStat[] {
-  const { data } = useReadContracts({ contracts: CL_POOL_STAT_CONTRACTS, query: { refetchInterval: 30000 } })
+  const { data } = useReadContracts({ contracts: CL_POOL_STAT_CONTRACTS, query: { refetchInterval: 30000, staleTime: 60000 } })
   const weights = useControllerWeights(CL_POOLS)
 
   return CL_POOLS.map((pool, i) => {
@@ -160,7 +168,7 @@ export function useClPoolStats(prices: PriceMap): PoolStat[] {
     const balA = data?.[base + 1]?.status === 'success' ? data[base + 1].result as bigint : undefined
     const balB = data?.[base + 2]?.status === 'success' ? data[base + 2].result as bigint : undefined
 
-    let tvlUsd: number | null = null
+    let tvlUsd: number | null = CL_STATS_CACHE.get(pool.address)?.tvlUsd ?? null
     if (onChainToken0 && balA !== undefined && balB !== undefined) {
       const priceA = prices[pool.token0] ?? null
       const priceB = prices[pool.token1] ?? null
@@ -176,7 +184,16 @@ export function useClPoolStats(prices: PriceMap): PoolStat[] {
     }
 
     const votes = weights[pool.address.toLowerCase()] ?? 0n
-    return { address: pool.address, tvlUsd, votesWei: votes, votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : '0' }
+    const stat: PoolStat = {
+      address: pool.address,
+      tvlUsd,
+      votesWei: votes > 0n ? votes : (CL_STATS_CACHE.get(pool.address)?.votesWei ?? 0n),
+      votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : (CL_STATS_CACHE.get(pool.address)?.votesFormatted ?? '0'),
+    }
+    if (tvlUsd !== null || stat.votesWei > 0n) {
+      CL_STATS_CACHE.set(pool.address, stat)
+    }
+    return stat
   })
 }
 
@@ -188,8 +205,10 @@ const DLMM_POOL_STAT_CONTRACTS = DLMM_POOLS.flatMap(p => ([
   { address: TOKENS[p.token1 as keyof typeof TOKENS]?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [p.address] } as const,
 ]))
 
+const DLMM_STATS_CACHE = new Map<string, PoolStat>()
+
 export function useDlmmPoolStats(prices: PriceMap): PoolStat[] {
-  const { data } = useReadContracts({ contracts: DLMM_POOL_STAT_CONTRACTS, query: { refetchInterval: 30000 } })
+  const { data } = useReadContracts({ contracts: DLMM_POOL_STAT_CONTRACTS, query: { refetchInterval: 30000, staleTime: 60000 } })
   const weights = useControllerWeights(DLMM_POOLS)
 
   return DLMM_POOLS.map((pool, i) => {
@@ -197,7 +216,7 @@ export function useDlmmPoolStats(prices: PriceMap): PoolStat[] {
     const balX = data?.[base]?.status === 'success' ? data[base].result as bigint : undefined
     const balY = data?.[base + 1]?.status === 'success' ? data[base + 1].result as bigint : undefined
 
-    let tvlUsd: number | null = null
+    let tvlUsd: number | null = DLMM_STATS_CACHE.get(pool.address)?.tvlUsd ?? null
     if (balX !== undefined && balY !== undefined) {
       const priceX = prices[pool.token0] ?? null
       const priceY = prices[pool.token1] ?? null
@@ -213,7 +232,16 @@ export function useDlmmPoolStats(prices: PriceMap): PoolStat[] {
     }
 
     const votes = weights[pool.address.toLowerCase()] ?? 0n
-    return { address: pool.address, tvlUsd, votesWei: votes, votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : '0' }
+    const stat: PoolStat = {
+      address: pool.address,
+      tvlUsd,
+      votesWei: votes > 0n ? votes : (DLMM_STATS_CACHE.get(pool.address)?.votesWei ?? 0n),
+      votesFormatted: votes > 0n ? parseFloat(formatUnits(votes, 18)).toFixed(2) : (DLMM_STATS_CACHE.get(pool.address)?.votesFormatted ?? '0'),
+    }
+    if (tvlUsd !== null || stat.votesWei > 0n) {
+      DLMM_STATS_CACHE.set(pool.address, stat)
+    }
+    return stat
   })
 }
 

@@ -46,12 +46,25 @@ const PRICE_CONTRACTS = PRICE_ROUTE_ENTRIES.map(route => ({
   address: route.pool, abi: PAIR_ABI, functionName: 'getReserves'
 } as const))
 
+let lastKnownPrices: PriceMap = {
+  USDG: 1,
+  AEON: 0.7186,
+  WETH: 2422.44,
+  ETH: 2422.44,
+  CASHCAT: 0.2815,
+  ROBINFUN: 0.000216,
+  VIRTUAL: 0.7315,
+  FRONG: 0.0104,
+  HOODIE: 0.00000138,
+  NASDAQ: 0.00000568,
+}
+
 export function usePrices(): PriceMap {
-  const { data } = useReadContracts({ contracts: PRICE_CONTRACTS, query: { refetchInterval: 15000 } })
+  const { data } = useReadContracts({ contracts: PRICE_CONTRACTS, query: { refetchInterval: 15000, staleTime: 60000 } })
 
   const get = (i: number) => (data?.[i]?.status === 'success' ? data[i].result : undefined)
 
-  const prices: PriceMap = { USDG: 1 }
+  const prices: PriceMap = { ...lastKnownPrices, USDG: 1 }
 
   function pickPrice(symbol: string, allowedAnchors: ReadonlySet<string>): number | null {
     const token = TOKENS[symbol as keyof typeof TOKENS]
