@@ -223,30 +223,34 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
     // each venue with bounded address batches so the complete time window is
     // retained and every event signature is matched independently.
     async function fetchVenueLogs(fromBlock: bigint, toBlock: bigint): Promise<any[]> {
-      const calls: Promise<any[]>[] = []
+      const logs: any[] = []
       for (const group of VENUE_LOG_GROUPS) {
         for (let i = 0; i < group.addresses.length; i += LOG_ADDRESS_CHUNK) {
           const address = group.addresses.slice(i, i + LOG_ADDRESS_CHUNK)
           if (address.length === 0) continue
-          calls.push((client as any).getLogs({
-            address,
-            topics: [group.topic],
-            fromBlock,
-            toBlock,
-          }))
+          try {
+            const batch = await (client as any).getLogs({
+              address,
+              topics: [group.topic],
+              fromBlock,
+              toBlock,
+            })
+            if (Array.isArray(batch)) logs.push(...batch)
+          } catch {
+            // continue on individual chunk failure
+          }
         }
       }
-      const batches = await Promise.all(calls)
-      return batches.flat()
+      return logs
     }
 
     async function fetchLogsForRange(primaryRange: bigint, currentBlock: bigint): Promise<{ logs: any[]; complete: boolean }> {
-      const candidateRanges = [primaryRange, 86400n, 43200n, 20000n, 5000n]
+      const candidateRanges = [primaryRange, 43200n, 20000n, 5000n]
       for (const range of candidateRanges) {
         const fromBlock = currentBlock > range ? currentBlock - range : 0n
         try {
           const logs = await fetchVenueLogs(fromBlock, currentBlock)
-          return { logs, complete: true }
+          if (logs.length > 0 || range <= 5000n) return { logs, complete: true }
         } catch {
           // try next smaller range
         }
@@ -254,14 +258,8 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
       return { logs: [], complete: false }
     }
 
-    // Weekly log fetching simplified to avoid RPC saturation
-    async function fetchPreviousSixDays(range24h: bigint, currentBlock: bigint): Promise<{ logs: any[]; complete: boolean }> {
-      return { logs: [], complete: false }
-    }
-
     // Decode a batch of logs into {totalUsd, byPool, priceHistory} — shared
-    // by both the 24h and 7d windows, since the decode logic doesn't care
-    // how wide the range was.
+    // by both the 24h and 7d windows.
     function processLogs(logs: any[], p: PriceMap) {
       let totalUsd = 0
       const byPool: Record<string, number> = {}
@@ -272,12 +270,11 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
         const meta = POOL_META.get(poolAddr)
         if (!meta) continue
 
-        const onChainToken0 = onChainToken0Ref.current.get(poolAddr)
-        if (!onChainToken0) continue
-        const t0Addr = TOKENS[meta.t0Key as keyof typeof TOKENS]?.address?.toLowerCase()
-        const configMatchesChain = onChainToken0 === t0Addr
-        const key0 = configMatchesChain ? meta.t0Key : meta.t1Key
-        const key1 = configMatchesChain ? meta.t1Key : meta.t0Key
+        const a0 = (TOKENS[meta.t0Key as keyof typeof TOKENS]?.address ?? '').toLowerCase()
+        const a1 = (TOKENS[meta.t1Key as keyof typeof TOKENS]?.address ?? '').toLowerCase()
+        const token0First = a0 < a1
+        const key0 = token0First ? meta.t0Key : meta.t1Key
+        const key1 = token0First ? meta.t1Key : meta.t0Key
 
         let amount0In = 0n, amount1In = 0n, amount0Out = 0n, amount1Out = 0n
         const topic0 = (log.topics?.[0] ?? '').toLowerCase()
