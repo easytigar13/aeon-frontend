@@ -65,8 +65,8 @@ const UPSTREAM_ENDPOINTS = [
 function getTtlForBody(body: string): number {
   if (body.includes('"eth_chainId"')) return 60_000 // Chain ID is immutable
   if (body.includes('"eth_blockNumber"')) return 2_000 // Fast block time on RH chain
-  if (body.includes('"eth_getLogs"')) return 15_000 // Cache logs for 15s
-  return 4_000 // 4 seconds for contract reads / multicalls
+  if (body.includes('"eth_getLogs"')) return 30_000 // Cache logs for 30s
+  return 6_000 // 6 seconds for contract reads / multicalls
 }
 
 async function fetchFromUpstream(body: string): Promise<{ text: string; status: number }> {

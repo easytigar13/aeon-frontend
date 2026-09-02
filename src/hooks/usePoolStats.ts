@@ -18,24 +18,28 @@ export interface PoolStat {
 // wagmi treats as a config change and re-queries for).
 const POOL_STAT_CONTRACTS = POOLS.flatMap(p => ([
   { address: p.address, abi: PAIR_ABI,  functionName: 'getReserves' } as const,
-  { address: p.address, abi: PAIR_ABI,  functionName: 'token0' } as const,
   { address: CONTRACTS.AeonVoter, abi: VOTER_ABI, functionName: 'weights', args: [p.address] } as const,
 ]))
+
+const POOL_TOKEN0_FIRST = POOLS.map(p => {
+  const addr0 = (TOKENS[p.token0 as keyof typeof TOKENS]?.address ?? '').toLowerCase()
+  const addr1 = (TOKENS[p.token1 as keyof typeof TOKENS]?.address ?? '').toLowerCase()
+  return addr0 < addr1
+})
 
 export function usePoolStats(prices: PriceMap): PoolStat[] {
   const { data } = useReadContracts({ contracts: POOL_STAT_CONTRACTS, query: { refetchInterval: 30000 } })
 
   return POOLS.map((pool, i) => {
-    const base = i * 3
+    const base = i * 2
     const reserves = data?.[base]?.status === 'success'   ? data[base].result   as readonly [bigint, bigint, number] : undefined
-    const token0   = data?.[base+1]?.status === 'success' ? data[base+1].result as string : undefined
-    const votes    = data?.[base+2]?.status === 'success' ? data[base+2].result as bigint : 0n
+    const votes    = data?.[base+1]?.status === 'success' ? data[base+1].result as bigint : 0n
 
     let tvlUsd: number | null = null
 
-    if (reserves && token0) {
+    if (reserves) {
       const [r0, r1] = reserves
-      const isToken0First = token0.toLowerCase() === (TOKENS[pool.token0 as keyof typeof TOKENS]?.address ?? '').toLowerCase()
+      const isToken0First = POOL_TOKEN0_FIRST[i]
       const rA = isToken0First ? r0 : r1
       const rB = isToken0First ? r1 : r0
 

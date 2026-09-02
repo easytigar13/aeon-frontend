@@ -42,10 +42,9 @@ const PRICE_ROUTE_INDEX = new Map(
   PRICE_ROUTE_ENTRIES.map((route, index) => [`${route.symbol}:${route.pool.toLowerCase()}:${route.anchor}`, index]),
 )
 
-const PRICE_CONTRACTS = PRICE_ROUTE_ENTRIES.flatMap(route => ([
-  { address: route.pool, abi: PAIR_ABI, functionName: 'getReserves' } as const,
-  { address: route.pool, abi: PAIR_ABI, functionName: 'token0' } as const,
-]))
+const PRICE_CONTRACTS = PRICE_ROUTE_ENTRIES.map(route => ({
+  address: route.pool, abi: PAIR_ABI, functionName: 'getReserves'
+} as const))
 
 export function usePrices(): PriceMap {
   const { data } = useReadContracts({ contracts: PRICE_CONTRACTS, query: { refetchInterval: 15000 } })
@@ -67,11 +66,10 @@ export function usePrices(): PriceMap {
 
       const routeIndex = PRICE_ROUTE_INDEX.get(`${symbol}:${route.pool.toLowerCase()}:${route.anchor}`)
       if (routeIndex === undefined) continue
-      const reserves = get(routeIndex * 2) as Reserves | undefined
-      const token0 = get(routeIndex * 2 + 1) as string | undefined
-      if (!reserves || !token0 || reserves[0] === 0n || reserves[1] === 0n) continue
+      const reserves = get(routeIndex) as Reserves | undefined
+      if (!reserves || reserves[0] === 0n || reserves[1] === 0n) continue
 
-      const tokenFirst = token0.toLowerCase() === token.address.toLowerCase()
+      const tokenFirst = token.address.toLowerCase() < anchor.address.toLowerCase()
       const tokenAmount = Number(formatUnits(tokenFirst ? reserves[0] : reserves[1], token.decimals))
       const anchorAmount = Number(formatUnits(tokenFirst ? reserves[1] : reserves[0], anchor.decimals))
       const anchorLiquidityUsd = anchorAmount * anchorPrice
