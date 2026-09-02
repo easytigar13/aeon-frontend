@@ -6,8 +6,7 @@ import { clsx } from 'clsx'
 
 const NAV_LINKS = [
   { href: '/swap',       label: 'Swap'      },
-  { href: '/liquidity',  label: 'Liquidity' },
-  { href: '/earn',       label: 'Portfolio' },
+  { href: '/earn',       label: 'Pools'     },
   { href: '/vote',       label: 'Vote'      },
   { href: '/lock',       label: 'Lock'      },
   { href: '/dashboard',  label: 'Dashboard' },
@@ -36,7 +35,9 @@ export function Navbar() {
         {/* Nav links */}
         <nav className="hidden md:flex items-center gap-1">
           {NAV_LINKS.map(link => {
-            const isActive = pathname === link.href || pathname.startsWith(link.href + '/')
+            const isActive = link.href === '/earn'
+              ? (pathname === '/earn' || pathname.startsWith('/earn/') || pathname === '/liquidity' || pathname.startsWith('/liquidity/'))
+              : (pathname === link.href || pathname.startsWith(link.href + '/'))
             return (
               <Link
                 key={link.href}
@@ -68,20 +69,25 @@ export function Navbar() {
       {/* Mobile nav */}
       <div className="md:hidden border-t border-[#181F30] overflow-x-auto bg-[#070A10]">
         <div className="flex px-4 py-2 gap-1">
-          {NAV_LINKS.map(link => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={clsx(
-                'shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
-                pathname === link.href
-                  ? 'bg-[#151D2F] text-white'
-                  : 'text-slate-400'
-              )}
-            >
-              {link.label}
-            </Link>
-          ))}
+          {NAV_LINKS.map(link => {
+            const isActive = link.href === '/earn'
+              ? (pathname === '/earn' || pathname.startsWith('/earn/') || pathname === '/liquidity' || pathname.startsWith('/liquidity/'))
+              : (pathname === link.href || pathname.startsWith(link.href + '/'))
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={clsx(
+                  'shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium transition-all',
+                  isActive
+                    ? 'bg-[#151D2F] text-white'
+                    : 'text-slate-400'
+                )}
+              >
+                {link.label}
+              </Link>
+            )
+          })}
         </div>
       </div>
     </header>

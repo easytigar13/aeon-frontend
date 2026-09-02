@@ -1,12 +1,12 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, BarChart3, Search, SlidersHorizontal, Plus, ChevronRight, Info } from 'lucide-react'
+import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, BarChart3, Search, SlidersHorizontal, Plus, ChevronRight, Info, Layers, ArrowUpRight, Waves, Grid3x3 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, DLMM_GAUGES, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, DLMM_GAUGES, CONTRACTS, TOKENS, NATIVE_SENTINEL, LEGACY_AEON_VOTER } from '@/config/contracts'
 import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, DLMM_GAUGE_ABI, FURNACE_ABI, VOTING_ESCROW_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
@@ -249,12 +249,13 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   apr?: number | null
   prices: PriceMap
 }) {
-  const [expanded,   setExpanded]   = useState(false)
-  const [innerTab,   setInnerTab]   = useState<'earn' | 'liquidity'>('earn')
-  const [stakeAmt,   setStakeAmt]   = useState('')
-  const [unstakeAmt, setUnstakeAmt] = useState('')
-  const [step,       setStep]       = useState<Step>('idle')
-  const [errMsg,     setErrMsg]     = useState('')
+  const [expanded,     setExpanded]     = useState(false)
+  const [innerTab,     setInnerTab]     = useState<'earn' | 'liquidity'>('earn')
+  const [gaugeVersion, setGaugeVersion] = useState<'new' | 'old'>('new')
+  const [stakeAmt,     setStakeAmt]     = useState('')
+  const [unstakeAmt,   setUnstakeAmt]   = useState('')
+  const [step,         setStep]         = useState<Step>('idle')
+  const [errMsg,       setErrMsg]       = useState('')
 
   const poolPrice = usePoolPrice(pool)
 
@@ -264,6 +265,14 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   })
   const gauge = gaugeAddr && gaugeAddr !== '0x0000000000000000000000000000000000000000' ? gaugeAddr : undefined
 
+  const { data: oldGaugeAddr } = useReadContract({
+    address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'gauges',
+    args: [pool.address], query: { enabled: expanded, refetchInterval: 60000 },
+  })
+  const oldGauge = oldGaugeAddr && oldGaugeAddr !== '0x0000000000000000000000000000000000000000' ? oldGaugeAddr : undefined
+
+  const activeGauge = gaugeVersion === 'old' ? oldGauge : gauge
+
   const { data: lpBalRaw, refetch: refetchLP } = useReadContract({
     address: pool.address, abi: ERC20_ABI, functionName: 'balanceOf',
     args: wallet ? [wallet] : undefined, query: { enabled: !!wallet },
@@ -272,22 +281,28 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   const lpFormatted = lpBal > 0n ? formatUnits(lpBal, 18).replace(/\.?0+$/, '') : '0'
 
   const { data: stakedRaw, refetch: refetchStaked } = useReadContract({
-    address: gauge, abi: GAUGE_ABI, functionName: 'balanceOf',
-    args: wallet ? [wallet] : undefined, query: { enabled: !!gauge && !!wallet },
+    address: activeGauge, abi: GAUGE_ABI, functionName: 'balanceOf',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!activeGauge && !!wallet },
   })
   const staked = (stakedRaw as bigint | undefined) ?? 0n
   const stakedFormatted = staked > 0n ? formatUnits(staked, 18).replace(/\.?0+$/, '') : '0'
 
+  const { data: oldStakedRaw, refetch: refetchOldStaked } = useReadContract({
+    address: oldGauge, abi: GAUGE_ABI, functionName: 'balanceOf',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!oldGauge && !!wallet },
+  })
+  const oldStaked = (oldStakedRaw as bigint | undefined) ?? 0n
+
   const { data: earnedRaw, refetch: refetchEarned } = useReadContract({
-    address: gauge, abi: GAUGE_ABI, functionName: 'earned',
-    args: wallet ? [wallet] : undefined, query: { enabled: !!gauge && !!wallet, refetchInterval: 15000 },
+    address: activeGauge, abi: GAUGE_ABI, functionName: 'earned',
+    args: wallet ? [wallet] : undefined, query: { enabled: !!activeGauge && !!wallet, refetchInterval: 15000 },
   })
   const earned = (earnedRaw as bigint | undefined) ?? 0n
   const earnedFormatted = earned > 0n ? parseFloat(formatUnits(earned, 18)).toFixed(4) : '0'
 
   const { data: allowanceRaw, refetch: refetchAllowance } = useReadContract({
     address: pool.address, abi: ERC20_ABI, functionName: 'allowance',
-    args: wallet && gauge ? [wallet, gauge] : undefined, query: { enabled: !!wallet && !!gauge },
+    args: wallet && activeGauge ? [wallet, activeGauge] : undefined, query: { enabled: !!wallet && !!activeGauge },
   })
   const allowance = (allowanceRaw as bigint | undefined) ?? 0n
 
@@ -320,7 +335,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
 
   useEffect(() => {
     if (!txSuccess) return
-    refetchLP(); refetchStaked(); refetchEarned(); refetchAllowance()
+    refetchLP(); refetchStaked(); refetchEarned(); refetchAllowance(); refetchOldStaked()
     if (step === 'approve_wait')    { setStep('staking');  return }
     if (step === 'stake_wait')      { setStep('done');     setStakeAmt('');   return }
     if (step === 'unstake_wait')    { setStep('idle');     setUnstakeAmt(''); return }
@@ -330,32 +345,32 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
   useEffect(() => { if (writeError) { setErrMsg(writeError.message.slice(0, 150)); setStep('idle') } }, [writeError])
 
   useEffect(() => {
-    if (!wallet || !gauge) return
+    if (!wallet || !activeGauge) return
     setErrMsg('')
     if (step === 'approving') {
-      writeContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [gauge, parseUnits(stakeAmt || '0', 18)] })
+      writeContract({ address: pool.address as `0x${string}`, abi: ERC20_ABI, functionName: 'approve', args: [activeGauge, parseUnits(stakeAmt || '0', 18)] })
       setStep('approve_wait')
     }
     if (step === 'staking') {
       const amt = parseUnits(stakeAmt || '0', 18)
       if (!amt) { setStep('idle'); return }
-      writeContract({ address: gauge, abi: GAUGE_ABI, functionName: 'deposit', args: [amt] })
+      writeContract({ address: activeGauge, abi: GAUGE_ABI, functionName: 'deposit', args: [amt] })
       setStep('stake_wait')
     }
     if (step === 'unstaking') {
       const amt = parseUnits(unstakeAmt || '0', 18)
       if (!amt) { setStep('idle'); return }
-      writeContract({ address: gauge, abi: GAUGE_ABI, functionName: 'withdraw', args: [amt] })
+      writeContract({ address: activeGauge, abi: GAUGE_ABI, functionName: 'withdraw', args: [amt] })
       setStep('unstake_wait')
     }
     if (step === 'claiming') {
-      writeContract({ address: gauge, abi: GAUGE_ABI, functionName: 'getReward', args: [wallet as `0x${string}`] })
+      writeContract({ address: activeGauge, abi: GAUGE_ABI, functionName: 'getReward', args: [wallet as `0x${string}`] })
       setStep('claim_wait')
     }
   }, [step])
 
   function handleStake() {
-    if (!stakeAmt || !gauge) return
+    if (!stakeAmt || !activeGauge) return
     if (allowance < parseUnits(stakeAmt, 18)) { setStep('approving'); return }
     setStep('staking')
   }
@@ -486,22 +501,24 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
                       Migration complete — this gauge no longer earns emissions. Unstake and move to New.
                     </div>
                   )}
-                  {!gauge
+                  {!activeGauge
                     ? <div className="p-4 text-center text-xs text-yellow-400">Gauge not yet deployed for this pool</div>
                     : (
                     <div className="space-y-3">
-                      <div className="flex items-center gap-2">
-                        <input type="number" value={stakeAmt} onChange={e => setStakeAmt(e.target.value)} placeholder="0.0" className="input-base flex-1 text-sm py-2" />
-                        <button onClick={() => setStakeAmt(lpFormatted)} className="text-xs text-aeon-400 font-mono hover:underline px-1">MAX</button>
-                        <button
-                          disabled={!stakeAmt || parseFloat(stakeAmt) <= 0 || isBusy}
-                          onClick={handleStake}
-                          className="btn-primary text-sm py-2 px-4 disabled:opacity-40 flex items-center gap-1 min-w-[110px] justify-center"
-                        >
-                          {(step === 'approving' || step === 'approve_wait' || step === 'staking' || step === 'stake_wait') && <Loader2 size={12} className="animate-spin" />}
-                          {stakeLabel()}
-                        </button>
-                      </div>
+                      {gaugeVersion === 'new' && (
+                        <div className="flex items-center gap-2">
+                          <input type="number" value={stakeAmt} onChange={e => setStakeAmt(e.target.value)} placeholder="0.0" className="input-base flex-1 text-sm py-2" />
+                          <button onClick={() => setStakeAmt(lpFormatted)} className="text-xs text-aeon-400 font-mono hover:underline px-1">MAX</button>
+                          <button
+                            disabled={!stakeAmt || parseFloat(stakeAmt) <= 0 || isBusy}
+                            onClick={handleStake}
+                            className="btn-primary text-sm py-2 px-4 disabled:opacity-40 flex items-center gap-1 min-w-[110px] justify-center"
+                          >
+                            {(step === 'approving' || step === 'approve_wait' || step === 'staking' || step === 'stake_wait') && <Loader2 size={12} className="animate-spin" />}
+                            {stakeLabel()}
+                          </button>
+                        </div>
+                      )}
                       <div className="flex justify-between text-xs">
                         <span className="text-text-muted">LP Balance: <span className="font-mono text-text-primary">{lpFormatted}</span></span>
                         <span className="text-text-muted">Staked: <span className="font-mono text-text-primary">{stakedFormatted}</span></span>
@@ -1255,6 +1272,94 @@ function PortfolioTab({ wallet, prices, lpByAddr, stakedByAddr, tvlByAddr }: {
   )
 }
 
+function LiquidityHubTab({ wallet }: { wallet?: `0x${string}` }) {
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* vAMM Standard Card */}
+        <div className="bg-[#0B0F19] border border-[#192134] hover:border-[#38BDF8]/40 transition-all rounded-2xl p-6 space-y-4 flex flex-col justify-between shadow-xl">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                <Layers size={20} />
+              </div>
+              <span className="text-2xs font-mono font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">Full Range</span>
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">vAMM Standard Pools</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">Provide 50/50 liquidity across the entire price curve. Ideal for passive fee and emission earning.</p>
+            </div>
+          </div>
+          <Link
+            href="/liquidity"
+            className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-[#151D2F] hover:bg-[#1C273E] text-white text-xs font-bold border border-[#2B3854] transition-all hover:border-[#38BDF8]/40 shadow-sm"
+          >
+            Deposit vAMM <ArrowUpRight size={14} />
+          </Link>
+        </div>
+
+        {/* CL Card */}
+        <div className="bg-[#0B0F19] border border-[#192134] hover:border-[#38BDF8]/40 transition-all rounded-2xl p-6 space-y-4 flex flex-col justify-between shadow-xl">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center text-violet-400">
+                <Waves size={20} />
+              </div>
+              <span className="text-2xs font-mono font-bold px-2 py-0.5 rounded bg-violet-500/10 text-violet-400 border border-violet-500/20">Concentrated</span>
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Concentrated Liquidity (CL)</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">Concentrate your capital within custom price ranges for maximum capital efficiency and high fee multipliers.</p>
+            </div>
+          </div>
+          <Link
+            href="/liquidity"
+            className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-[#151D2F] hover:bg-[#1C273E] text-white text-xs font-bold border border-[#2B3854] transition-all hover:border-[#38BDF8]/40 shadow-sm"
+          >
+            Deposit CL <ArrowUpRight size={14} />
+          </Link>
+        </div>
+
+        {/* DLMM Card */}
+        <div className="bg-[#0B0F19] border border-[#192134] hover:border-[#38BDF8]/40 transition-all rounded-2xl p-6 space-y-4 flex flex-col justify-between shadow-xl">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400">
+                <Grid3x3 size={20} />
+              </div>
+              <span className="text-2xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Bin Dynamic</span>
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-white">Discretized Liquidity (DLMM)</h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">Zero-slippage discrete bin liquidity with dynamic volatility-fee scaling and automated surge pricing.</p>
+            </div>
+          </div>
+          <Link
+            href="/liquidity"
+            className="w-full inline-flex items-center justify-center gap-1.5 py-2.5 px-4 rounded-xl bg-[#151D2F] hover:bg-[#1C273E] text-white text-xs font-bold border border-[#2B3854] transition-all hover:border-[#38BDF8]/40 shadow-sm"
+          >
+            Deposit DLMM <ArrowUpRight size={14} />
+          </Link>
+        </div>
+      </div>
+
+      {/* Direct Pool Creation and Management Action Banner */}
+      <div className="bg-gradient-to-r from-[#0E1726] to-[#0B0F19] border border-[#1E293B] rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+        <div>
+          <h4 className="text-sm font-bold text-white">Create a New Liquidity Pool</h4>
+          <p className="text-xs text-slate-400 mt-0.5">Permissionlessly create and seed a new pool for any standard token pair on Robinhood Chain.</p>
+        </div>
+        <Link
+          href="/liquidity"
+          className="bg-white hover:bg-slate-100 text-black font-extrabold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 whitespace-nowrap"
+        >
+          <Plus size={15} strokeWidth={3} /> Create Pool
+        </Link>
+      </div>
+    </div>
+  )
+}
+
 export default function EarnPage() {
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
@@ -1263,7 +1368,7 @@ export default function EarnPage() {
   const isConnected = mounted && _isConnected
   const { openConnectModal } = useConnectModal()
 
-  const [mainTab,   setMainTab]   = useState<'earn' | 'portfolio'>('earn')
+  const [mainTab,   setMainTab]   = useState<'earn' | 'liquidity' | 'portfolio'>('earn')
   const [filterTab, setFilterTab] = useState<'all' | 'my'>('all')
 
   const stats         = useEarnStats(isConnected ? address : undefined)
@@ -1356,15 +1461,33 @@ export default function EarnPage() {
       {/* Main Tab selector & Claim rewards bar */}
       <div className="flex items-center justify-between">
         <div className="flex gap-1 p-1 bg-[#0B0F19] border border-[#192134] rounded-xl">
-          {(['earn', 'portfolio'] as const).map(t => (
-            <button key={t} onClick={() => setMainTab(t)}
-              className={clsx(
-                'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all',
-                mainTab === t ? 'bg-[#151D2F] text-white shadow-sm border border-[#2B3854]' : 'text-slate-400 hover:text-slate-200'
-              )}>
-              {t === 'earn' ? <><Coins size={14} /> Earn & Pools</> : <><BarChart3 size={14} /> My Portfolio</>}
-            </button>
-          ))}
+          <button
+            onClick={() => setMainTab('earn')}
+            className={clsx(
+              'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all',
+              mainTab === 'earn' ? 'bg-[#151D2F] text-white shadow-sm border border-[#2B3854]' : 'text-slate-400 hover:text-slate-200'
+            )}
+          >
+            <Coins size={14} /> Earn & Pools
+          </button>
+          <button
+            onClick={() => setMainTab('liquidity')}
+            className={clsx(
+              'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all',
+              mainTab === 'liquidity' ? 'bg-[#151D2F] text-white shadow-sm border border-[#2B3854]' : 'text-slate-400 hover:text-slate-200'
+            )}
+          >
+            <Layers size={14} /> Add Liquidity
+          </button>
+          <button
+            onClick={() => setMainTab('portfolio')}
+            className={clsx(
+              'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all',
+              mainTab === 'portfolio' ? 'bg-[#151D2F] text-white shadow-sm border border-[#2B3854]' : 'text-slate-400 hover:text-slate-200'
+            )}
+          >
+            <BarChart3 size={14} /> My Portfolio
+          </button>
         </div>
         {!isConnected && (
           <button onClick={() => openConnectModal?.()} className="bg-[#151D2F] hover:bg-[#1C273E] text-slate-200 text-xs font-semibold px-4 py-2 rounded-lg border border-[#2B3854] flex items-center gap-2">
@@ -1381,6 +1504,8 @@ export default function EarnPage() {
           stakedByAddr={stats.stakedByAddr}
           tvlByAddr={tvlByAddr}
         />
+      ) : mainTab === 'liquidity' ? (
+        <LiquidityHubTab wallet={isConnected ? address : undefined} />
       ) : (
         <>
           <ClaimAllGaugeRewards />
@@ -1408,12 +1533,12 @@ export default function EarnPage() {
               </div>
             </div>
 
-            <Link
-              href="/liquidity"
-              className="w-full sm:w-auto bg-white hover:bg-slate-100 text-black font-extrabold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5"
+            <button
+              onClick={() => setMainTab('liquidity')}
+              className="w-full sm:w-auto bg-white hover:bg-slate-100 text-black font-extrabold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
             >
               <Plus size={15} strokeWidth={3} /> Add Liquidity
-            </Link>
+            </button>
           </div>
 
           {/* AEON Pools Table Header */}
