@@ -1154,7 +1154,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
 // always means profitable after fees -- never just profitable on the swap
 // math alone.
 
-const GAS_SAFETY_MULT_PCT = 130n   // require 1.30x the estimate -- buffer for gas price drift between quoting and inclusion
+const GAS_SAFETY_MULT_PCT = 105n   // require 1.05x the estimate -- operator-selected buffer for gas price drift between quoting and inclusion
 const APPROVE_GAS_FALLBACK = 60_000n
 const EXEC_ARB_BASE_GAS = 100_000n
 const EXEC_ARB_GAS_PER_HOP = 70_000n
