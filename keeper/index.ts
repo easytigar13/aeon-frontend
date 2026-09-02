@@ -1657,23 +1657,14 @@ async function ensureNativeGasReserve(
   let minimumUnwrap = gasReserveWei - currentNative + refillGasCost
   let preferredUnwrap = targetWei - currentNative + refillGasCost
   // A settlement trade can legitimately leave the wallet with USDG/AEON
-  // and almost no WETH. Buy a small WETH operating buffer from USDG first,
-  // then unwrap it. This is maintenance funding, never part of arb P&L.
   if (wethBalance < minimumUnwrap) {
-    const wethOperatingTarget = preferredUnwrap + refillGasCost * 3n
-    console.log(`   → WETH balance is short; buying a gas-refill buffer from USDG...`)
-    wethBalance = await ensureBaseTokenFunded('WETH', wethOperatingTarget, graph)
-    currentNative = await pub.getBalance({ address: account.address })
-    if (currentNative <= refillGasCost) {
-      console.error(`   ⚠ WETH was funded, but native ETH can no longer pay for the unwrap transaction`)
-      return false
-    }
-    minimumUnwrap = gasReserveWei - currentNative + refillGasCost
-    preferredUnwrap = targetWei - currentNative + refillGasCost
+    // Strictly unwrap whatever WETH is available without touching other tokens (USDG, AEON, etc.)
+    if (wethBalance <= 0n) return false
+    minimumUnwrap = wethBalance
+    preferredUnwrap = wethBalance
   }
   const unwrapAmount = wethBalance >= preferredUnwrap ? preferredUnwrap : minimumUnwrap
-  if (wethBalance < unwrapAmount) {
-    console.error(`   ⚠ Cannot self-refill gas: need ${formatEther(unwrapAmount)} WETH, have ${formatEther(wethBalance)} WETH`)
+  if (wethBalance < unwrapAmount || unwrapAmount <= 0n) {
     return false
   }
 

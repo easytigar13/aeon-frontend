@@ -58,6 +58,10 @@ function isCacheable(body: string): boolean {
   }
 }
 
+const UPSTREAM_ENDPOINTS = [
+  'https://rpc.mainnet.chain.robinhood.com',
+]
+
 function getTtlForBody(body: string): number {
   if (body.includes('"eth_chainId"')) return 60_000 // Chain ID is immutable
   if (body.includes('"eth_blockNumber"')) return 2_000 // Fast block time on RH chain
@@ -67,36 +71,40 @@ function getTtlForBody(body: string): number {
 
 async function fetchFromUpstream(body: string): Promise<{ text: string; status: number }> {
   const isGetLogs = body.includes('"eth_getLogs"')
-  // Do not retry getLogs 5 times if node rate-limits or times out
-  const MAX = isGetLogs ? 1 : 4
+  const MAX = isGetLogs ? 1 : 3
   let lastText = ''
   let lastStatus = 502
 
-  for (let attempt = 0; attempt < MAX; attempt++) {
-    try {
-      const upstream = await fetch(UPSTREAM, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        cache: 'no-store',
-      })
-      lastStatus = upstream.status
-      lastText = await upstream.text()
+  for (const endpoint of UPSTREAM_ENDPOINTS) {
+    for (let attempt = 0; attempt < MAX; attempt++) {
+      try {
+        const upstream = await fetch(endpoint, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'AeonProtocol/1.0',
+          },
+          body,
+          cache: 'no-store',
+        })
+        lastStatus = upstream.status
+        lastText = await upstream.text()
 
-      // 429 (rate limit) or 5xx (transient) -> back off and retry for non-getLogs
-      if ((upstream.status === 429 || upstream.status >= 500) && attempt < MAX - 1) {
-        await new Promise(r => setTimeout(r, 150 * (attempt + 1)))
-        continue
-      }
-      return { text: lastText, status: upstream.status }
-    } catch (e: unknown) {
-      lastText = JSON.stringify({
-        error: 'upstream RPC unreachable',
-        detail: e instanceof Error ? e.message : String(e),
-      })
-      if (attempt < MAX - 1) {
-        await new Promise(r => setTimeout(r, 150 * (attempt + 1)))
-        continue
+        // 429 (rate limit) or 5xx (transient) -> back off and retry
+        if ((upstream.status === 429 || upstream.status >= 500) && attempt < MAX - 1) {
+          await new Promise(r => setTimeout(r, 120 * (attempt + 1)))
+          continue
+        }
+        return { text: lastText, status: upstream.status }
+      } catch (e: unknown) {
+        lastText = JSON.stringify({
+          error: 'upstream RPC unreachable',
+          detail: e instanceof Error ? e.message : String(e),
+        })
+        if (attempt < MAX - 1) {
+          await new Promise(r => setTimeout(r, 120 * (attempt + 1)))
+          continue
+        }
       }
     }
   }

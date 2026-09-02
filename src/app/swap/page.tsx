@@ -886,6 +886,7 @@ function TokenSelectModal({ onSelect, onClose, exclude, walletAddress }: {
 }) {
   const [search, setSearch] = useState('')
   const filtered = TOKEN_LIST.filter(t => t.key !== exclude && (t.symbol.toLowerCase().includes(search.toLowerCase()) || t.name.toLowerCase().includes(search.toLowerCase())))
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-bg-base/80 backdrop-blur-sm" onClick={onClose}>
       <div className="card w-full max-w-sm p-4" onClick={e => e.stopPropagation()}>
@@ -893,7 +894,7 @@ function TokenSelectModal({ onSelect, onClose, exclude, walletAddress }: {
           <h3 className="font-display font-semibold">Select Token</h3>
           <button onClick={onClose} className="btn-ghost p-1 text-text-muted">✕</button>
         </div>
-        <input autoFocus type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search token..." className="input-base w-full mb-3" />
+        <input autoFocus type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search token name, symbol, or address..." className="input-base w-full mb-3" />
         <div className="space-y-1 max-h-72 overflow-y-auto">
           {filtered.map(token => <TokenRow key={token.key} token={token} walletAddress={walletAddress} onSelect={onSelect} />)}
         </div>
@@ -904,17 +905,21 @@ function TokenSelectModal({ onSelect, onClose, exclude, walletAddress }: {
 
 function TokenRow({ token, walletAddress, onSelect }: { token: typeof TOKEN_LIST[number]; walletAddress?: `0x${string}`; onSelect: (key: TokenKey) => void }) {
   const bal = useTokenBalance(token.key, walletAddress)
+  const hasBalance = bal.raw > 0n
   return (
-    <button onClick={() => onSelect(token.key)} className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-bg-raised transition-colors text-left">
+    <button onClick={() => onSelect(token.key)} className={clsx("w-full flex items-center gap-3 p-3 rounded-xl hover:bg-bg-raised transition-colors text-left", hasBalance && "bg-bg-raised/40")}>
       <TokenIcon symbol={token.key} size={36} />
       <div>
-        <div className="font-semibold text-sm text-text-primary">{token.symbol}</div>
+        <div className="flex items-center gap-1.5">
+          <span className="font-semibold text-sm text-text-primary">{token.symbol}</span>
+          {hasBalance && <span className="text-3xs px-1.5 py-0.5 rounded bg-aeon-400/20 text-aeon-400 font-mono">Owned</span>}
+        </div>
         <div className="text-xs text-text-muted">{token.name}</div>
         {token.address !== NATIVE_SENTINEL && (
           <div className="text-2xs font-mono text-text-muted/60">{token.address.slice(0, 6)}…{token.address.slice(-4)}</div>
         )}
       </div>
-      <div className="ml-auto text-xs font-mono text-text-muted">{bal.formatted}</div>
+      <div className={clsx("ml-auto text-xs font-mono", hasBalance ? "text-text-primary font-medium" : "text-text-muted")}>{bal.formatted}</div>
     </button>
   )
 }
