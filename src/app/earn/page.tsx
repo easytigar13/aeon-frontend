@@ -242,11 +242,12 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   )
 }
 
-function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
+function PoolRow({ pool, wallet, tvlUsd, apr, volume24h, prices }: {
   pool: typeof UNIQUE_POOLS[number]
   wallet?: `0x${string}`
   tvlUsd?: number | null
   apr?: number | null
+  volume24h?: number | null
   prices: PriceMap
 }) {
   const [expanded,     setExpanded]     = useState(false)
@@ -437,7 +438,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
 
         {/* 24h Volume */}
         <div className="col-span-4 md:col-span-2 hidden md:block">
-          <div className="text-sm font-mono text-slate-200">{fmtUsd((tvlUsd ?? 0) * 0.85)}</div>
+          <div className="text-sm font-mono text-slate-200">{fmtUsd(volume24h ?? 0)}</div>
           <div className="text-2xs text-slate-400">24h Volume</div>
         </div>
 
@@ -1566,6 +1567,7 @@ export default function EarnPage() {
                   wallet={isConnected ? address : undefined}
                   tvlUsd={tvlByAddr[pool.address]}
                   apr={aprByAddr[pool.address]}
+                  volume24h={volResult.byPool[pool.address.toLowerCase()]}
                   prices={prices}
                 />
               ))}
