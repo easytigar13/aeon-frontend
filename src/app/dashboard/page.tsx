@@ -182,7 +182,7 @@ let dashboardCache: {
 }
 
 export default function DashboardPage() {
-  const [chartTab, setChartTab] = useState<'tvl' | 'volume'>('tvl')
+  const [chartTab, setChartTab] = useState<'tvl' | 'vol24h' | 'vol7d' | 'volAllTime'>('tvl')
 
   const prices        = usePrices()
   const poolStats     = usePoolStats(prices)
@@ -192,8 +192,12 @@ export default function DashboardPage() {
   const liquidPoolStats = allPoolStats.filter(stat => hasMeaningfulPoolLiquidity(stat.tvlUsd))
   const totalTVL      = useTotalTVL(liquidPoolStats)
   const volResult     = useVolume24h(prices)
-  const volume24h = volResult.total
-  const volByAddr = volResult.byPool
+  const volume24h     = volResult.volume24h
+  const volume7d      = volResult.volume7d
+  const volumeAllTime = volResult.volumeAllTime
+  const volByAddr24h  = volResult.byPool24h
+  const volByAddr7d   = volResult.byPool7d
+  const volByAddrAllTime = volResult.byPoolAllTime
   const volByAddrWeek = volResult.byPoolWeek
   const statByAddr = Object.fromEntries(allPoolStats.map(s => [s.address.toLowerCase(), s]))
 
@@ -360,18 +364,34 @@ export default function DashboardPage() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 10)
 
-  const volChartData = liquidPools
-    .map(p => ({ name: chartName(p), value: volByAddr[p.address.toLowerCase()] ?? 0 }))
-    .filter(d => d.value > 0)
+  const vol24hChartData = liquidPools
+    .map(p => ({ name: chartName(p), value: volByAddr24h[p.address.toLowerCase()] ?? 0 }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10)
 
-  const chartData  = chartTab === 'tvl' ? tvlChartData : volChartData
+  const vol7dChartData = liquidPools
+    .map(p => ({ name: chartName(p), value: volByAddr7d[p.address.toLowerCase()] ?? 0 }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10)
+
+  const volAllTimeChartData = liquidPools
+    .map(p => ({ name: chartName(p), value: volByAddrAllTime[p.address.toLowerCase()] ?? 0 }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 10)
+
+  const chartData = chartTab === 'tvl'
+    ? tvlChartData
+    : chartTab === 'vol24h'
+      ? vol24hChartData
+      : chartTab === 'vol7d'
+        ? vol7dChartData
+        : volAllTimeChartData
+
   const chartEmpty = chartData.length === 0
 
   const epochProgressPct = (elapsedMs / WEEK_MS) * 100
   const emissionsActive  = !!totalVotes && totalVotes > 0n
-  const chartAccentHex   = chartTab === 'tvl' ? ACCENT.aeon.barHex : ACCENT.violet.barHex
+  const chartAccentHex   = chartTab === 'tvl' ? ACCENT.aeon.barHex : chartTab === 'vol24h' ? ACCENT.blue.barHex : chartTab === 'vol7d' ? ACCENT.violet.barHex : ACCENT.emerald.barHex
 
   return (
     <div className="relative isolate">
@@ -382,20 +402,34 @@ export default function DashboardPage() {
           <p className="text-text-secondary">Protocol stats, pool performance, and epoch data</p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
-          <KpiCard label="Total Value Locked" value={fmtUsd(totalTVL || null, true)} accent="emerald" icon={<TrendingUp size={16} className="text-emerald-400" />} delta={`${liquidPools.length} non-empty pools`} />
-          <KpiCard label="Volume 24h"         value={fmtUsd(volume24h, true)}         accent="blue"    icon={<BarChart3  size={16} className="text-blue-400" />}    delta="from on-chain swap events" />
-          <KpiCard label="AEON Supply"        value={`${fmt18(aeonSupply)} AEON`}     accent="aeon"    icon={<Coins      size={16} className="text-aeon-400" />}    delta="genesis: 90,000" />
-          <KpiCard label="Circulating Supply" value={`${fmt18(circulatingSupply)} AEON`} accent="violet" icon={<Vote      size={16} className="text-violet-400" />}  delta="supply − burned" />
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-8">
+          <KpiCard label="Total Value Locked" value={fmtUsd(totalTVL || null, true)} accent="emerald" icon={<TrendingUp size={16} className="text-emerald-400" />} delta={`${liquidPools.length} pools`} />
+          <KpiCard label="24h Volume"         value={fmtUsd(volume24h, true)}         accent="blue"    icon={<BarChart3  size={16} className="text-blue-400" />}    delta="trailing 24h" />
+          <KpiCard label="7d (Epoch) Volume"  value={fmtUsd(volume7d, true)}          accent="violet"  icon={<Sparkles   size={16} className="text-violet-400" />}  delta={`Epoch #${protocolEpoch}`} />
+          <KpiCard label="All-Time Volume"    value={fmtUsd(volumeAllTime, true)}     accent="aeon"    icon={<TrendingUp size={16} className="text-aeon-400" />}    delta="all epochs" />
+          <KpiCard label="AEON Supply"        value={`${fmt18(aeonSupply)} AEON`}     accent="aeon"    icon={<Coins      size={16} className="text-aeon-400" />}    delta="genesis: 100,000" />
+          <KpiCard label="Circulating Supply" value={`${fmt18(circulatingSupply)} AEON`} accent="violet" icon={<Vote      size={16} className="text-violet-400" />}  delta="supply − burned − veAEON" />
           <KpiCard label="AEON Burned"        value={`${fmt18(totalBurned)} AEON`}    accent="red"     icon={<Flame      size={16} className="text-red-400" />}     delta={`${burnedPct}% of supply`} />
         </div>
 
         <div className="card p-6 mb-8 relative" style={{ boxShadow: `0 0 40px -20px ${chartTab === 'tvl' ? ACCENT.aeon.glow : ACCENT.violet.glow}` }}>
           <div className="flex items-center justify-between mb-6">
-            <div className="flex gap-1 p-1 bg-bg-raised rounded-xl border border-bg-border">
-              {(['tvl', 'volume'] as const).map(t => (
-                <button key={t} onClick={() => setChartTab(t)} className={clsx('px-3 py-1.5 rounded-lg text-sm font-medium capitalize transition-all', chartTab === t ? 'bg-bg-base text-text-primary' : 'text-text-muted hover:text-text-secondary')}>
-                  {t === 'tvl' ? 'TVL by Pool' : 'Volume 24h by Pool'}
+            <div className="flex flex-wrap gap-1 p-1 bg-bg-raised rounded-xl border border-bg-border">
+              {[
+                { id: 'tvl', label: 'TVL by Pool' },
+                { id: 'vol24h', label: '24h Volume' },
+                { id: 'vol7d', label: '7d Epoch Volume' },
+                { id: 'volAllTime', label: 'All-Time Volume' },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setChartTab(t.id as any)}
+                  className={clsx(
+                    'px-3 py-1.5 rounded-lg text-xs font-medium transition-all',
+                    chartTab === t.id ? 'bg-bg-base text-text-primary shadow-sm font-semibold' : 'text-text-muted hover:text-text-secondary'
+                  )}
+                >
+                  {t.label}
                 </button>
               ))}
             </div>
@@ -403,7 +437,7 @@ export default function DashboardPage() {
           </div>
           {chartEmpty ? (
             <div className="h-[200px] flex items-center justify-center text-text-muted text-sm font-mono">
-              {chartTab === 'volume' ? 'No swaps through AEON pools yet — pools need rebalancing by LPs before trading is active' : 'No liquidity yet — add to a pool to see TVL here'}
+              No volume data recorded yet for this window
             </div>
           ) : (
             <ResponsiveContainer width="100%" height={Math.max(200, chartData.length * 36)}>
