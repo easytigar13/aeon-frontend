@@ -123,9 +123,10 @@ if (!Number.isFinite(MIN_PROFIT_PCT) || MIN_PROFIT_PCT < 0) throw new Error('MIN
 // Percent converted to parts-per-million of amountIn. PPM precision is needed
 // because the configured 0.001% floor is one tenth of a basis point.
 const MIN_NET_PROFIT_PPM = BigInt(Math.ceil(MIN_PROFIT_PCT * 10_000))
-const minimumNetProfitRaw = (amountIn: bigint) => {
-  const configuredFloor = (amountIn * MIN_NET_PROFIT_PPM + 999_999n) / 1_000_000n
-  return configuredFloor > 0n ? configuredFloor : 1n
+const minimumNetProfitRaw = (amountIn: bigint, tokenSym?: string) => {
+  const decimals = tokenSym && (TOKENS as any)[tokenSym]?.decimals ? (TOKENS as any)[tokenSym].decimals : 18
+  const tokenFloor = parseUnits('0.0001', decimals)
+  return tokenFloor > 0n ? tokenFloor : 1n
 }
 const INTERVAL_MS    = parseInt(process.env.INTERVAL_MS ?? '1000')
 const DRY_RUN         = process.env.DRY_RUN === 'true'

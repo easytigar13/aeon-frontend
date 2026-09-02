@@ -1379,7 +1379,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
 // always means profitable after fees -- never just profitable on the swap
 // math alone.
 
-const GAS_SAFETY_MULT_PCT = 130n   // require 1.30x the estimate -- buffer for gas price drift between quoting and inclusion
+const GAS_SAFETY_MULT_PCT = 105n   // require 1.05x the estimate -- lean buffer for gas price on L2
 const APPROVE_GAS_FALLBACK = 60_000n
 const EXEC_ARB_BASE_GAS = 100_000n
 const EXEC_ARB_GAS_PER_HOP = 70_000n
@@ -2366,9 +2366,10 @@ async function executeArbViaUniversalRouter(opp: ArbOpp, graph: Map<string, HopC
   }
   console.log(`   Est. gas cost (incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
 
-  let requiredProfit = gasFloor + 1n
+  const minNetProfit = parseUnits('0.0001', tokenIn.decimals)
+  let requiredProfit = gasFloor + (minNetProfit > 0n ? minNetProfit : 1n)
   if (profitRaw < requiredProfit) {
-    console.log('   Profit does not clear the buffered gas cost, skipping')
+    console.log('   Profit does not clear the buffered gas cost + 0.0001 token profit floor, skipping')
     outcomeCounters.belowGas++
     return 'skipped'
   }
@@ -2572,10 +2573,9 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
   }
   console.log(`   Est. gas cost (incl. 1.3x buffer): ~${formatUnits(gasFloor, tokenIn.decimals)} ${tokenIn.symbol}`)
 
-  // Strictly profitable after the buffered gas estimate, with no additional
-  // percentage or dollar floor: one raw unit of net profit is enough.
-  let requiredProfit = gasFloor + 1n
-  console.log(`   Required profit (buffered gas + 1 raw unit): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
+  const minNetProfit = parseUnits('0.0001', tokenIn.decimals)
+  let requiredProfit = gasFloor + (minNetProfit > 0n ? minNetProfit : 1n)
+  console.log(`   Required profit (buffered gas + 0.0001 token profit floor): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     outcomeCounters.belowGas++
