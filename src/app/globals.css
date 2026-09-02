@@ -5,6 +5,7 @@
 @layer base {
   :root {
     --color-aeon: #FFB800;
+    --color-emerald: #10B981;
     --color-aeon-dim: rgba(255, 184, 0, 0.15);
     --color-aeon-glow: rgba(255, 184, 0, 0.08);
   }
@@ -17,38 +18,35 @@
 
   html {
     scroll-behavior: smooth;
+    background-color: #000000;
   }
 
   body {
-    background: #0A0A0F;
+    background-color: #000000;
     color: #F0EFE8;
     font-family: var(--font-sans), system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
   }
 
   /* Custom scrollbar */
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
-  ::-webkit-scrollbar-track { background: #111118; }
-  ::-webkit-scrollbar-thumb { background: #23232D; border-radius: 2px; }
-  ::-webkit-scrollbar-thumb:hover { background: #FFB800; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #000000; }
+  ::-webkit-scrollbar-thumb { background: #1A1D26; border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #10B981; }
 
   /* Selection */
-  ::selection { background: rgba(255, 184, 0, 0.2); color: #FFB800; }
+  ::selection { background: rgba(16, 185, 129, 0.25); color: #10B981; }
 }
 
 @layer components {
-  /* Card variants -- glass surface, gradient hairline edge, ambient lift on
-     hover. This is the single most-used class in the app (every page's
-     panels, tables, and form containers), so upgrading it here is what
-     actually makes the whole site feel elevated, not just the Dashboard. */
+  /* Solid high-performance pitch-black surface cards (no laggy backdrop blurs) */
   .card {
     @apply relative rounded-xl2 border;
-    background: linear-gradient(165deg, rgba(26,26,34,0.55) 0%, rgba(15,15,21,0.5) 100%);
-    border-color: rgba(255,255,255,0.07);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    box-shadow: 0 20px 50px -24px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.05);
-    transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+    background: #0B0C12;
+    border-color: rgba(16, 185, 129, 0.15);
+    box-shadow: 0 10px 30px -15px rgba(0,0,0,0.9), inset 0 1px 0 rgba(255,255,255,0.03);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   }
 
   .card::before {
@@ -57,7 +55,7 @@
     inset: 0;
     border-radius: inherit;
     padding: 1px;
-    background: linear-gradient(135deg, rgba(255,184,0,0.22), transparent 35%, transparent 65%, rgba(139,92,246,0.16));
+    background: linear-gradient(135deg, rgba(16,185,129,0.3), transparent 40%, transparent 60%, rgba(255,184,0,0.25));
     -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
     -webkit-mask-composite: xor;
     mask-composite: exclude;
@@ -65,106 +63,104 @@
   }
 
   .card:hover {
-    border-color: rgba(255,184,0,0.28);
-    box-shadow: 0 24px 60px -24px rgba(0,0,0,0.7), 0 0 44px -14px rgba(255,184,0,0.2), inset 0 1px 0 rgba(255,255,255,0.07);
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 16px 40px -20px rgba(0,0,0,0.95), 0 0 30px -10px rgba(16,185,129,0.25);
     transform: translateY(-2px);
   }
 
   .card-raised {
     @apply relative rounded-xl2 border;
-    background: linear-gradient(165deg, rgba(34,34,44,0.6) 0%, rgba(20,20,28,0.55) 100%);
-    border-color: rgba(255,255,255,0.08);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    box-shadow: 0 16px 40px -20px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06);
+    background: #11131C;
+    border-color: rgba(16, 185, 129, 0.2);
+    box-shadow: 0 12px 30px -15px rgba(0,0,0,0.9);
   }
 
   /* Input */
   .input-base {
-    @apply bg-bg-base border border-bg-border rounded-xl px-4 py-3
+    @apply bg-black border border-emerald-500/20 rounded-xl px-4 py-3
            text-text-primary placeholder-text-muted
-           focus:outline-none focus:border-aeon-400 focus:ring-1 focus:ring-aeon-400/30
+           focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/30
            transition-all duration-200;
   }
 
   /* Button variants */
   .btn-primary {
-    @apply text-bg-base font-semibold
+    @apply text-black font-bold
            rounded-xl px-6 py-3 transition-all duration-200
            disabled:opacity-40 disabled:cursor-not-allowed
            hover:enabled:scale-[1.015] active:enabled:scale-[0.98];
-    background: linear-gradient(135deg, #FFCB45 0%, #FFB800 55%, #E6A500 100%);
-    box-shadow: 0 0 18px -6px rgba(255, 184, 0, 0.5);
+    background: linear-gradient(135deg, #34D399 0%, #10B981 60%, #059669 100%);
+    box-shadow: 0 0 20px -5px rgba(16, 185, 129, 0.6);
   }
   .btn-primary:hover:not(:disabled) {
-    box-shadow: 0 0 28px -6px rgba(255, 184, 0, 0.7);
+    box-shadow: 0 0 30px -5px rgba(16, 185, 129, 0.8);
   }
 
   .btn-secondary {
-    @apply bg-bg-raised hover:bg-bg-hover border border-bg-border
-           text-text-primary font-medium
+    @apply bg-zinc-900 hover:bg-zinc-800 border border-emerald-500/30
+           text-emerald-400 font-medium
            rounded-xl px-6 py-3 transition-all duration-200
            active:scale-[0.98];
   }
 
   .btn-ghost {
-    @apply hover:bg-bg-raised text-text-secondary hover:text-text-primary
+    @apply hover:bg-emerald-500/10 text-emerald-400 hover:text-emerald-300
            rounded-xl px-4 py-2 transition-all duration-200;
   }
 
   /* Badge */
   .badge {
-    @apply text-2xs font-mono font-bold px-2 py-0.5 rounded-full;
+    @apply text-2xs font-mono font-bold px-2.5 py-0.5 rounded-full;
   }
 
   .badge-aeon {
-    @apply badge bg-aeon-400/15 text-aeon-400 border border-aeon-400/20;
+    @apply badge bg-aeon-400/15 text-aeon-400 border border-aeon-400/30;
     box-shadow: 0 0 12px -5px rgba(255,184,0,0.6);
   }
 
   .badge-violet {
-    @apply badge bg-violet-500/15 text-violet-400 border border-violet-500/20;
+    @apply badge bg-violet-500/15 text-violet-400 border border-violet-500/30;
     box-shadow: 0 0 12px -5px rgba(139,92,246,0.6);
   }
 
   .badge-green {
-    @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/20;
-    box-shadow: 0 0 12px -5px rgba(16,185,129,0.6);
+    @apply badge bg-emerald-500/20 text-emerald-400 border border-emerald-500/40;
+    box-shadow: 0 0 12px -5px rgba(16,185,129,0.7);
   }
 
   /* Stat display */
   .stat-value {
-    @apply font-display font-bold text-text-primary;
+    @apply font-display font-bold text-emerald-400;
     letter-spacing: -0.015em;
   }
 
   .stat-label {
-    @apply text-xs font-mono text-text-muted uppercase tracking-wider;
+    @apply text-xs font-mono text-emerald-400/80 uppercase tracking-wider;
   }
 
   /* Pool type pill */
-  .pool-type-vamm { @apply badge bg-blue-500/15 text-blue-400 border border-blue-500/20; box-shadow: 0 0 10px -5px rgba(59,130,246,0.6); }
-  .pool-type-cl   { @apply badge bg-violet-500/15 text-violet-400 border border-violet-500/20; box-shadow: 0 0 10px -5px rgba(139,92,246,0.6); }
-  .pool-type-dlmm { @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/20; box-shadow: 0 0 10px -5px rgba(16,185,129,0.6); }
+  .pool-type-vamm { @apply badge bg-blue-500/20 text-blue-400 border border-blue-500/30; box-shadow: 0 0 10px -5px rgba(59,130,246,0.6); }
+  .pool-type-cl   { @apply badge bg-violet-500/20 text-violet-400 border border-violet-500/30; box-shadow: 0 0 10px -5px rgba(139,92,246,0.6); }
+  .pool-type-dlmm { @apply badge bg-emerald-500/20 text-emerald-400 border border-emerald-500/30; box-shadow: 0 0 10px -5px rgba(16,185,129,0.7); }
 
   /* Glow effect */
   .aeon-glow {
-    box-shadow: 0 0 20px rgba(255, 184, 0, 0.15), 0 0 60px rgba(255, 184, 0, 0.05);
+    box-shadow: 0 0 25px rgba(16, 185, 129, 0.2), 0 0 60px rgba(16, 185, 129, 0.08);
   }
 
   .aeon-glow-sm {
-    box-shadow: 0 0 10px rgba(255, 184, 0, 0.1);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
   }
 
   /* Divider */
   .divider {
-    @apply border-t border-bg-border;
+    @apply border-t border-emerald-500/20;
   }
 
   /* Token icon placeholder */
   .token-icon {
-    @apply w-8 h-8 rounded-full bg-bg-raised border border-bg-border
-           flex items-center justify-center text-xs font-bold font-mono;
+    @apply w-8 h-8 rounded-full bg-black border border-emerald-500/30
+           flex items-center justify-center text-xs font-bold font-mono text-emerald-400;
   }
 
   /* APR display */
@@ -180,7 +176,14 @@
 
 @layer utilities {
   .text-gradient-aeon {
-    background: linear-gradient(135deg, #FFB800 0%, #FFE08A 50%, #FFB800 100%);
+    background: linear-gradient(135deg, #34D399 0%, #10B981 50%, #FFB800 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-green {
+    background: linear-gradient(135deg, #6EE7B7 0%, #34D399 50%, #10B981 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -195,23 +198,18 @@
 
   .border-gradient {
     border: 1px solid transparent;
-    background: linear-gradient(#111118, #111118) padding-box,
-                linear-gradient(135deg, rgba(255,184,0,0.3), transparent) border-box;
-  }
-
-  .bg-grid {
-    background-image: var(--tw-gradient-stops);
-    background-size: 40px 40px;
+    background: linear-gradient(#000000, #000000) padding-box,
+                linear-gradient(135deg, rgba(16,185,129,0.4), transparent) border-box;
   }
 }
 
 /* RainbowKit customization */
 [data-rk] {
-  --rk-colors-accentColor: #FFB800 !important;
-  --rk-colors-accentColorForeground: #0A0A0F !important;
-  --rk-colors-modalBackground: #111118 !important;
-  --rk-colors-modalBorder: #23232D !important;
-  --rk-colors-menuItemBackground: #18181F !important;
+  --rk-colors-accentColor: #10B981 !important;
+  --rk-colors-accentColorForeground: #000000 !important;
+  --rk-colors-modalBackground: #0B0C12 !important;
+  --rk-colors-modalBorder: #1A1D26 !important;
+  --rk-colors-menuItemBackground: #12141F !important;
   --rk-colors-modalText: #F0EFE8 !important;
   --rk-colors-modalTextSecondary: #9B9A95 !important;
   --rk-radii-modal: 16px !important;

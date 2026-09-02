@@ -4,82 +4,80 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // AEON Design System
-        // Deep space black with warm undertone — not cold tech blue
+        // Ramses Exchange Dark Mode Theme
         bg: {
-          base:    '#0A0A0F',                  // true deep background -- stays opaque, it IS the backdrop
-          surface: 'rgba(17,17,24,0.55)',       // cards, panels -- translucent so the backdrop shows through
-          raised:  'rgba(24,24,31,0.55)',       // elevated/nested elements -- same translucency
-          border:  '#23232D',                   // borders
-          hover:   'rgba(30,30,40,0.65)',        // hover states -- a bit more opaque for contrast
+          base:    '#070A10',                  // Ultra dark background
+          surface: '#0B0F19',                  // Card & table surface
+          raised:  '#101524',                  // Elevated row/container
+          border:  '#192134',                  // Clean slate border
+          hover:   '#151C2D',                  // Row hover state
         },
-        // AEON signature: amber-gold, not generic blue/green
+        ramses: {
+          cyan:    '#38BDF8',                  // Ramses APR cyan
+          blue:    '#60A5FA',                  // Ramses highlight blue
+          white:   '#FFFFFF',                  // Primary action CTA
+          darkBtn: '#181E2C',                  // Deposit action button background
+          darkBtnHover: '#222A3E',             // Deposit action button hover
+          darkBtnBorder: '#283248',            // Deposit action button border
+        },
+        // Primary AEON & Ramses accents
         aeon: {
-          50:  '#FFF8E8',
-          100: '#FFEFC0',
-          200: '#FFE08A',
-          300: '#FFCB45',
-          400: '#FFB800',  // primary accent
-          500: '#E6A500',
-          600: '#CC9200',
-          700: '#A37500',
-          800: '#7A5800',
-          900: '#523B00',
+          50:  '#F0F9FF',
+          100: '#E0F2FE',
+          200: '#BAE6FD',
+          300: '#7DD3FC',
+          400: '#38BDF8',  // Ramses electric cyan accent
+          500: '#0EA5E9',
+          600: '#0284C7',
+          700: '#0369A1',
+          800: '#075985',
+          900: '#0C4A6E',
         },
-        // Secondary: deep violet for vote/governance
+        // Gold token accent
+        gold: {
+          400: '#FFB800',
+          500: '#E6A500',
+        },
+        // Secondary violet for governance
         violet: {
           400: '#A78BFA',
           500: '#8B5CF6',
           600: '#7C3AED',
         },
-        // Success green for positive stats
+        // Success green
         emerald: {
           400: '#34D399',
           500: '#10B981',
         },
-        // Text scale
+        // Text scale - high contrast Ramses crisp typography
         text: {
-          primary:   '#F0EFE8',  // warm white
-          secondary: '#9B9A95',  // muted
-          muted:     '#5A5A60',  // very muted
+          primary:   '#F8FAFC',  // slate-50 bright white
+          secondary: '#94A3B8',  // slate-400 muted text
+          muted:     '#64748B',  // slate-500 subtext
         },
       },
       fontFamily: {
-        // Display: geometric sans for headers
         display: ['var(--font-display)', 'system-ui', 'sans-serif'],
-        // Body: clean readable
         sans:    ['var(--font-sans)',    'system-ui', 'sans-serif'],
-        // Numbers/data: tabular mono
         mono:    ['var(--font-mono)',    'monospace'],
       },
       fontSize: {
         '2xs': ['0.625rem', { lineHeight: '1rem' }],
       },
       backgroundImage: {
-        'aeon-glow':    'radial-gradient(ellipse 60% 40% at 50% 0%, rgba(255,184,0,0.12) 0%, transparent 70%)',
+        'aeon-glow':    'radial-gradient(ellipse 60% 40% at 50% 0%, rgba(16,185,129,0.12) 0%, transparent 70%)',
         'violet-glow':  'radial-gradient(ellipse 60% 40% at 50% 0%, rgba(139,92,246,0.10) 0%, transparent 70%)',
-        'grid-pattern': 'linear-gradient(rgba(255,184,0,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,184,0,0.03) 1px, transparent 1px)',
-      },
-      backgroundSize: {
-        'grid': '40px 40px',
       },
       animation: {
         'pulse-slow':   'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
         'glow':         'glow 2s ease-in-out infinite alternate',
-        'count-up':     'countUp 0.5s ease-out forwards',
         'slide-up':     'slideUp 0.3s ease-out forwards',
         'fade-in':      'fadeIn 0.2s ease-out forwards',
-        'drift-a':      'driftA 26s ease-in-out infinite',
-        'drift-b':      'driftB 32s ease-in-out infinite',
-        'drift-c':      'driftC 22s ease-in-out infinite',
-        'shimmer':      'shimmer 2.5s linear infinite',
-        'scan':         'scan 10s linear infinite',
-        'node-pulse':   'nodePulse 3s ease-in-out infinite',
       },
       keyframes: {
         glow: {
-          '0%':   { boxShadow: '0 0 5px rgba(255,184,0,0.2)' },
-          '100%': { boxShadow: '0 0 20px rgba(255,184,0,0.4), 0 0 40px rgba(255,184,0,0.1)' },
+          '0%':   { boxShadow: '0 0 5px rgba(16,185,129,0.2)' },
+          '100%': { boxShadow: '0 0 20px rgba(16,185,129,0.4)' },
         },
         slideUp: {
           '0%':   { transform: 'translateY(8px)', opacity: '0' },
@@ -88,30 +86,6 @@ module.exports = {
         fadeIn: {
           '0%':   { opacity: '0' },
           '100%': { opacity: '1' },
-        },
-        driftA: {
-          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
-          '50%':      { transform: 'translate(60px, 40px) scale(1.08)' },
-        },
-        driftB: {
-          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
-          '50%':      { transform: 'translate(-50px, 60px) scale(1.1)' },
-        },
-        driftC: {
-          '0%, 100%': { transform: 'translate(0, 0) scale(1)' },
-          '50%':      { transform: 'translate(40px, -50px) scale(1.06)' },
-        },
-        shimmer: {
-          '0%':   { backgroundPosition: '-200% 0' },
-          '100%': { backgroundPosition: '200% 0' },
-        },
-        scan: {
-          '0%':   { transform: 'translateY(-100%)' },
-          '100%': { transform: 'translateY(100vh)' },
-        },
-        nodePulse: {
-          '0%, 100%': { opacity: '0.4', transform: 'scale(1)' },
-          '50%':      { opacity: '1',   transform: 'scale(1.6)' },
         },
       },
       borderRadius: {

@@ -103,6 +103,7 @@ const VOTER_ABI = parseAbi([
   'function length() view returns (uint256)',
   'function pools(uint256) view returns (address)',
   'function gauges(address) view returns (address)',
+  'function isAlive(address) view returns (bool)',
   'function distributeAll()',
 ])
 const GAUGE_ABI = parseAbi([
@@ -161,30 +162,41 @@ async function sweepFeesIfNearBoundary() {
   }
   log(`Pre-boundary window (T-${secsToBoundary}s) -- collecting this epoch's fees once.`)
   const res = await sweepFees()
-  lastSweptEpoch = epochStart
-  writeStatus({ ok: true, lastRun: new Date().toISOString(), lastSweep: res })
+  if (res.failures.length === 0) {
+    lastSweptEpoch = epochStart
+    writeStatus({ ok: true, lastRun: new Date().toISOString(), lastSweep: res })
+  } else {
+    writeStatus({ ok: false, lastRun: new Date().toISOString(), lastSweep: res })
+    log(`Fee sweep incomplete: ${res.failures.length} gauge(s) failed; epoch remains retryable.`)
+  }
 }
 
 async function sweepFees() {
   const poolCount = await publicClient.readContract({ address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 'length' })
   let collected = 0
   let skipped = 0
+  const failures: { pool: `0x${string}`; gauge: `0x${string}`; error: string }[] = []
   for (let i = 0n; i < poolCount; i++) {
     const pool = await publicClient.readContract({ address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 'pools', args: [i] })
     const gauge = await publicClient.readContract({ address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 'gauges', args: [pool] })
     if (gauge === '0x0000000000000000000000000000000000000000') { skipped++; continue }
+    const isAlive = await publicClient.readContract({ address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 'isAlive', args: [gauge] })
+    if (!isAlive) { skipped++; continue }
     try {
-      const hash = await walletClient.writeContract({
-        address: gauge, abi: GAUGE_ABI, functionName: 'collectFees', gas: GAS_LIMIT_PER_COLLECT,
+      const simulation = await publicClient.simulateContract({
+        account, address: gauge, abi: GAUGE_ABI, functionName: 'collectFees', gas: GAS_LIMIT_PER_COLLECT,
       })
+      const hash = await walletClient.writeContract(simulation.request)
       await publicClient.waitForTransactionReceipt({ hash })
       collected++
-    } catch {
-      skipped++
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      failures.push({ pool, gauge, error: message.slice(0, 500) })
+      log(`Fee sweep failed: pool=${pool} gauge=${gauge} error=${message.split('\n')[0]}`)
     }
   }
-  log(`Fee sweep: ${collected} collected, ${skipped} skipped/empty (${poolCount} pools)`)
-  return { collected, skipped }
+  log(`Fee sweep: ${collected} collected, ${skipped} inactive/missing skipped, ${failures.length} failed (${poolCount} pools)`)
+  return { collected, skipped, failures }
 }
 
 async function closeEpochIfNeeded() {

@@ -118,9 +118,15 @@ const RPC_URLS     = Array.from(new Set([
   PRIMARY_RPC,
 ]))
 const PK            = (process.env.KEEPER_PRIVATE_KEY ?? '') as `0x${string}`
-const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT ?? '0.05')  // require at least 0.05% gross; execution still requires positive net after exact gas
-const MIN_NET_PROFIT_BPS = 5n
-const minimumNetProfitRaw = (amountIn: bigint) => (amountIn * MIN_NET_PROFIT_BPS + 9_999n) / 10_000n
+const MIN_PROFIT_PCT = parseFloat(process.env.MIN_PROFIT_PCT ?? '0.001')
+if (!Number.isFinite(MIN_PROFIT_PCT) || MIN_PROFIT_PCT < 0) throw new Error('MIN_PROFIT_PCT must be a non-negative number')
+// Percent converted to parts-per-million of amountIn. PPM precision is needed
+// because the configured 0.001% floor is one tenth of a basis point.
+const MIN_NET_PROFIT_PPM = BigInt(Math.ceil(MIN_PROFIT_PCT * 10_000))
+const minimumNetProfitRaw = (amountIn: bigint) => {
+  const configuredFloor = (amountIn * MIN_NET_PROFIT_PPM + 999_999n) / 1_000_000n
+  return configuredFloor > 0n ? configuredFloor : 1n
+}
 const INTERVAL_MS    = parseInt(process.env.INTERVAL_MS ?? '1000')
 const DRY_RUN         = process.env.DRY_RUN === 'true'
 const DEADLINE_SECONDS = 120  // execution must land within 2 min of being sized, else it just reverts (no funds lost)
@@ -233,7 +239,7 @@ function parseFeeBps(fee: string): number {
 // Trader Joe Liquidity Book fork (bin-based). All four route through the
 // same DFS/ternary-search sizing below via PoolState's r0/r1/effFeeBps --
 // only pool discovery, state-fetching, and on-chain execution differ by kind.
-type PoolKind = 'vAMM' | 'uniV2' | 'uniV3' | 'uniV4' | 'CL' | 'DLMM'
+type PoolKind = 'vAMM' | 'uniV2' | 'uniV3' | 'uniV4' | 'directCL' | 'CL' | 'DLMM'
 
 interface PoolConfig {
   name: string
@@ -250,6 +256,7 @@ interface PoolConfig {
   v4TickSpacing?: number
   v4Hooks?: `0x${string}`
   v4Native?: boolean
+  directClState?: 'up' | 'v3' | 'algebra'
 }
 
 const ARB_POOLS: PoolConfig[] = POOLS
@@ -273,7 +280,7 @@ const UNISWAP_UNSUPPORTED_TOKENS = new Set<keyof typeof TOKENS>(['ROBINFUN'])
 // Seed explicitly verified V2-compatible pools, including factories outside
 // the primary discovery factory. Dynamic discovery below de-duplicates these
 // by address when it encounters the same pair.
-for (const p of UNISWAP_POOLS) {
+for (const p of UNISWAP_POOLS.filter(pool => pool.type === 'UniV2')) {
   const token0 = p.token0 as keyof typeof TOKENS
   const token1 = p.token1 as keyof typeof TOKENS
   if (!(token0 in TOKENS) || !(token1 in TOKENS)) continue
@@ -300,11 +307,72 @@ const MIN_EXTERNAL_VOLUME_USD = parseFloat(process.env.MIN_EXTERNAL_VOLUME_USD ?
 // Off by default; set true only if you want this instance to also chase
 // those pools (keeper/'s original scope), at the cost of tick speed.
 const ENABLE_EXTERNAL_DISCOVERY = process.env.ENABLE_EXTERNAL_DISCOVERY === 'true'
+// Requires a deployed AeonUniversalRouter with POOL_TYPE_DIRECT_CL (6).
+// Fail closed until all exact quote, executor simulation and gas gates pass.
+const ENABLE_EXTERNAL_CL_POOLS = process.env.ENABLE_EXTERNAL_CL_POOLS === 'true'
 // Explicit user-requested external token pins. These remain in V3/V4
 // discovery even if the general exclusion policy is tightened later.
 const MANUAL_EXTERNAL_TOKENS = new Set<keyof typeof TOKENS>(['HOODIE'])
 const uniswapV3Refs = new Map<string, UniswapV3PoolRef>()
 const uniswapV4Refs = new Map<string, UniswapV4PoolRef>()
+
+// Exact operator-supplied pools resolved and quoted on-chain. Pinning their
+// complete keys keeps the fast scanner independent of external indexers.
+const NATIVE_V4 = '0x0000000000000000000000000000000000000000' as const
+const MANUAL_UNIV3_POOLS = [
+  { address: getAddress('0x09a431261E3d0F1dc2f7e0b14718DBBBCBe19Ae4'), token0: 'WETH', token1: 'FRONG', fee: 10_000 },
+  { address: getAddress('0xd42A491087a15E5afd51FEb3606066Cc152d2b09'), token0: 'CASHCAT', token1: 'WETH', fee: 3_000 },
+  { address: getAddress('0xA70fc67C9F69da90B63a0e4C05D229954574E313'), token0: 'CASHCAT', token1: 'WETH', fee: 10_000 },
+] as const
+const MANUAL_UNIV4_POOLS = [
+  { id: '0xacea8920877840033f0275c37f9b61550b5326917e948bcf8339714d96f9521a', token0: 'WETH', token1: 'FRONG', currency0: NATIVE_V4, currency1: TOKENS.FRONG.address, fee: 2_500, tickSpacing: 60, hooks: NATIVE_V4, native: true },
+  { id: '0x43907ea5b073cbbcdbf03228df029764dc285bc7a5fb616b1fb973b454e5d46c', token0: 'USDG', token1: 'FRONG', currency0: TOKENS.USDG.address, currency1: TOKENS.FRONG.address, fee: 8_388_608, tickSpacing: 60, hooks: '0x6D2aC09bF3E7Be9E1898e8429b000bfF6fb380C4', native: false },
+  { id: '0x20d317b609c9a9af863d0dd6cd95953f8c209f775cd148171e9566b86cc6bc7f', token0: 'USDG', token1: 'FRONG', currency0: TOKENS.USDG.address, currency1: TOKENS.FRONG.address, fee: 21_000, tickSpacing: 210, hooks: NATIVE_V4, native: false },
+  { id: '0xa92a3df27a00a276183ff7265fd8affa11df1fe8bb23ddfaf13f6c879a3f818b', token0: 'CASHCAT', token1: 'USDG', currency0: TOKENS.CASHCAT.address, currency1: TOKENS.USDG.address, fee: 2_690, tickSpacing: 54, hooks: NATIVE_V4, native: false },
+  { id: '0xa2a8b872de9a817eb3ebee0706693143b687c25606a15ec12ec0b859f8b90036', token0: 'WETH', token1: 'CASHCAT', currency0: NATIVE_V4, currency1: TOKENS.CASHCAT.address, fee: 10_075, tickSpacing: 201, hooks: NATIVE_V4, native: true },
+  { id: '0xf7dc0af99fce7169eb76854c0b39beb9915526894d42229946e5cb469cab50b1', token0: 'WETH', token1: 'CASHCAT', currency0: NATIVE_V4, currency1: TOKENS.CASHCAT.address, fee: 20_000, tickSpacing: 400, hooks: NATIVE_V4, native: true },
+  { id: '0x404c8eb258ece3c428a6ac879854488b103f4fd33058df3af17cd5d641fa3be1', token0: 'WETH', token1: 'CASHCAT', currency0: NATIVE_V4, currency1: TOKENS.CASHCAT.address, fee: 2_925, tickSpacing: 29, hooks: NATIVE_V4, native: true },
+] as const
+const MANUAL_EXTERNAL_CL_POOLS = [
+  { name: 'Up V3 CASHCAT/USDG 0.25%', address: '0x3986840e83E64C113B4EbEEEd6B3223528e06Ed9', token0: 'CASHCAT', token1: 'USDG', fee: 2_500, tickSpacing: 60, state: 'up' },
+  { name: 'Alandale CASHCAT/USDG 0.10%', address: '0x8df767cbef77Ee0997A400f11A8902Aa1728E179', token0: 'CASHCAT', token1: 'USDG', fee: 1_000, tickSpacing: 60, state: 'algebra' },
+  { name: 'Up V3 CASHCAT/WETH 1.00%', address: '0x4E8649Be40aE67EBbcff99C291B92eE03015917b', token0: 'CASHCAT', token1: 'WETH', fee: 10_000, tickSpacing: 200, state: 'up' },
+  { name: 'Up V3 WETH/FRONG 1.00%', address: '0x9334BbCBE77C0883d704f71Db35CCF636639334c', token0: 'WETH', token1: 'FRONG', fee: 10_000, tickSpacing: 200, state: 'up' },
+  { name: 'Sushi V3 CASHCAT/WETH 1.00%', address: '0xCd3B02f383e8E311fc26bc8845A6D52B38Cb8dFd', token0: 'CASHCAT', token1: 'WETH', fee: 10_000, tickSpacing: 200, state: 'v3' },
+  { name: 'Ramses V3 CASHCAT/WETH 1.00%', address: '0x5401Fd0cbC244eCc1c9b95900b6868e00ed26eF9', token0: 'CASHCAT', token1: 'WETH', fee: 10_000, tickSpacing: 50, state: 'v3' },
+  { name: 'RobinSwap V3 CASHCAT/WETH 1.00%', address: '0x1e4238E85B8C76c3a81d8E65544367ebb9A61b78', token0: 'CASHCAT', token1: 'WETH', fee: 10_000, tickSpacing: 200, state: 'v3' },
+  { name: 'Up V3 CASHCAT/WETH 0.30%', address: '0x1B619a121D6c5bFd10D149e7246Da3c838A66B48', token0: 'CASHCAT', token1: 'WETH', fee: 3_000, tickSpacing: 60, state: 'up' },
+  { name: 'Giga V3 WETH/FRONG 1.00%', address: '0x82e60A9f77f857CAA9271BC7e51d97344ADA73f8', token0: 'WETH', token1: 'FRONG', fee: 10_000, tickSpacing: 200, state: 'v3' },
+  { name: 'SwapHood V3 WETH/FRONG 0.18%', address: '0xDDCC8c085F71F3ADceE7b3E43F9659f5a7b284C9', token0: 'WETH', token1: 'FRONG', fee: 1_800, tickSpacing: 50, state: 'v3' },
+  { name: 'Giga V3 CASHCAT/USDG 0.20%', address: '0x43781f7Ae77D99df3A52095c0b7d162828467A6e', token0: 'CASHCAT', token1: 'USDG', fee: 2_000, tickSpacing: 40, state: 'v3' },
+] as const
+
+for (const ref of MANUAL_UNIV3_POOLS) {
+  const fullRef: UniswapV3PoolRef = { address: ref.address, token0: getAddress(TOKENS[ref.token0].address), token1: getAddress(TOKENS[ref.token1].address), fee: ref.fee, liquidity: 1n }
+  uniswapV3Refs.set(ref.address.toLowerCase(), fullRef)
+  ARB_POOLS.push({ name: `UniV3 ${ref.token0}/${ref.token1} ${ref.fee}`, address: ref.address, token0: ref.token0, token1: ref.token1, feeBps: (BigInt(ref.fee) + 99n) / 100n, isUniV2: false, kind: 'uniV3', v3Fee: ref.fee })
+}
+for (const ref of MANUAL_UNIV4_POOLS) {
+  const fullRef: UniswapV4PoolRef = { id: ref.id, token0: getAddress(TOKENS[ref.token0].address), token1: getAddress(TOKENS[ref.token1].address), currency0: getAddress(ref.currency0), currency1: getAddress(ref.currency1), fee: ref.fee, tickSpacing: ref.tickSpacing, hooks: getAddress(ref.hooks), native: ref.native, volume24: 0 }
+  uniswapV4Refs.set(ref.id.toLowerCase(), fullRef)
+  ARB_POOLS.push({ name: `UniV4 ${ref.token0}/${ref.token1} ${ref.fee}`, address: UNISWAP_V4.poolManager, token0: ref.token0, token1: ref.token1, feeBps: (BigInt(ref.fee) + 99n) / 100n, isUniV2: false, kind: 'uniV4', v4PoolId: ref.id, v4Fee: ref.fee, v4TickSpacing: ref.tickSpacing, v4Hooks: ref.hooks, v4Native: ref.native })
+}
+if (ENABLE_EXTERNAL_CL_POOLS) {
+  for (const ref of MANUAL_EXTERNAL_CL_POOLS) {
+    ARB_POOLS.push({
+      name: ref.name,
+      address: getAddress(ref.address),
+      token0: ref.token0,
+      token1: ref.token1,
+      feeBps: (BigInt(ref.fee) + 99n) / 100n,
+      isUniV2: false,
+      kind: 'directCL',
+      v3Fee: ref.fee,
+      v4TickSpacing: ref.tickSpacing,
+      directClState: ref.state,
+    })
+  }
+}
 
 async function discoverHighVolumeUniswapV3Pools(): Promise<number> {
   const symbols = (Object.keys(TOKENS) as (keyof typeof TOKENS)[]).filter(sym =>
@@ -384,6 +452,14 @@ const PAIR_ABI = [
     ]},
   { name: 'token0', type: 'function', stateMutability: 'view',
     inputs: [], outputs: [{ type: 'address' }] },
+] as const
+
+const UP_V3_POOL_ABI = [
+  { name: 'slot0', type: 'function', stateMutability: 'view', inputs: [], outputs: [
+    { type: 'uint160' }, { type: 'int24' }, { type: 'uint16' },
+    { type: 'uint16' }, { type: 'uint16' }, { type: 'bool' },
+  ] },
+  { name: 'liquidity', type: 'function', stateMutability: 'view', inputs: [], outputs: [{ type: 'uint128' }] },
 ] as const
 
 const UNISWAP_FACTORY_ABI = [{
@@ -576,6 +652,7 @@ async function fetchAllStates(): Promise<PoolState[]> {
   const vammPools = ARB_POOLS.filter(p => p.kind === 'vAMM' || p.kind === 'uniV2')
   const v3Pools   = ARB_POOLS.filter(p => p.kind === 'uniV3')
   const v4Pools   = ARB_POOLS.filter(p => p.kind === 'uniV4')
+  const directClPools = ARB_POOLS.filter(p => p.kind === 'directCL')
   const clPools   = ARB_POOLS.filter(p => p.kind === 'CL')
   const dlmmPools = ARB_POOLS.filter(p => p.kind === 'DLMM')
 
@@ -587,6 +664,17 @@ async function fetchAllStates(): Promise<PoolState[]> {
     { address: p.address, abi: ALGEBRA_POOL_ABI, functionName: 'globalState' as const },
     { address: p.address, abi: ALGEBRA_POOL_ABI, functionName: 'liquidity'   as const },
   ])
+  const directClContracts = directClPools.flatMap(p => {
+    if (p.directClState === 'algebra') return [
+      { address: p.address, abi: ALGEBRA_POOL_ABI, functionName: 'globalState' as const },
+      { address: p.address, abi: ALGEBRA_POOL_ABI, functionName: 'liquidity' as const },
+    ]
+    const abi = p.directClState === 'up' ? UP_V3_POOL_ABI : UNISWAP_V3_POOL_ABI
+    return [
+      { address: p.address, abi, functionName: 'slot0' as const },
+      { address: p.address, abi, functionName: 'liquidity' as const },
+    ]
+  })
   const dlmmActiveIdContracts = dlmmPools.map(p => ({
     address: p.address, abi: LB_PAIR_ABI, functionName: 'getActiveId' as const,
   }))
@@ -599,10 +687,12 @@ async function fetchAllStates(): Promise<PoolState[]> {
     { address: UNISWAP_V4.stateView, abi: UNISWAP_V4_STATE_VIEW_ABI, functionName: 'getLiquidity' as const, args: [p.v4PoolId!] as const },
   ])
 
-  const results = await chunkedMulticall([...vammContracts, ...clContracts, ...dlmmActiveIdContracts, ...v3Contracts, ...v4Contracts])
+  const results = await chunkedMulticall([...vammContracts, ...clContracts, ...directClContracts, ...dlmmActiveIdContracts, ...v3Contracts, ...v4Contracts])
   const vammResults     = results.slice(0, vammContracts.length)
   const clResults       = results.slice(vammContracts.length, vammContracts.length + clContracts.length)
-  const afterCl = vammContracts.length + clContracts.length
+  const directClStart = vammContracts.length + clContracts.length
+  const directClResults = results.slice(directClStart, directClStart + directClContracts.length)
+  const afterCl = directClStart + directClContracts.length
   const activeIdResults = results.slice(afterCl, afterCl + dlmmActiveIdContracts.length)
   const v3Start = afterCl + dlmmActiveIdContracts.length
   const v3Results = results.slice(v3Start, v3Start + v3Contracts.length)
@@ -645,6 +735,27 @@ async function fetchAllStates(): Promise<PoolState[]> {
     // exactly (see discoverClAndDlmmPools), so virtualR0 always IS
     // pool.token0's reserve -- no separate ordering check needed here.
     return { pool, r0: virtualR0, r1: virtualR1, onchain0: TOKENS[pool.token0].address.toLowerCase(), effFeeBps }
+  })
+
+  const directClStates: PoolState[] = directClPools.map((pool, i) => {
+    const stateD = directClResults[i * 2]
+    const liqD = directClResults[i * 2 + 1]
+    const state = stateD?.status === 'success' ? stateD.result as readonly unknown[] : null
+    const liquidity = liqD?.status === 'success' ? liqD.result as bigint : 0n
+    const sqrtPriceX96 = state?.[0] as bigint | undefined ?? 0n
+    if (!state || liquidity === 0n || sqrtPriceX96 === 0n) {
+      return { pool, r0: 0n, r1: 0n, onchain0: '', effFeeBps: pool.feeBps }
+    }
+    const effFeeBps = pool.directClState === 'algebra'
+      ? (BigInt(state[2] as number) + 99n) / 100n
+      : pool.feeBps
+    return {
+      pool,
+      r0: (liquidity << 96n) / sqrtPriceX96,
+      r1: (liquidity * sqrtPriceX96) >> 96n,
+      onchain0: TOKENS[pool.token0].address.toLowerCase(),
+      effFeeBps,
+    }
   })
 
   const activeIds = dlmmPools.map((_, i) => {
@@ -715,7 +826,7 @@ async function fetchAllStates(): Promise<PoolState[]> {
     }
   })
 
-  return [...vammStates, ...clStates, ...dlmmStates, ...v3States, ...v4States].filter(s => s.r0 > 0n && s.r1 > 0n && hasRealLiquidity(s))
+  return [...vammStates, ...clStates, ...directClStates, ...dlmmStates, ...v3States, ...v4States].filter(s => s.r0 > 0n && s.r1 > 0n && hasRealLiquidity(s))
 }
 
 // Several pools in POOLS are genuinely empty -- deployed with a real gauge
@@ -724,20 +835,22 @@ async function fetchAllStates(): Promise<PoolState[]> {
 // comments). Feeding those into the constant-product math against a properly
 // funded pool produces nonsense: a 1-wei-scale optimalIn against reserves
 // that are almost all fee/rounding noise can price out as an astronomical
-// "profit" that doesn't exist. Require at least 0.01 of a whole token on
-// BOTH sides before a pool is considered tradeable -- cheap dust, real pools
-// clear this trivially.
-const MIN_LIQUIDITY_WHOLE = 0.01   // require at least this many whole tokens on each side
-function minRawUnits(decimals: number): bigint {
-  // e.g. decimals=18, MIN_LIQUIDITY_WHOLE=0.01 -> 10^16 raw units (0.01 token)
-  return 10n ** BigInt(Math.max(Math.round(decimals + Math.log10(MIN_LIQUIDITY_WHOLE)), 0))
+// "profit" that doesn't exist. The floor must be token-aware: 0.01 WETH is
+// orders of magnitude more value than 0.01 of most other listed tokens and
+// incorrectly excluded the funded canonical FRONG/WETH pool. This remains a
+// dust guard only; exact quoting, deployed-executor simulation and exact gas
+// still decide whether any amount is executable.
+function minRawUnits(symbol: keyof typeof TOKENS): bigint {
+  const token = TOKENS[symbol]
+  const minimumWhole = symbol === 'WETH' ? 0.0001 : 0.01
+  return 10n ** BigInt(Math.max(Math.round(token.decimals + Math.log10(minimumWhole)), 0))
 }
 function hasRealLiquidity(s: { pool: typeof ARB_POOLS[number]; r0: bigint; r1: bigint; onchain0: string }): boolean {
   const t0 = TOKENS[s.pool.token0]
   const t1 = TOKENS[s.pool.token1]
   const isT0First = s.onchain0 === t0.address.toLowerCase()
   const [rFirst, rSecond] = isT0First ? [s.r0, s.r1] : [s.r1, s.r0]
-  return rFirst >= minRawUnits(t0.decimals) && rSecond >= minRawUnits(t1.decimals)
+  return rFirst >= minRawUnits(s.pool.token0) && rSecond >= minRawUnits(s.pool.token1)
 }
 
 // ─── Arb finder ───────────────────────────────────────────────────────────────
@@ -829,13 +942,19 @@ function cycleOut(amountIn: bigint, hops: HopCandidate[]): bigint {
   return amt
 }
 
+// 64 ternary-search steps resolve an 18-decimal input interval far below one
+// economically meaningful raw unit for the balances Keeper2 can deploy. The
+// previous 100 steps returned identical integer optima in randomized parity
+// tests but spent ~60% more CPU in the hottest local-discovery loop.
+const SIZING_SEARCH_ITERATIONS = 64
+
 // Generic ternary-search sizer -- works for any hop count, unlike a
 // closed-form 2-hop formula, so the same function sizes both 2-hop and
 // 3-hop cycles.
 function optimalTrade(hops: HopCandidate[], maxIn: bigint): { amountIn: bigint; profit: bigint } {
   if (maxIn <= 1n) return { amountIn: 0n, profit: -1n }
   let lo = 0n, hi = maxIn
-  for (let i = 0; i < 100; i++) {
+  for (let i = 0; i < SIZING_SEARCH_ITERATIONS; i++) {
     const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n
     const p1 = cycleOut(m1, hops) - m1, p2 = cycleOut(m2, hops) - m2
     if (p1 < p2) lo = m1; else hi = m2
@@ -971,7 +1090,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
     const maxIn = poolCap < walletCap ? poolCap : walletCap
     if (maxIn <= 1n) return
     let lo = 0n, hi = maxIn
-    for (let i = 0; i < 100; i++) {
+    for (let i = 0; i < SIZING_SEARCH_ITERATIONS; i++) {
       const m1 = lo + (hi - lo) / 3n, m2 = hi - (hi - lo) / 3n
       if (profitUsdgAt(m1) < profitUsdgAt(m2)) lo = m1; else hi = m2
       if (hi - lo < 2n) break
@@ -1219,7 +1338,7 @@ function candidateBaseTokens(searchBalances: Record<string, bigint>): (keyof typ
     return [BASE_TOKEN_OVERRIDE]
   }
   return SETTLEMENT_TOKENS.filter(sym =>
-    (searchBalances[sym] ?? 0n) >= minRawUnits(TOKENS[sym].decimals)
+    (searchBalances[sym] ?? 0n) >= minRawUnits(sym)
   ) as (keyof typeof TOKENS)[]
 }
 
@@ -1267,7 +1386,7 @@ async function unwrapIdleWeth(): Promise<void> {
   }) as bigint
   // Unwrap gas is a fixed cost regardless of amount -- skip true dust
   // rather than spend real gas converting a negligible remainder.
-  if (wethBal < minRawUnits(TOKENS.WETH.decimals)) return
+  if (wethBal < minRawUnits('WETH')) return
 
   console.log(`\n[${new Date().toISOString()}] Unwrapping idle WETH balance: ${formatEther(wethBal)} WETH → ETH`)
   try {
@@ -1505,6 +1624,7 @@ const METRICS_VERSION = 5
 
 const scanTelemetry = {
   mode: 'full' as 'full' | 'incremental' | 'gas-only' | 'heartbeat',
+  networkSetupMs: 0,
   stateReadMs: 0,
   balanceReadMs: 0,
   localSearchMs: 0,
@@ -1860,6 +1980,46 @@ async function writeStatus(lastOpps: ReportedOpportunity[], tickMs: number, rawB
     balances[sym] = formatUnits(bal, TOKENS[sym as keyof typeof TOKENS].decimals)
   }
 
+  const livePoolStates = new Map<string, PoolState>()
+  for (const edges of graph.values()) {
+    for (const edge of edges) {
+      const pool = edge.pool.pool
+      const key = `${pool.kind}:${pool.v4PoolId?.toLowerCase() ?? pool.address.toLowerCase()}:${pool.token0}:${pool.token1}`
+      livePoolStates.set(key, edge.pool)
+    }
+  }
+  const monitoredPools = ARB_POOLS.map(pool => {
+    const key = `${pool.kind}:${pool.v4PoolId?.toLowerCase() ?? pool.address.toLowerCase()}:${pool.token0}:${pool.token1}`
+    const state = livePoolStates.get(key)
+    let reserves: Record<string, string> | null = null
+    if (state) {
+      const token0IsFirst = state.onchain0 === TOKENS[pool.token0].address.toLowerCase()
+      const [token0Reserve, token1Reserve] = token0IsFirst ? [state.r0, state.r1] : [state.r1, state.r0]
+      reserves = {
+        [pool.token0]: formatUnits(token0Reserve, TOKENS[pool.token0].decimals),
+        [pool.token1]: formatUnits(token1Reserve, TOKENS[pool.token1].decimals),
+      }
+    }
+    return {
+      name: pool.name,
+      address: pool.address,
+      poolId: pool.v4PoolId ?? null,
+      kind: pool.kind,
+      token0: pool.token0,
+      token1: pool.token1,
+      feeBps: Number(state?.effFeeBps ?? pool.feeBps),
+      live: !!state,
+      reserves,
+    }
+  })
+  const venueBreakdown = monitoredPools.reduce((summary, pool) => {
+    const venue = summary[pool.kind] ?? { total: 0, live: 0 }
+    venue.total++
+    if (pool.live) venue.live++
+    summary[pool.kind] = venue
+    return summary
+  }, {} as Record<string, { total: number; live: number }>)
+
   const status = {
     metricsVersion: METRICS_VERSION,
     updatedAt: new Date().toISOString(),
@@ -1869,6 +2029,9 @@ async function writeStatus(lastOpps: ReportedOpportunity[], tickMs: number, rawB
     tickMs,
     scanTelemetry: { ...scanTelemetry },
     poolsMonitored: ARB_POOLS.length,
+    poolsLiveThisTick: monitoredPools.filter(pool => pool.live).length,
+    venueBreakdown,
+    monitoredPools,
     poolActivity: poolActivityReport,
     rpcEndpointCount: RPC_URLS.length,
     gasReserve: {
@@ -2009,8 +2172,20 @@ function buildUniversalHops(hopCandidates: HopCandidate[]) {
     if (kind === 'DLMM') return { poolType: 2, pool: ZERO_ADDRESS, tokenIn, tokenOut, feeBps: 0, binStep: h.pool.pool.binStep ?? 0, tickSpacing: 0, v4Native: false }
     if (kind === 'uniV3') return { poolType: 4, pool: getAddress(h.pool.pool.address), tokenIn, tokenOut, feeBps: h.pool.pool.v3Fee ?? 0, binStep: 0, tickSpacing: 0, v4Native: false }
     if (kind === 'uniV4') return { poolType: 5, pool: getAddress(h.pool.pool.v4Hooks ?? ZERO_ADDRESS), tokenIn, tokenOut, feeBps: h.pool.pool.v4Fee ?? 0, binStep: 0, tickSpacing: h.pool.pool.v4TickSpacing ?? 0, v4Native: h.pool.pool.v4Native ?? false }
+    if (kind === 'directCL') return { poolType: 6, pool: getAddress(h.pool.pool.address), tokenIn, tokenOut, feeBps: h.pool.pool.v3Fee ?? 0, binStep: 0, tickSpacing: h.pool.pool.v4TickSpacing ?? 0, v4Native: false }
     return { poolType: kind === 'uniV2' ? 3 : 0, pool: getAddress(h.pool.pool.address), tokenIn, tokenOut, feeBps: Number(h.pool.pool.feeBps), binStep: 0, tickSpacing: 0, v4Native: false }
   })
+}
+
+// User-supplied V2-style pairs verified on-chain on 2026-08-29. Both expose
+// token0/token1/getReserves/swap and therefore execute through the deployed
+// universal router's measured-input UniV2 path. Their fee() values are ppm.
+const MANUAL_UNIV2_POOLS: PoolConfig[] = [
+  { name: 'External V2 FRONG/WETH 1.5%', address: getAddress('0x00EccbF137ee425B211c36cfdeC3B2E5535d2289'), token0: 'WETH', token1: 'FRONG', feeBps: 150n, isUniV2: true, kind: 'uniV2' },
+  { name: 'External V2 CASHCAT/WETH 0.5%', address: getAddress('0xDC5BAa131c844D0CA548f4e0AA7CE9f50c742eC5'), token0: 'CASHCAT', token1: 'WETH', feeBps: 50n, isUniV2: true, kind: 'uniV2' },
+]
+for (const pool of MANUAL_UNIV2_POOLS) {
+  if (!ARB_POOLS.some(existing => existing.address.toLowerCase() === pool.address.toLowerCase())) ARB_POOLS.push(pool)
 }
 
 function buildKeeperHops(hopCandidates: HopCandidate[]) {
@@ -2027,6 +2202,7 @@ function venueName(kind: PoolKind): string {
   if (kind === 'uniV2') return 'Uniswap V2'
   if (kind === 'uniV3') return 'Uniswap V3'
   if (kind === 'uniV4') return 'Uniswap V4'
+  if (kind === 'directCL') return 'External CL'
   if (kind === 'CL') return 'AEON CL'
   if (kind === 'DLMM') return 'AEON DLMM'
   return 'AEON DEX'
@@ -2039,13 +2215,23 @@ function describeVenuePath(hops: HopCandidate[]): string {
 }
 
 function hasNonVammHop(hopCandidates: HopCandidate[]): boolean {
-  return hopCandidates.some(h => h.pool.pool.kind === 'CL' || h.pool.pool.kind === 'DLMM' || h.pool.pool.kind === 'uniV3' || h.pool.pool.kind === 'uniV4')
+  return hopCandidates.some(h => h.pool.pool.kind === 'CL' || h.pool.pool.kind === 'DLMM' || h.pool.pool.kind === 'uniV3' || h.pool.pool.kind === 'uniV4' || h.pool.pool.kind === 'directCL')
 }
 
 async function quoteMixedRouteExact(hops: HopCandidate[], amountIn: bigint): Promise<bigint> {
   let amount = amountIn
   for (const hop of hops) {
-    if (hop.pool.pool.kind === 'uniV3') {
+    if (hop.pool.pool.kind === 'directCL') {
+      const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
+      const quote = await pub.simulateContract({
+        account,
+        address: CONTRACTS.UniversalRouter,
+        abi: AEON_UNIVERSAL_ROUTER_ABI,
+        functionName: 'swapExactTokensForTokens',
+        args: [buildUniversalHops([hop]), amount, 0n, account.address, deadline],
+      })
+      amount = typeof quote.result === 'bigint' ? quote.result : 0n
+    } else if (hop.pool.pool.kind === 'uniV3') {
       const quote = await quoteUniswapV3ExactInput(
         pub,
         getAddress(TOKENS[hop.tokenInSym as keyof typeof TOKENS].address),
@@ -2106,10 +2292,13 @@ async function quoteMixedRouteExact(hops: HopCandidate[], amountIn: bigint): Pro
 // Dashboard truth and execution use the same calldata gate. A route is not a
 // publishable opportunity merely because all per-hop quotes succeed: the
 // deployed executor must accept the complete route, exact gas must be known,
-// and the remaining profit after buffered gas must clear 0.05%.
+// and the remaining profit after buffered gas must clear MIN_PROFIT_PCT.
 const allowanceCache = new Map<string, { value: bigint; expiresAt: number }>()
 
-async function preflightCycleExact(opp: ArbOpp, graph: Map<string, HopCandidate[]>, gasPrice: bigint): Promise<boolean> {
+async function preflightCycleExact(
+  opp: ArbOpp, graph: Map<string, HopCandidate[]>, gasPrice: bigint,
+  walletBalances: Record<string, bigint>,
+): Promise<boolean> {
   const tokenIn = opp.tokenIn
   const mixed = hasNonVammHop(opp.hops)
   const executor = mixed ? CONTRACTS.UniversalRouter : CONTRACTS.ArbKeeper
@@ -2124,11 +2313,20 @@ async function preflightCycleExact(opp: ArbOpp, graph: Map<string, HopCandidate[
     allowanceCache.set(allowanceKey, cachedAllowance)
   }
   const allowance = cachedAllowance.value
+  // Reuse this tick's on-chain balance snapshot. Exact-shortlist preflight can
+  // run several candidates at once, and another balanceOf per candidate was
+  // enough to trip the single Robinhood RPC endpoint's 60-second rate limit.
+  const walletBalance = walletBalances[tokenIn.symbol] ?? 0n
   // CL/DLMM discovery sizes are approximate. Try a bounded ladder of smaller
   // inputs through the deployed executor before cooling down the route. This
   // lets Keeper2 escape an oversized active-bin quote while preserving the
   // exact gas and protected-profit gates below.
-  const executableCap = allowance < opp.amountIn ? allowance : opp.amountIn
+  // Approval is only permission to spend; it is not evidence of capital.
+  // Cap exact simulation to the fresh wallet balance as well, otherwise a
+  // max allowance can repeatedly feed an oversized discovery input into the
+  // deployed router and produce ERC20 "transfer amount exceeds balance".
+  const executableCap = [opp.amountIn, allowance, walletBalance]
+    .reduce((smallest, value) => value < smallest ? value : smallest)
   if (executableCap <= 0n) return false
 
   const deadline = BigInt(Math.floor(Date.now() / 1000) + DEADLINE_SECONDS)
@@ -2162,6 +2360,12 @@ async function preflightCycleExact(opp: ArbOpp, graph: Map<string, HopCandidate[
           bestProfit = candidateProfit
           exactOut = candidateOut
         }
+        // The ladder exists to recover from an oversized concentrated-
+        // liquidity discovery input. Once the largest input already clears
+        // the percentage floor, smaller probes cannot improve throughput and
+        // would consume two more shared-RPC simulations before exact gas and
+        // the final protected-output simulation. Keep them as fallbacks only.
+        if (candidateSurplus > 0n) break
       } catch (err: any) {
         const failure = decodeFailure(err)
         if (failure.category !== 'stale_quote' && failure.category !== 'slippage') throw err
@@ -2465,7 +2669,7 @@ async function executeArb(opp: ArbOpp, graph: Map<string, HopCandidate[]>, avail
   // percentage or dollar floor: one raw unit of net profit is enough.
   const minNetProfit = minimumNetProfitRaw(amountIn)
   let requiredProfit = gasFloor + minNetProfit
-  console.log(`   Required profit (buffered gas + 0.05% net): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
+  console.log(`   Required profit (buffered gas + ${MIN_PROFIT_PCT}% net): ~${formatUnits(requiredProfit, tokenIn.decimals)} ${tokenIn.symbol}`)
   if (profitRaw < requiredProfit) {
     console.log('   Profit does not clear the buffered gas cost, skipping')
     outcomeCounters.belowGas++
@@ -3736,6 +3940,7 @@ const EXECUTION_CANDIDATES_PER_TICK = 10
 async function tick() {
   const t0 = Date.now()
   scanTelemetry.mode = 'full'
+  scanTelemetry.networkSetupMs = 0
   scanTelemetry.stateReadMs = 0
   scanTelemetry.balanceReadMs = 0
   scanTelemetry.localSearchMs = 0
@@ -3744,13 +3949,16 @@ async function tick() {
   scanTelemetry.exactSelected = 0
   scanTelemetry.exactChecked = 0
   scanTelemetry.exactValid = 0
-  scanTelemetry.lastBlock = (await pub.getBlockNumber().catch(() => null))?.toString() ?? scanTelemetry.lastBlock
+  const networkSetupStartedAt = Date.now()
+  const [blockNumber, gasPrice] = await Promise.all([
+    pub.getBlockNumber().catch(() => null),
+    pub.getGasPrice().catch(() => null),
+  ])
+  scanTelemetry.lastBlock = blockNumber?.toString() ?? scanTelemetry.lastBlock
+  cachedGasPrice = gasPrice
+  scanTelemetry.networkSetupMs = Date.now() - networkSetupStartedAt
 
   maybeAuditPoolActivity()
-
-  try {
-    cachedGasPrice = await pub.getGasPrice()
-  } catch { /* leave null -- gasCostFloorInToken falls back to a live fetch per-candidate this tick */ }
 
   try {
     await distributeMultiGaugeRewards()
@@ -3777,11 +3985,28 @@ async function tick() {
       recentErrors = recentErrors.slice(0, 5)
     }
   }
+  const rankingGasPrice = cachedGasPrice ?? await pub.getGasPrice()
   let states: PoolState[]
-  const stateReadStartedAt = Date.now()
+  let balanceSnapshot: Awaited<ReturnType<typeof fetchBalances>>
   try {
-    states = await fetchAllStates()
-    scanTelemetry.stateReadMs = Date.now() - stateReadStartedAt
+    // State and wallet balances are independent read-only RPC batches. Run
+    // them together so the configured 200ms cadence is not inflated by two
+    // serial network round trips; execution still refreshes allowance,
+    // balance, simulation, nonce and gas immediately before any broadcast.
+    ;[states, balanceSnapshot] = await Promise.all([
+      (async () => {
+        const startedAt = Date.now()
+        const value = await fetchAllStates()
+        scanTelemetry.stateReadMs = Date.now() - startedAt
+        return value
+      })(),
+      (async () => {
+        const startedAt = Date.now()
+        const value = await fetchBalances(rankingGasPrice)
+        scanTelemetry.balanceReadMs = Date.now() - startedAt
+        return value
+      })(),
+    ])
   } catch (err: any) {
     const message = err?.message ?? String(err)
     console.error(`[RPC error] ${message}`)
@@ -3790,16 +4015,12 @@ async function tick() {
     return
   }
 
-  const rankingGasPrice = await pub.getGasPrice()
   const graph = buildGraph(states)
-  const balanceReadStartedAt = Date.now()
-  let balanceSnapshot = await fetchBalances(rankingGasPrice)
   if (!balanceSnapshot.gasReserveHealthy) {
     const refilled = await ensureNativeGasReserve(balanceSnapshot.nativeEth, balanceSnapshot.gasReserveWei, rankingGasPrice, graph)
     if (refilled) balanceSnapshot = await fetchBalances(rankingGasPrice)
   }
   const { balances, searchBalances, nativeEth, availableEthForWrap, gasReserveWei, gasReserveHealthy } = balanceSnapshot
-  scanTelemetry.balanceReadMs = Date.now() - balanceReadStartedAt
   const bases = candidateBaseTokens(searchBalances)
   const localSearchStartedAt = Date.now()
   // Signed, NOT floored at zero -- this feeds the dashboard's "net est."
@@ -3877,7 +4098,16 @@ async function tick() {
   // the entire keeper to Robinhood's 60-second throttle when the approximate
   // graph emits dozens of unique false positives at once.
   const EXACT_PREFLIGHT_BUDGET = 8
-  const eligibleForPreflight = rankedCandidates.filter(candidate => routeCooldownRemaining(candidate.opp.hops) === 0)
+  // Never spend exact-quoter/executor RPC calls on a route that discovery
+  // already proves is below the required gas-inclusive floor. This was the
+  // source of thousands of harmless rejections and 6-20s of wasted latency
+  // per tick. Exact quote + deployed-executor simulation + exact gas remain
+  // mandatory for every candidate that can actually reach execution.
+  const eligibleForPreflight = rankedCandidates.filter(candidate =>
+    routeCooldownRemaining(candidate.opp.hops) === 0
+    && (candidate.opp.expectedNetUsd ?? -Infinity) > 0
+    && candidate.opp.profitPct >= MIN_PROFIT_PCT
+  )
   let candidatesToPreflight = eligibleForPreflight
   if (eligibleForPreflight.length > EXACT_PREFLIGHT_BUDGET) {
     const priority = eligibleForPreflight.slice(0, 4)
@@ -3900,7 +4130,7 @@ async function tick() {
     if (routeCooldownRemaining(candidate.opp.hops) > 0) return null
     scanTelemetry.exactChecked++
     try {
-      const valid = await preflightCycleExact(candidate.opp, graph, rankingGasPrice)
+      const valid = await preflightCycleExact(candidate.opp, graph, rankingGasPrice, balances)
       if (valid) clearRouteFailure(candidate.opp.hops)
       else registerRouteFailure(candidate.opp.hops, {
         category: 'stale_quote',
@@ -3910,7 +4140,7 @@ async function tick() {
       const report = reportedCandidates.find(item => item.opp === candidate.opp)
       if (report) {
         report.validation = valid ? 'exact-valid' : 'preflight-rejected'
-        if (!valid) report.rejectionReason = 'Exact quote, deployed-executor simulation, gas, or 0.05% net floor did not pass'
+        if (!valid) report.rejectionReason = `Exact quote, deployed-executor simulation, gas, or ${MIN_PROFIT_PCT}% net floor did not pass`
       }
       return valid ? candidate : null
     } catch (err: any) {
@@ -4093,6 +4323,7 @@ async function main() {
   console.log(`  Pool discovery refresh interval: ${POOL_REFRESH_INTERVAL_MS}ms`)
   console.log(`  Pool activity review: every ${POOL_ACTIVITY_CHECK_INTERVAL_MS / 3_600_000}h; flag after ${POOL_INACTIVE_AFTER_MS / 3_600_000}h without an on-chain event`)
   console.log(`  External Uniswap V3/V4 discovery: ${ENABLE_EXTERNAL_DISCOVERY ? 'enabled' : 'disabled (AEON pools + listed Uniswap mirrors only)'}`)
+  console.log(`  External direct CL pools: ${ENABLE_EXTERNAL_CL_POOLS ? `enabled (${MANUAL_EXTERNAL_CL_POOLS.length} configured)` : 'disabled pending router deployment and simulation gates'}`)
   console.log(`  Min profit to execute: ${MIN_PROFIT_PCT}%`)
   console.log(`  Interval: ${INTERVAL_MS}ms`)
   console.log(`  Cross-venue scan interval: ${AGGREGATOR_SCAN_INTERVAL_MS}ms`)

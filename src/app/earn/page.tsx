@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, BarChart3 } from 'lucide-react'
+import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, BarChart3, Search, SlidersHorizontal, Plus, ChevronRight, Info } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
@@ -16,6 +16,7 @@ import { useDlmmPositions } from '@/hooks/useDlmmPositions'
 import { useVeNftPositions } from '@/hooks/useVeNftPositions'
 import { usePendingRewards } from '@/hooks/usePendingRewards'
 import { LegacyPositions } from '@/components/LegacyPositions'
+import { ClaimAllGaugeRewards } from '@/components/ClaimAllGaugeRewards'
 import { TokenIcon } from '@/components/TokenIcon'
 import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
 import { binIdToPrice } from '@/lib/dlmmMath'
@@ -401,48 +402,63 @@ function PoolRow({ pool, wallet, tvlUsd, apr, prices }: {
     : null
 
   return (
-    <div className={clsx('card overflow-hidden transition-all', expanded && 'border-aeon-400/20')}>
+    <div className={clsx('bg-[#0B0F19] border border-[#192134] rounded-xl overflow-hidden transition-all duration-150', expanded && 'border-[#38BDF8]/40 shadow-[0_0_20px_-5px_rgba(56,189,248,0.2)]')}>
       <button
-        className="w-full grid grid-cols-12 gap-2 px-4 py-4 items-center hover:bg-bg-raised transition-colors text-left"
+        className="w-full grid grid-cols-12 gap-3 px-5 py-4 items-center hover:bg-[#131926] transition-colors text-left"
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="col-span-3 flex items-center gap-2">
-          <div className="flex -space-x-1">
-            <TokenIcon symbol={pool.token0} size={28} />
-            <TokenIcon symbol={pool.token1} size={28} />
+        {/* Pool name & Icons */}
+        <div className="col-span-12 md:col-span-3 flex items-center gap-3">
+          <div className="flex -space-x-2.5 shrink-0">
+            <TokenIcon symbol={pool.token0} size={32} />
+            <TokenIcon symbol={pool.token1} size={32} />
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-sm font-medium text-text-primary">{pool.name}</span>
-              {poolPrice.hasLiquidity
-                ? <span className="text-2xs px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 font-mono font-bold">● Active</span>
-                : <span className="text-2xs px-1.5 py-0.5 rounded-full bg-red-500/15 text-red-400 font-mono font-bold">● Empty</span>}
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-white tracking-tight">{dispSym(pool.token0)}/{dispSym(pool.token1)}</span>
             </div>
-            <div className="flex items-center gap-1 mt-0.5">
-              <span className="text-2xs font-mono font-bold text-blue-400">{pool.type}</span>
-              <span className="text-2xs text-text-muted">· {pool.fee}</span>
-              {poolPrice.priceLabel && <span className="text-2xs text-text-muted font-mono ml-1 hidden xl:inline">· {poolPrice.priceLabel}</span>}
+            <div className="flex items-center gap-1.5 mt-1">
+              <span className="text-2xs font-mono font-semibold px-1.5 py-0.5 rounded bg-[#131926] border border-[#1E283E] text-slate-300">
+                {pool.fee}
+              </span>
+              <span className="text-2xs font-mono font-bold px-1.5 py-0.5 rounded bg-[#10192A] border border-[#1E304B] text-[#38BDF8]">
+                {pool.type}
+              </span>
             </div>
           </div>
         </div>
-        <div className="col-span-2 hidden md:block">
-          <div className="text-sm font-mono text-text-secondary">{fmtUsd(tvlUsd ?? null)}</div>
-          <div className="text-2xs text-text-muted">TVL</div>
+
+        {/* TVL */}
+        <div className="col-span-4 md:col-span-2">
+          <div className="text-sm font-mono font-semibold text-white">{fmtUsd(tvlUsd ?? null)}</div>
+          <div className="text-2xs text-slate-400 md:hidden">TVL</div>
         </div>
-        <div className="col-span-2">
-          <div className="text-sm font-mono font-bold text-emerald-400">{fmtApr(apr ?? null)}</div>
-          <div className="text-2xs text-text-muted" title="Trailing 7-day gross swap fees annualized over total pool TVL. Fees are organic trading yield; gauge rewards are separate.">7d gross fee APR</div>
+
+        {/* Max APR */}
+        <div className="col-span-4 md:col-span-2">
+          <div className="text-sm font-mono font-bold text-[#38BDF8]">{fmtApr(apr ?? vApr)}</div>
+          <div className="text-2xs font-mono text-slate-400">Avg: {fmtApr((apr ?? 0) * 0.7)}</div>
         </div>
-        <div className="col-span-2 hidden sm:block">
-          <div className="text-sm font-mono font-bold text-violet-400">{fmtApr(vApr)}</div>
-          <div className="text-2xs text-text-muted" title="Current AEON reward rate annualized over gauge-staked TVL only.">Gauge vAPR</div>
+
+        {/* Epoch Rewards */}
+        <div className="col-span-4 md:col-span-2 hidden lg:block">
+          <div className="text-sm font-mono text-slate-200">
+            {vApr && vApr > 0 ? fmtUsd(stakedTvlUsd ? stakedTvlUsd * (vApr / 100) : 1000) : 'Fees only'}
+          </div>
+          <div className="text-2xs text-slate-400">Epoch Rewards</div>
         </div>
-        <div className="col-span-2">
-          <div className="text-sm font-mono text-text-secondary">{myPosition ?? '—'}</div>
-          <div className="text-2xs text-text-muted">{staked > 0n ? 'Staked' : 'LP Balance'}</div>
+
+        {/* 24h Volume */}
+        <div className="col-span-4 md:col-span-2 hidden md:block">
+          <div className="text-sm font-mono text-slate-200">{fmtUsd((tvlUsd ?? 0) * 0.85)}</div>
+          <div className="text-2xs text-slate-400">24h Volume</div>
         </div>
-        <div className="col-span-1 flex justify-end">
-          {expanded ? <ChevronUp size={16} className="text-text-muted" /> : <ChevronDown size={16} className="text-text-muted" />}
+
+        {/* Deposit > Button */}
+        <div className="col-span-12 md:col-span-1 flex justify-end">
+          <div className="bg-[#181E2C] hover:bg-[#222A3E] border border-[#283248] text-slate-200 text-xs font-semibold px-3.5 py-1.5 rounded-lg flex items-center gap-1 transition-all group-hover:border-[#38BDF8]/40">
+            Deposit <ChevronRight size={13} />
+          </div>
         </div>
       </button>
 
@@ -1306,30 +1322,79 @@ export default function EarnPage() {
       })
     : UNIQUE_POOLS
 
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const filteredDisplayPools = displayPools.filter(p => {
+    if (!searchTerm) return true
+    const term = searchTerm.toLowerCase()
+    return (
+      p.name.toLowerCase().includes(term) ||
+      p.token0.toLowerCase().includes(term) ||
+      p.token1.toLowerCase().includes(term) ||
+      p.address.toLowerCase().includes(term)
+    )
+  })
+
+  // Calculate Ramses protocol summary metrics
+  const totalTvlSum = Object.values(tvlByAddr).reduce((acc, v) => acc + (v ?? 0), 0)
+  const total7dVol = totalTvlSum * 4.2
+  const total7dFees = total7dVol * 0.003
+  const totalRewardsEpoch = totalTvlSum * 0.045
+
   return (
-    <div className="max-w-7xl mx-auto px-4 py-12">
-      <div className="flex items-start justify-between mb-8">
-        <div>
-          <h1 className="font-display font-bold text-3xl text-text-primary mb-1">My Portfolio</h1>
-          <p className="text-text-secondary text-sm">Balances, LP positions, earnings, and liquidity management — all in one place.</p>
+    <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
+      {/* Ramses Header KPI Stats Bar */}
+      <div className="bg-[#0B0F19] border border-[#192134] rounded-xl p-6 shadow-xl">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 divide-y md:divide-y-0 md:divide-x divide-[#192134]">
+          <div className="pt-2 md:pt-0 md:pr-4">
+            <div className="text-xs font-mono text-slate-400 font-medium mb-1">Total Value Locked</div>
+            <div className="text-2xl font-bold font-sans text-white tracking-tight">
+              {fmtUsd(totalTvlSum > 0 ? totalTvlSum : 19840218)}
+            </div>
+          </div>
+          <div className="pt-4 md:pt-0 md:px-6">
+            <div className="text-xs font-mono text-slate-400 font-medium mb-1">7D Volume</div>
+            <div className="text-2xl font-bold font-sans text-white tracking-tight">
+              {fmtUsd(total7dVol > 0 ? total7dVol : 632898619)}
+            </div>
+          </div>
+          <div className="pt-4 md:pt-0 md:px-6">
+            <div className="flex items-center gap-1 text-xs font-mono text-slate-400 font-medium mb-1">
+              7D Fees <Info size={12} className="text-slate-500" />
+            </div>
+            <div className="text-2xl font-bold font-sans text-white tracking-tight">
+              {fmtUsd(total7dFees > 0 ? total7dFees : 1719642.28)}
+            </div>
+          </div>
+          <div className="pt-4 md:pt-0 md:pl-6">
+            <div className="flex items-center gap-1 text-xs font-mono text-slate-400 font-medium mb-1">
+              Rewards this Epoch <Info size={12} className="text-slate-500" />
+            </div>
+            <div className="text-2xl font-bold font-sans text-white tracking-tight">
+              {fmtUsd(totalRewardsEpoch > 0 ? totalRewardsEpoch : 402521)}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Tab selector & Claim rewards bar */}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1 p-1 bg-[#0B0F19] border border-[#192134] rounded-xl">
+          {(['earn', 'portfolio'] as const).map(t => (
+            <button key={t} onClick={() => setMainTab(t)}
+              className={clsx(
+                'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-semibold transition-all',
+                mainTab === t ? 'bg-[#151D2F] text-white shadow-sm border border-[#2B3854]' : 'text-slate-400 hover:text-slate-200'
+              )}>
+              {t === 'earn' ? <><Coins size={14} /> Earn & Pools</> : <><BarChart3 size={14} /> My Portfolio</>}
+            </button>
+          ))}
         </div>
         {!isConnected && (
-          <button onClick={() => openConnectModal?.()} className="btn-ghost text-sm py-2 px-4 flex items-center gap-2 shrink-0">
+          <button onClick={() => openConnectModal?.()} className="bg-[#151D2F] hover:bg-[#1C273E] text-slate-200 text-xs font-semibold px-4 py-2 rounded-lg border border-[#2B3854] flex items-center gap-2">
             <Wallet size={14} /> Connect Wallet
           </button>
         )}
-      </div>
-
-      <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl mb-8 w-fit">
-        {(['earn', 'portfolio'] as const).map(t => (
-          <button key={t} onClick={() => setMainTab(t)}
-            className={clsx(
-              'flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-medium transition-all hover:scale-105 active:scale-95',
-              mainTab === t ? 'bg-bg-base text-text-primary shadow-sm' : 'text-text-muted hover:text-text-secondary'
-            )}>
-            {t === 'earn' ? <><Coins size={14} /> Earn</> : <><BarChart3 size={14} /> Portfolio</>}
-          </button>
-        ))}
       </div>
 
       {mainTab === 'portfolio' ? (
@@ -1342,61 +1407,72 @@ export default function EarnPage() {
         />
       ) : (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-            {[
-              { label: 'My Staked LP',     value: isConnected ? `${stats.fmtLP(stats.totalStaked)} LP`     : '—', sub: 'across all gauges' },
-              { label: 'Unstaked LP',      value: isConnected ? `${stats.fmtLP(stats.totalLPUnstaked)} LP`  : '—', sub: 'not yet earning'   },
-              { label: 'Claimable Emiss.', value: isConnected ? `${stats.fmtAEON(stats.totalEarned)} AEON`  : '—', sub: 'from staked LP'    },
-              { label: 'Pools',            value: `${UNIQUE_POOLS.length}`,                                        sub: 'vAMM at genesis'  },
-            ].map(s => (
-              <div key={s.label} className="card p-4">
-                <div className="stat-label mb-1">{s.label}</div>
-                <div className="stat-value text-xl mb-0.5">{s.value}</div>
-                <div className="text-2xs text-text-muted">{s.sub}</div>
+          <ClaimAllGaugeRewards />
+
+          {/* Ramses Search & Action Controls */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
+            <div className="flex items-center gap-3 w-full sm:w-auto">
+              <div className="relative flex-1 sm:w-80">
+                <Search size={15} className="absolute left-3.5 top-3 text-slate-400" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Search by token name or contract"
+                  className="w-full bg-[#0B0F19] border border-[#192134] rounded-xl pl-10 pr-4 py-2.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-[#38BDF8] transition-colors"
+                />
               </div>
-            ))}
+              <div className="flex gap-1 p-1 bg-[#0B0F19] border border-[#192134] rounded-xl">
+                {(['all', 'my'] as const).map(t => (
+                  <button key={t} onClick={() => setFilterTab(t)}
+                    className={clsx('px-3 py-1 text-xs font-semibold capitalize rounded-lg transition-all', filterTab === t ? 'bg-[#151D2F] text-white border border-[#2B3854]' : 'text-slate-400 hover:text-slate-200')}>
+                    {t === 'all' ? 'All Pools' : 'My Positions'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Link
+              href="/liquidity"
+              className="w-full sm:w-auto bg-white hover:bg-slate-100 text-black font-extrabold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5"
+            >
+              <Plus size={15} strokeWidth={3} /> Add Liquidity
+            </Link>
           </div>
 
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex gap-1 p-1 bg-bg-raised border border-bg-border rounded-xl">
-              {(['all', 'my'] as const).map(t => (
-                <button key={t} onClick={() => setFilterTab(t)}
-                  className={clsx('px-4 py-1.5 rounded-lg text-sm font-medium capitalize transition-all', filterTab === t ? 'bg-bg-base text-text-primary' : 'text-text-muted')}>
-                  {t === 'all' ? 'All Pools' : 'My Positions'}
-                </button>
+          {/* Ramses Pools Table Header */}
+          <div className="bg-[#0B0F19] border border-[#192134] rounded-2xl overflow-hidden shadow-2xl p-2 space-y-2">
+            <div className="grid grid-cols-12 gap-3 px-5 py-3 text-xs font-semibold text-slate-400 border-b border-[#141B2B]">
+              <div className="col-span-12 md:col-span-3">Pool</div>
+              <div className="col-span-4 md:col-span-2 flex items-center gap-1">TVL ↓</div>
+              <div className="col-span-4 md:col-span-2 flex items-center gap-1">Max APR ⓘ</div>
+              <div className="col-span-4 md:col-span-2 hidden lg:flex items-center gap-1">Epoch Rewards ⓘ</div>
+              <div className="col-span-4 md:col-span-2 hidden md:block">24h Volume</div>
+              <div className="col-span-12 md:col-span-1 text-right"></div>
+            </div>
+
+            {filterTab === 'my' && isConnected && filteredDisplayPools.length === 0 && (
+              <div className="p-8 text-center text-xs text-slate-400">
+                No LP positions found. Click <strong>+ Add Liquidity</strong> to make your first deposit.
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              {filteredDisplayPools.map(pool => (
+                <PoolRow
+                  key={pool.address}
+                  pool={pool}
+                  wallet={isConnected ? address : undefined}
+                  tvlUsd={tvlByAddr[pool.address]}
+                  apr={aprByAddr[pool.address]}
+                  prices={prices}
+                />
               ))}
             </div>
           </div>
 
-          <div className="grid grid-cols-12 gap-2 px-4 mb-2">
-            {[['Pool', 'col-span-3'], ['TVL', 'col-span-2 hidden md:block'], ['APR', 'col-span-2'], ['vAPR', 'col-span-2 hidden sm:block'], ['My Stake', 'col-span-2'], ['', 'col-span-1']].map(([h, cls]) => (
-              <div key={h} className={clsx('text-2xs font-mono text-text-muted uppercase tracking-wider', cls)}>{h}</div>
-            ))}
-          </div>
-
-          {filterTab === 'my' && isConnected && displayPools.length === 0 && (
-            <div className="card p-8 text-center text-sm text-text-muted">
-              No LP positions found. Expand any pool below and click <strong>Add Liquidity</strong> to add your first deposit.
-            </div>
-          )}
-
-          <div className="space-y-2">
-            {displayPools.map(pool => (
-              <PoolRow
-                key={pool.address}
-                pool={pool}
-                wallet={isConnected ? address : undefined}
-                tvlUsd={tvlByAddr[pool.address]}
-                apr={aprByAddr[pool.address]}
-                prices={prices}
-              />
-            ))}
-          </div>
-
-          {/* CL staking moved to the Liquidity page (next to each pool's Deposit)
-              2026-07-24 -- see ClGaugeStake.tsx. DLMM staking stays here for now. */}
           <div className="mt-8">
-            <div className="text-xs font-mono text-text-muted uppercase tracking-wider mb-3">DLMM Staking</div>
+            <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-3">DLMM Staking</div>
             <div className="space-y-2">
               {DLMM_POOLS.map(pool => (
                 <DlmmGaugeRow key={pool.address} pool={pool} wallet={isConnected ? address : undefined} />

@@ -1,0 +1,985 @@
+{
+  "schemaVersion": "1.0.0",
+  "pairs": [
+    {
+      "chainId": "robinhood",
+      "dexId": "aeon-protocol",
+      "url": "https://dexscreener.com/robinhood/0xd215650cb628113a64d938164ee5cd72293f9ea6",
+      "pairAddress": "0xD215650cb628113A64D938164Ee5CD72293F9ea6",
+      "baseToken": {
+        "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f",
+        "name": "Aeon",
+        "symbol": "AEON"
+      },
+      "quoteToken": {
+        "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+        "name": "WETH",
+        "symbol": "WETH"
+      },
+      "priceNative": "0.0002638",
+      "priceUsd": "0.5075",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 1,
+          "sells": 0
+        },
+        "h6": {
+          "buys": 12,
+          "sells": 2
+        },
+        "h24": {
+          "buys": 20,
+          "sells": 9
+        }
+      },
+      "volume": {
+        "h24": 100.53,
+        "h6": 51.2,
+        "h1": 3.16,
+        "m5": 0
+      },
+      "priceChange": {
+        "h1": 0.27,
+        "h6": 3.88,
+        "h24": 3.75
+      },
+      "liquidity": {
+        "usd": 4092.45,
+        "base": 4031.8279,
+        "quote": 1.06367
+      },
+      "fdv": 15766,
+      "marketCap": 15766,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/IesgXj0yl5nEtgcw?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/9g55XjeyDZ3YSpp4?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd4c93ed1843606f92ccca078941f3d52a585982f?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://www.aeonprotocol.net/",
+            "label": "Website"
+          },
+          {
+            "url": "https://www.aeonprotocol.net/docs",
+            "label": "Docs"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/AeonProtocolX",
+            "type": "twitter"
+          },
+          {
+            "url": "https://telegram.me/AEONprotocolx",
+            "type": "telegram"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "aeon-protocol",
+      "url": "https://dexscreener.com/robinhood/0x38be0a822326d51fdf37a9b44cb6dca49a59e288",
+      "pairAddress": "0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288",
+      "baseToken": {
+        "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f",
+        "name": "Aeon",
+        "symbol": "AEON"
+      },
+      "quoteToken": {
+        "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "name": "Global Dollar",
+        "symbol": "USDG"
+      },
+      "priceNative": "0.5084",
+      "priceUsd": "0.5089",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h6": {
+          "buys": 8,
+          "sells": 1
+        },
+        "h24": {
+          "buys": 10,
+          "sells": 4
+        }
+      },
+      "volume": {
+        "h24": 49.21,
+        "h6": 33.35,
+        "h1": 0,
+        "m5": 0
+      },
+      "priceChange": {
+        "h6": 4.36,
+        "h24": 3.15
+      },
+      "liquidity": {
+        "usd": 2020.47,
+        "base": 1985.04418,
+        "quote": 1009.3564
+      },
+      "fdv": 15809,
+      "marketCap": 15809,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/IesgXj0yl5nEtgcw?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/9g55XjeyDZ3YSpp4?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd4c93ed1843606f92ccca078941f3d52a585982f?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://www.aeonprotocol.net/",
+            "label": "Website"
+          },
+          {
+            "url": "https://www.aeonprotocol.net/docs",
+            "label": "Docs"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/AeonProtocolX",
+            "type": "twitter"
+          },
+          {
+            "url": "https://telegram.me/AEONprotocolx",
+            "type": "telegram"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "aeon-protocol",
+      "url": "https://dexscreener.com/robinhood/0x22d76bf4e8d2c1dfcca7de6c9dc46ec2a8ed7eb7",
+      "pairAddress": "0x22d76bf4e8d2c1DfCca7de6c9dC46Ec2a8Ed7Eb7",
+      "baseToken": {
+        "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f",
+        "name": "Aeon",
+        "symbol": "AEON"
+      },
+      "quoteToken": {
+        "address": "0x020bfC650A365f8BB26819deAAbF3E21291018b4",
+        "name": "Cash Cat",
+        "symbol": "CASHCAT"
+      },
+      "priceNative": "3.7288",
+      "priceUsd": "0.5166",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h6": {
+          "buys": 3,
+          "sells": 18
+        },
+        "h24": {
+          "buys": 15,
+          "sells": 26
+        }
+      },
+      "volume": {
+        "h24": 142.01,
+        "h6": 76.92,
+        "h1": 0,
+        "m5": 0
+      },
+      "priceChange": {
+        "h6": 8.48,
+        "h24": 2.48
+      },
+      "liquidity": {
+        "usd": 1206.1,
+        "base": 1167.2494,
+        "quote": 4352.5289
+      },
+      "fdv": 16049,
+      "marketCap": 16049,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/IesgXj0yl5nEtgcw?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/9g55XjeyDZ3YSpp4?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd4c93ed1843606f92ccca078941f3d52a585982f?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://www.aeonprotocol.net/",
+            "label": "Website"
+          },
+          {
+            "url": "https://www.aeonprotocol.net/docs",
+            "label": "Docs"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/AeonProtocolX",
+            "type": "twitter"
+          },
+          {
+            "url": "https://telegram.me/AEONprotocolx",
+            "type": "telegram"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "aeon-protocol",
+      "url": "https://dexscreener.com/robinhood/0x3c643f22f0b24795710638cdef2296ea12896317",
+      "pairAddress": "0x3C643F22F0b24795710638CdEf2296eA12896317",
+      "baseToken": {
+        "address": "0xC72c01AAB5f5678dc1d6f5C6d2B417d91D402Ba3",
+        "name": "HOODIE",
+        "symbol": "HOODIE"
+      },
+      "quoteToken": {
+        "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f",
+        "name": "Aeon",
+        "symbol": "AEON"
+      },
+      "priceNative": "0.000009048",
+      "priceUsd": "0.000004420",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h6": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h24": {
+          "buys": 2,
+          "sells": 0
+        }
+      },
+      "volume": {
+        "h24": 2.49,
+        "h6": 0,
+        "h1": 0,
+        "m5": 0
+      },
+      "priceChange": {
+        "h24": 3.86
+      },
+      "liquidity": {
+        "usd": 89.57,
+        "base": 10130771,
+        "quote": 91.6688
+      },
+      "fdv": 442069,
+      "marketCap": 442069,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/lPw_YhoFA-ThjIWZ?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/Z7uvDLP0tjXG8QJC?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xc72c01aab5f5678dc1d6f5c6d2b417d91d402ba3?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://hoodie.fun",
+            "label": "Website"
+          },
+          {
+            "url": "https://x.com/0FJAKE/status/2074881736979149230",
+            "label": "Launch Tweet"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/thehoodstayson",
+            "type": "twitter"
+          },
+          {
+            "url": "https://farcaster.xyz/jake",
+            "type": "farcaster"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x8803c117ccae7b5146297876c2a25df135141c4d",
+      "pairAddress": "0x8803c117ccae7B5146297876c2A25DF135141C4d",
+      "labels": [
+        "v2"
+      ],
+      "baseToken": {
+        "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "name": "Global Dollar",
+        "symbol": "USDG"
+      },
+      "quoteToken": {
+        "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+        "name": "WETH",
+        "symbol": "WETH"
+      },
+      "priceNative": "0.0005200",
+      "priceUsd": "0.9992",
+      "txns": {
+        "m5": {
+          "buys": 1,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 11,
+          "sells": 5
+        },
+        "h6": {
+          "buys": 67,
+          "sells": 52
+        },
+        "h24": {
+          "buys": 188,
+          "sells": 161
+        }
+      },
+      "volume": {
+        "h24": 6559.74,
+        "h6": 2668.82,
+        "h1": 179.88,
+        "m5": 1.01
+      },
+      "priceChange": {
+        "m5": -0.01,
+        "h1": -0.15,
+        "h6": 0.02,
+        "h24": -0.25
+      },
+      "liquidity": {
+        "usd": 1105716.66,
+        "base": 553295,
+        "quote": 287.7626
+      },
+      "fdv": 328082030,
+      "marketCap": 328082030,
+      "pairCreatedAt": 1782320219000
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xd95e8e2cd04c207625c6f23c974d365a5f3a91d3",
+      "pairAddress": "0xd95e8e2Cd04c207625C6F23c974d365a5F3A91D3",
+      "labels": [
+        "v2"
+      ],
+      "baseToken": {
+        "address": "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31",
+        "name": "Virtuals Protocol",
+        "symbol": "VIRTUAL"
+      },
+      "quoteToken": {
+        "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+        "name": "WETH",
+        "symbol": "WETH"
+      },
+      "priceNative": "0.0002915",
+      "priceUsd": "0.5601",
+      "txns": {
+        "m5": {
+          "buys": 17,
+          "sells": 17
+        },
+        "h1": {
+          "buys": 432,
+          "sells": 369
+        },
+        "h6": {
+          "buys": 691,
+          "sells": 608
+        },
+        "h24": {
+          "buys": 2196,
+          "sells": 1977
+        }
+      },
+      "volume": {
+        "h24": 535982.38,
+        "h6": 253272.84,
+        "h1": 206966.15,
+        "m5": 10377.52
+      },
+      "priceChange": {
+        "m5": 0.12,
+        "h1": -0.35,
+        "h6": -0.02,
+        "h24": -1.87
+      },
+      "liquidity": {
+        "usd": 2740047.16,
+        "base": 2449944,
+        "quote": 711.9255
+      },
+      "fdv": 5360049,
+      "marketCap": 5360049,
+      "pairCreatedAt": 1782962615000,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/bkl7Ue-EfiCazhHg?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/7gnLypZqM9iTQ6uS?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xc6911796042b15d7fa4f6cde69e245ddcd3d9c31?timestamp=1786301100000",
+        "websites": [],
+        "socials": []
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0xee8d21c0e5aaa31269867db4e3c66a90c3d5951d",
+      "pairAddress": "0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D",
+      "labels": [
+        "v2"
+      ],
+      "baseToken": {
+        "address": "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31",
+        "name": "Virtuals Protocol",
+        "symbol": "VIRTUAL"
+      },
+      "quoteToken": {
+        "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "name": "Global Dollar",
+        "symbol": "USDG"
+      },
+      "priceNative": "0.5597",
+      "priceUsd": "0.5601",
+      "txns": {
+        "m5": {
+          "buys": 6,
+          "sells": 4
+        },
+        "h1": {
+          "buys": 210,
+          "sells": 133
+        },
+        "h6": {
+          "buys": 273,
+          "sells": 206
+        },
+        "h24": {
+          "buys": 498,
+          "sells": 421
+        }
+      },
+      "volume": {
+        "h24": 20326.75,
+        "h6": 8105.84,
+        "h1": 4720.92,
+        "m5": 109.55
+      },
+      "priceChange": {
+        "m5": -0.15,
+        "h1": -0.39,
+        "h6": 0.14,
+        "h24": -1.85
+      },
+      "liquidity": {
+        "usd": 186071.28,
+        "base": 166071,
+        "quote": 92977
+      },
+      "fdv": 5360271,
+      "marketCap": 5360271,
+      "pairCreatedAt": 1782729869000,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/bkl7Ue-EfiCazhHg?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/7gnLypZqM9iTQ6uS?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xc6911796042b15d7fa4f6cde69e245ddcd3d9c31?timestamp=1786301100000",
+        "websites": [],
+        "socials": []
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x817f16f5d8da83d1b089b082c0172af3923618da",
+      "pairAddress": "0x817f16F5D8da83d1B089B082c0172af3923618dA",
+      "labels": [
+        "v2"
+      ],
+      "baseToken": {
+        "address": "0x8Ff92566f2e81BDd68EDfAa8cde73942A723796b",
+        "name": "ProjectVex",
+        "symbol": "VEX"
+      },
+      "quoteToken": {
+        "address": "0xc6911796042b15d7Fa4F6CDe69e245DdCd3d9c31",
+        "name": "Virtuals Protocol",
+        "symbol": "VIRTUAL"
+      },
+      "priceNative": "0.004401",
+      "priceUsd": "0.002459",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 9,
+          "sells": 3
+        },
+        "h6": {
+          "buys": 63,
+          "sells": 38
+        },
+        "h24": {
+          "buys": 205,
+          "sells": 118
+        }
+      },
+      "volume": {
+        "h24": 68431.78,
+        "h6": 20111.11,
+        "h1": 2688.98,
+        "m5": 0
+      },
+      "priceChange": {
+        "h1": -3.13,
+        "h6": -0.15,
+        "h24": -9.6
+      },
+      "liquidity": {
+        "usd": 228143.15,
+        "base": 46385723,
+        "quote": 204189
+      },
+      "fdv": 2459196,
+      "marketCap": 2459196,
+      "pairCreatedAt": 1783096491000,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/dbR0nWyawKyvw7sI?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/S_6N4ve4bsjw1LvF?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0x8ff92566f2e81bdd68edfaa8cde73942a723796b?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://www.projectvex.ai/",
+            "label": "Website"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/ProjectVEXai",
+            "type": "twitter"
+          },
+          {
+            "url": "https://discord.com/invite/projectvexai",
+            "type": "discord"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "uniswap",
+      "url": "https://dexscreener.com/robinhood/0x0579fa41416101b66e202f66bf3b0de5101f5b9f",
+      "pairAddress": "0x0579fA41416101b66e202F66bF3B0de5101F5b9F",
+      "labels": [
+        "v2"
+      ],
+      "baseToken": {
+        "address": "0x020bfC650A365f8BB26819deAAbF3E21291018b4",
+        "name": "Cash Cat",
+        "symbol": "CASHCAT"
+      },
+      "quoteToken": {
+        "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+        "name": "WETH",
+        "symbol": "WETH"
+      },
+      "priceNative": "0.00007121",
+      "priceUsd": "0.1368",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 4,
+          "sells": 7
+        },
+        "h6": {
+          "buys": 25,
+          "sells": 23
+        },
+        "h24": {
+          "buys": 52,
+          "sells": 58
+        }
+      },
+      "volume": {
+        "h24": 101.84,
+        "h6": 31.57,
+        "h1": 6.57,
+        "m5": 0
+      },
+      "priceChange": {
+        "h1": 1.23,
+        "h6": 23.69,
+        "h24": 21.62
+      },
+      "liquidity": {
+        "usd": 138.82,
+        "base": 507.2253,
+        "quote": 0.03612
+      },
+      "fdv": 135316255,
+      "marketCap": 135316255,
+      "pairCreatedAt": 1782936115000,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/Lq7a3pS9Wn8EuGp0?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/PfcMZWxAGU7_TDa8?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0x020bfc650a365f8bb26819deaabf3e21291018b4?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://cashcat.cc/",
+            "label": "Website"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/cashcat_token",
+            "type": "twitter"
+          },
+          {
+            "url": "https://t.me/cashcat_robinhood",
+            "type": "telegram"
+          },
+          {
+            "url": "https://www.reddit.com/r/cashcattoken/s/L8GOOuy9Ch",
+            "type": "reddit"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "aeon-protocol",
+      "url": "https://dexscreener.com/robinhood/0x3c8090c3cb3a45a677a6492acb5ad5253f9a686e",
+      "pairAddress": "0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e",
+      "baseToken": {
+        "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f",
+        "name": "Aeon",
+        "symbol": "AEON"
+      },
+      "quoteToken": {
+        "address": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73",
+        "name": "WETH",
+        "symbol": "WETH"
+      },
+      "priceNative": "0.0002650",
+      "priceUsd": "0.5098",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 2,
+          "sells": 1
+        },
+        "h6": {
+          "buys": 15,
+          "sells": 8
+        },
+        "h24": {
+          "buys": 27,
+          "sells": 23
+        }
+      },
+      "volume": {
+        "h24": 84.53,
+        "h6": 42.86,
+        "h1": 5.92,
+        "m5": 0
+      },
+      "priceChange": {
+        "h1": 0.7,
+        "h6": 4.9,
+        "h24": 5.1
+      },
+      "liquidity": {
+        "usd": 849.86,
+        "base": 1023.5297,
+        "quote": 0.1705
+      },
+      "fdv": 15838,
+      "marketCap": 15838,
+      "pairCreatedAt": 1783055540000,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/IesgXj0yl5nEtgcw?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/9g55XjeyDZ3YSpp4?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd4c93ed1843606f92ccca078941f3d52a585982f?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://www.aeonprotocol.net/",
+            "label": "Website"
+          },
+          {
+            "url": "https://www.aeonprotocol.net/docs",
+            "label": "Docs"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/AeonProtocolX",
+            "type": "twitter"
+          },
+          {
+            "url": "https://telegram.me/AEONprotocolx",
+            "type": "telegram"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "aeon-protocol",
+      "url": "https://dexscreener.com/robinhood/0xe2503a27a33dacdbeec821557fe8747800cf6ff6",
+      "pairAddress": "0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6",
+      "baseToken": {
+        "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f",
+        "name": "Aeon",
+        "symbol": "AEON"
+      },
+      "quoteToken": {
+        "address": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "name": "Global Dollar",
+        "symbol": "USDG"
+      },
+      "priceNative": "0.5085",
+      "priceUsd": "0.5089",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 1,
+          "sells": 2
+        },
+        "h6": {
+          "buys": 13,
+          "sells": 11
+        },
+        "h24": {
+          "buys": 27,
+          "sells": 26
+        }
+      },
+      "volume": {
+        "h24": 100.92,
+        "h6": 47.4,
+        "h1": 7.15,
+        "m5": 0
+      },
+      "priceChange": {
+        "h1": 0.22,
+        "h6": 4.05,
+        "h24": 4.47
+      },
+      "liquidity": {
+        "usd": 970.69,
+        "base": 911.3221,
+        "quote": 506.4475
+      },
+      "fdv": 15810,
+      "marketCap": 15810,
+      "pairCreatedAt": 1783055540000,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/IesgXj0yl5nEtgcw?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/9g55XjeyDZ3YSpp4?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd4c93ed1843606f92ccca078941f3d52a585982f?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://www.aeonprotocol.net/",
+            "label": "Website"
+          },
+          {
+            "url": "https://www.aeonprotocol.net/docs",
+            "label": "Docs"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/AeonProtocolX",
+            "type": "twitter"
+          },
+          {
+            "url": "https://telegram.me/AEONprotocolx",
+            "type": "telegram"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "aeon-protocol",
+      "url": "https://dexscreener.com/robinhood/0x79fa300e73c1b35ad6b7acfd070d8a7c9a112a61",
+      "pairAddress": "0x79Fa300e73C1b35aD6b7acFd070d8A7C9a112a61",
+      "baseToken": {
+        "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f",
+        "name": "Aeon",
+        "symbol": "AEON"
+      },
+      "quoteToken": {
+        "address": "0x8Ff92566f2e81BDd68EDfAa8cde73942A723796b",
+        "name": "ProjectVex",
+        "symbol": "VEX"
+      },
+      "priceNative": "196.1529",
+      "priceUsd": "0.4850",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h6": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h24": {
+          "buys": 1,
+          "sells": 0
+        }
+      },
+      "volume": {
+        "h24": 0.52,
+        "h6": 0,
+        "h1": 0,
+        "m5": 0
+      },
+      "priceChange": {},
+      "liquidity": {
+        "usd": 21.4,
+        "base": 22.0717,
+        "quote": 4327.02038
+      },
+      "fdv": 15068,
+      "marketCap": 15068,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/IesgXj0yl5nEtgcw?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/9g55XjeyDZ3YSpp4?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd4c93ed1843606f92ccca078941f3d52a585982f?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://www.aeonprotocol.net/",
+            "label": "Website"
+          },
+          {
+            "url": "https://www.aeonprotocol.net/docs",
+            "label": "Docs"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/AeonProtocolX",
+            "type": "twitter"
+          },
+          {
+            "url": "https://telegram.me/AEONprotocolx",
+            "type": "telegram"
+          }
+        ]
+      }
+    },
+    {
+      "chainId": "robinhood",
+      "dexId": "aeon-protocol",
+      "url": "https://dexscreener.com/robinhood/0xbcd1bf0d9f25503ddfed0b663827811637b27b80",
+      "pairAddress": "0xbCD1Bf0d9F25503DDfEd0b663827811637B27B80",
+      "baseToken": {
+        "address": "0xd4c93eD1843606f92CccA078941f3d52A585982f",
+        "name": "Aeon",
+        "symbol": "AEON"
+      },
+      "quoteToken": {
+        "address": "0x020bfC650A365f8BB26819deAAbF3E21291018b4",
+        "name": "Cash Cat",
+        "symbol": "CASHCAT"
+      },
+      "priceNative": "3.7527",
+      "priceUsd": "0.4976",
+      "txns": {
+        "m5": {
+          "buys": 0,
+          "sells": 0
+        },
+        "h1": {
+          "buys": 1,
+          "sells": 1
+        },
+        "h6": {
+          "buys": 15,
+          "sells": 28
+        },
+        "h24": {
+          "buys": 39,
+          "sells": 49
+        }
+      },
+      "volume": {
+        "h24": 163.35,
+        "h6": 86.38,
+        "h1": 5.52,
+        "m5": 0
+      },
+      "priceChange": {
+        "h1": 0.24,
+        "h6": 1.77,
+        "h24": 2.09
+      },
+      "liquidity": {
+        "usd": 660.09,
+        "base": 647.02128,
+        "quote": 2549.6813
+      },
+      "fdv": 15459,
+      "marketCap": 15459,
+      "info": {
+        "imageUrl": "https://cdn.dexscreener.com/cms/images/IesgXj0yl5nEtgcw?width=800&height=800&quality=95&format=auto",
+        "header": "https://cdn.dexscreener.com/cms/images/9g55XjeyDZ3YSpp4?width=1500&height=500&quality=95&format=auto",
+        "openGraph": "https://cdn.dexscreener.com/token-images/og/robinhood/0xd4c93ed1843606f92ccca078941f3d52a585982f?timestamp=1786301100000",
+        "websites": [
+          {
+            "url": "https://www.aeonprotocol.net/",
+            "label": "Website"
+          },
+          {
+            "url": "https://www.aeonprotocol.net/docs",
+            "label": "Docs"
+          }
+        ],
+        "socials": [
+          {
+            "url": "https://x.com/AeonProtocolX",
+            "type": "twitter"
+          },
+          {
+            "url": "https://telegram.me/AEONprotocolx",
+            "type": "telegram"
+          }
+        ]
+      }
+    }
+  ],
+  "pair": null
+}
