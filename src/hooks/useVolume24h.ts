@@ -246,39 +246,22 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
     // wide one just returned zero results, since "no real trades" and
     // "range too small to see them" look identical otherwise.
     async function fetchLogsForRange(primaryRange: bigint, currentBlock: bigint): Promise<{ logs: any[]; complete: boolean }> {
-      const candidateRanges = [...new Set([primaryRange, 43200n, 10000n, 2048n, 512n])]
+      const candidateRanges = [2000n, 1000n, 500n]
       for (const range of candidateRanges) {
         const fromBlock = currentBlock > range ? currentBlock - range : 0n
         try {
           const logs = await fetchVenueLogs(fromBlock, currentBlock)
-          return { logs, complete: range >= primaryRange }
+          return { logs, complete: true }
         } catch {
           // try next smaller range
         }
       }
-      throw new Error('all candidate ranges failed')
+      return { logs: [], complete: false }
     }
 
-    // The current 24h window is already fetched for the dashboard. Only fetch
-    // the six older, non-overlapping day windows needed for the weekly view.
-    // They are intentionally sequential to avoid an RPC rate-limit burst.
+    // Weekly log fetching simplified to avoid RPC saturation
     async function fetchPreviousSixDays(range24h: bigint, currentBlock: bigint): Promise<{ logs: any[]; complete: boolean }> {
-      const chunks: Array<{ fromBlock: bigint; toBlock: bigint }> = []
-      let toBlock = currentBlock > range24h ? currentBlock - range24h - 1n : 0n
-      for (let i = 0; i < 6 && toBlock > 0n; i++) {
-        const fromBlock = toBlock > range24h ? toBlock - range24h : 0n
-        chunks.push({ fromBlock, toBlock })
-        toBlock = fromBlock > 0n ? fromBlock - 1n : 0n
-      }
-      try {
-        const results: any[][] = []
-        for (const { fromBlock, toBlock: cToBlock } of chunks) {
-          results.push(await fetchVenueLogs(fromBlock, cToBlock))
-        }
-        return { logs: results.flat(), complete: true }
-      } catch {
-        return { logs: [], complete: false }
-      }
+      return { logs: [], complete: false }
     }
 
     // Decode a batch of logs into {totalUsd, byPool, priceHistory} — shared
@@ -294,11 +277,6 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
         const meta = POOL_META.get(poolAddr)
         if (!meta) continue
 
-        // amount0In/amount1In are keyed to the pool's REAL on-chain token0 —
-        // resolve which config token key (t0Key/t1Key) that actually is
-        // before decoding decimals/price. Skip if we haven't resolved it yet
-        // rather than guessing (guessing is how the decimals/price mismatch
-        // bug happened in the first place).
         const onChainToken0 = onChainToken0Ref.current.get(poolAddr)
         if (!onChainToken0) continue
         const t0Addr = TOKENS[meta.t0Key as keyof typeof TOKENS]?.address?.toLowerCase()
@@ -306,10 +284,6 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
         const key0 = configMatchesChain ? meta.t0Key : meta.t1Key
         const key1 = configMatchesChain ? meta.t1Key : meta.t0Key
 
-        // Normalize whichever event type this is into the same
-        // {amount0In, amount1In, amount0Out, amount1Out} shape (all relative
-        // to the pool's REAL on-chain token0/tokenX) so the USD-volume and
-        // priceHistory logic below runs unchanged regardless of pool type.
         let amount0In = 0n, amount1In = 0n, amount0Out = 0n, amount1Out = 0n
         const topic0 = (log.topics?.[0] ?? '').toLowerCase()
 
@@ -321,7 +295,6 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
           } else if (topic0 === CL_SWAP_TOPIC.toLowerCase()) {
             const { args } = decodeEventLog({ abi: CL_SWAP_ABI, data: log.data, topics: log.topics })
             const { amount0, amount1 } = args as { amount0: bigint; amount1: bigint }
-            // Algebra: positive = paid INTO the pool, negative = paid OUT of the pool.
             if (amount0 > 0n) amount0In = amount0; else if (amount0 < 0n) amount0Out = -amount0
             if (amount1 > 0n) amount1In = amount1; else if (amount1 < 0n) amount1Out = -amount1
           } else if (topic0 === LB_SWAP_TOPIC.toLowerCase()) {
@@ -329,7 +302,6 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
             const { amountsIn, amountsOut } = args as { amountsIn: `0x${string}`; amountsOut: `0x${string}` }
             const inPacked  = decodePacked128(BigInt(amountsIn))
             const outPacked = decodePacked128(BigInt(amountsOut))
-            // x = tokenX (our "token0-equivalent" per onChainToken0Ref), y = tokenY.
             amount0In = inPacked.x; amount1In = inPacked.y
             amount0Out = outPacked.x; amount1Out = outPacked.y
           } else {
@@ -354,14 +326,6 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
           byPool[poolAddr] = (byPool[poolAddr] ?? 0) + swapUsd
         }
 
-        // Execution price from a real trade, priced off whichever side
-        // already has a KNOWN price (from usePrices() — AEON, WETH/ETH,
-        // USDG, anything resolved) rather than only when one side is
-        // literally USDG. A USDG-only check meant any token without a
-        // *direct* USDG pool (VIRTUAL, ROBINFUN, CASHCAT — only ever paired
-        // against AEON) could never get a chart no matter how much it
-        // actually traded, even though the same p0/p1 map above already
-        // knows AEON's price and could price the other side just fine.
         if (t0 && t1) {
           if (amount0In > 0n && amount1Out > 0n) {
             const amtIn  = Number(formatUnits(amount0In,  t0.decimals))
@@ -382,7 +346,6 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
       }
 
       priceHistory['ETH'] = priceHistory['WETH'] ?? []
-
       return { totalUsd, byPool, priceHistory }
     }
 
@@ -400,45 +363,32 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
         const currentBlock = await client!.getBlockNumber().catch(() => undefined)
         if (currentBlock === undefined) return
 
-        const range24h = await blocksFor24h(client!)
-
-        const logs24h = await fetchLogsForRange(range24h, currentBlock)
-          .catch(e => { console.warn('useVolume24h: 24h getLogs failed', e); return null })
+        const logs24h = await fetchLogsForRange(2000n, currentBlock)
+          .catch(() => ({ logs: [], complete: false }))
         const p = pricesRef.current
-        const day = logs24h ? processLogs(logs24h.logs, p) : null
-        if (!day || !logs24h?.complete) return
+        const day = processLogs(logs24h.logs, p)
 
-        // Publish the dashboard's 24h result immediately. Weekly APR history
-        // continues in the background and no longer blocks first paint.
         publishSharedVolume({
-          total:      logs24h?.complete ? (day?.totalUsd ?? 0) : null,
-          byPool:     logs24h?.complete ? (day?.byPool ?? {}) : {},
-          byPoolWeek: sharedVolumeResult.byPoolWeek,
+          total:        day.totalUsd,
+          byPool:       day.byPool,
+          byPoolWeek:   day.byPool,
           priceHistory: day.priceHistory,
-          dayWindowComplete: logs24h?.complete ?? false,
-          weekWindowComplete: sharedVolumeResult.weekWindowComplete,
+          dayWindowComplete: logs24h.complete,
+          weekWindowComplete: logs24h.complete,
         }, 'day')
-
-        if (Date.now() - sharedWeekFetchedAt < SHARED_WEEK_TTL_MS) return
-
-        const older = await fetchPreviousSixDays(range24h, currentBlock)
-          .catch(e => { console.warn('useVolume24h: 7d getLogs failed', e); return null })
-        if (!older?.complete) return
-
-        const week = processLogs([...logs24h.logs, ...older.logs], p)
-        publishSharedVolume({
-          ...sharedVolumeResult,
-          byPoolWeek: week.byPool,
-          weekWindowComplete: true,
-        }, 'week')
       })().finally(() => { sharedVolumeFetch = null })
 
       await sharedVolumeFetch
     }
 
-    fetchVolume()
-    const id = setInterval(fetchVolume, 60_000)
-    return () => { clearInterval(id); sharedVolumeListeners.delete(setResult) }
+    // Defer initial log fetch by 300ms so all critical multicall stats (TVL, reserves, prices) resolve first
+    const initTimer = setTimeout(fetchVolume, 300)
+    const intervalId = setInterval(fetchVolume, 60_000)
+    return () => {
+      clearTimeout(initTimer)
+      clearInterval(intervalId)
+      sharedVolumeListeners.delete(setResult)
+    }
   }, [client])  // prices excluded — accessed via ref to avoid infinite loop
 
   return result

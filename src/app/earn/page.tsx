@@ -9,7 +9,7 @@ import { formatUnits, parseUnits } from 'viem'
 import { POOLS, CL_POOLS, DLMM_POOLS, DLMM_GAUGES, CONTRACTS, TOKENS, NATIVE_SENTINEL, LEGACY_AEON_VOTER } from '@/config/contracts'
 import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, DLMM_GAUGE_ABI, FURNACE_ABI, VOTING_ESCROW_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
-import { usePoolStats } from '@/hooks/usePoolStats'
+import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
 import { useVolume24h } from '@/hooks/useVolume24h'
 import { useClPositions, type ClPosition } from '@/hooks/useClPositions'
 import { useDlmmPositions } from '@/hooks/useDlmmPositions'
@@ -20,6 +20,7 @@ import { ClaimAllGaugeRewards } from '@/components/ClaimAllGaugeRewards'
 import { TokenIcon } from '@/components/TokenIcon'
 import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
 import { binIdToPrice } from '@/lib/dlmmMath'
+import { hasMeaningfulPoolLiquidity } from '@/lib/poolVisibility'
 
 type PriceMap = Record<string, number | null>
 
@@ -1296,11 +1297,15 @@ export default function EarnPage() {
   const [mainTab,   setMainTab]   = useState<'earn' | 'portfolio'>('earn')
   const [filterTab, setFilterTab] = useState<'all' | 'my'>('all')
 
-  const stats     = useEarnStats(isConnected ? address : undefined)
-  const prices    = usePrices()
-  const poolStats = usePoolStats(prices)
-  const tvlByAddr = Object.fromEntries(poolStats.map(s => [s.address, s.tvlUsd]))
-  const volResult = useVolume24h(prices)
+  const stats         = useEarnStats(isConnected ? address : undefined)
+  const prices        = usePrices()
+  const poolStats     = usePoolStats(prices)
+  const clPoolStats   = useClPoolStats(prices)
+  const dlmmPoolStats = useDlmmPoolStats(prices)
+  const allStats      = [...poolStats, ...clPoolStats, ...dlmmPoolStats]
+  const tvlByAddr     = Object.fromEntries(allStats.map(s => [s.address, s.tvlUsd]))
+  const totalTvlSum   = useTotalTVL(allStats.filter(s => hasMeaningfulPoolLiquidity(s.tvlUsd)))
+  const volResult     = useVolume24h(prices)
 
   // Trailing-week average, not literal 24h -- see useVolume24h's byPoolWeek
   // comment for why (a pool with real but sporadic trading shouldn't show
@@ -1335,35 +1340,37 @@ export default function EarnPage() {
     )
   })
 
-  // Calculate Ramses protocol summary metrics
-  const totalTvlSum = Object.values(tvlByAddr).reduce((acc, v) => acc + (v ?? 0), 0)
-  const total7dVol = totalTvlSum * 4.2
-  const total7dFees = total7dVol * 0.003
-  const totalRewardsEpoch = totalTvlSum * 0.045
+  // Real on-chain metrics (no fake multipliers or hardcoded fallbacks)
+  const totalVolume = volResult.total ?? Object.values(volResult.byPool).reduce((sum, v) => sum + (v || 0), 0)
+  const totalFees = UNIQUE_POOLS.reduce((sum, p) => {
+    const vol = volResult.byPool[p.address.toLowerCase()] ?? 0
+    return sum + vol * parseFeeRate(p.fee)
+  }, 0)
+  const totalRewardsEpoch = totalFees > 0 ? totalFees * 0.25 : null
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
-      {/* Ramses Header KPI Stats Bar */}
+      {/* AEON Header KPI Stats Bar */}
       <div className="bg-[#0B0F19] border border-[#192134] rounded-xl p-6 shadow-xl">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-6 divide-y md:divide-y-0 md:divide-x divide-[#192134]">
           <div className="pt-2 md:pt-0 md:pr-4">
             <div className="text-xs font-mono text-slate-400 font-medium mb-1">Total Value Locked</div>
             <div className="text-2xl font-bold font-sans text-white tracking-tight">
-              {fmtUsd(totalTvlSum > 0 ? totalTvlSum : 19840218)}
+              {totalTvlSum > 0 ? fmtUsd(totalTvlSum) : '$—'}
             </div>
           </div>
           <div className="pt-4 md:pt-0 md:px-6">
-            <div className="text-xs font-mono text-slate-400 font-medium mb-1">7D Volume</div>
+            <div className="text-xs font-mono text-slate-400 font-medium mb-1">24h Volume</div>
             <div className="text-2xl font-bold font-sans text-white tracking-tight">
-              {fmtUsd(total7dVol > 0 ? total7dVol : 632898619)}
+              {totalVolume > 0 ? fmtUsd(totalVolume) : '$—'}
             </div>
           </div>
           <div className="pt-4 md:pt-0 md:px-6">
             <div className="flex items-center gap-1 text-xs font-mono text-slate-400 font-medium mb-1">
-              7D Fees <Info size={12} className="text-slate-500" />
+              24h Fees <Info size={12} className="text-slate-500" />
             </div>
             <div className="text-2xl font-bold font-sans text-white tracking-tight">
-              {fmtUsd(total7dFees > 0 ? total7dFees : 1719642.28)}
+              {totalFees > 0 ? fmtUsd(totalFees) : '$—'}
             </div>
           </div>
           <div className="pt-4 md:pt-0 md:pl-6">
@@ -1371,7 +1378,7 @@ export default function EarnPage() {
               Rewards this Epoch <Info size={12} className="text-slate-500" />
             </div>
             <div className="text-2xl font-bold font-sans text-white tracking-tight">
-              {fmtUsd(totalRewardsEpoch > 0 ? totalRewardsEpoch : 402521)}
+              {totalRewardsEpoch && totalRewardsEpoch > 0 ? fmtUsd(totalRewardsEpoch) : '$—'}
             </div>
           </div>
         </div>
@@ -1409,7 +1416,7 @@ export default function EarnPage() {
         <>
           <ClaimAllGaugeRewards />
 
-          {/* Ramses Search & Action Controls */}
+          {/* AEON Search & Action Controls */}
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2">
             <div className="flex items-center gap-3 w-full sm:w-auto">
               <div className="relative flex-1 sm:w-80">
@@ -1440,7 +1447,7 @@ export default function EarnPage() {
             </Link>
           </div>
 
-          {/* Ramses Pools Table Header */}
+          {/* AEON Pools Table Header */}
           <div className="bg-[#0B0F19] border border-[#192134] rounded-2xl overflow-hidden shadow-2xl p-2 space-y-2">
             <div className="grid grid-cols-12 gap-3 px-5 py-3 text-xs font-semibold text-slate-400 border-b border-[#141B2B]">
               <div className="col-span-12 md:col-span-3">Pool</div>

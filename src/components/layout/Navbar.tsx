@@ -6,13 +6,11 @@ import { clsx } from 'clsx'
 
 const NAV_LINKS = [
   { href: '/swap',       label: 'Swap'      },
-  { href: '/tokens',     label: 'Tokens'    },
   { href: '/liquidity',  label: 'Liquidity' },
   { href: '/earn',       label: 'Portfolio' },
   { href: '/vote',       label: 'Vote'      },
   { href: '/lock',       label: 'Lock'      },
   { href: '/dashboard',  label: 'Dashboard' },
-  { href: '/bot',        label: 'Bot'       },
   { href: '/docs',       label: 'Docs'      },
 ]
 
@@ -32,7 +30,6 @@ export function Navbar() {
             style={{ boxShadow: '0 0 14px -2px rgba(56,189,248,0.5)' }}
           />
           <span className="font-display font-extrabold text-lg text-white tracking-wide">AEON</span>
-          <span className="hidden sm:block text-slate-400 text-xs font-mono px-2 py-0.5 rounded bg-[#101625] border border-[#1E283D]">RAMSES CL</span>
         </Link>
 
         {/* Nav links */}

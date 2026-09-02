@@ -3,7 +3,7 @@
 export function SiteBackdrop() {
   return (
     <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none bg-[#070A10]">
-      {/* High-performance Ramses ambient radial glow */}
+      {/* High-performance AEON ambient radial glow */}
       <div
         className="absolute w-[900px] h-[900px] rounded-full opacity-[0.12]"
         style={{

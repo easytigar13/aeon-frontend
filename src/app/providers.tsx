@@ -5,7 +5,16 @@ import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit'
 import { wagmiConfig } from '@/config/wagmi'
 import '@rainbow-me/rainbowkit/styles.css'
 
-const queryClient = new QueryClient()
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 10_000, // Keep data fresh for 10s before background refetch
+      gcTime: 1000 * 60 * 5, // Keep unused cache for 5 minutes
+      refetchOnWindowFocus: false, // Don't blank or thrash stats on tab switch
+      retry: 1,
+    },
+  },
+})
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (

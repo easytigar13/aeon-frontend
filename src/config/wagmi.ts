@@ -21,8 +21,18 @@ export const wagmiConfig = getDefaultConfig({
   // Aggregate contract reads through Multicall3 (deployed on this chain) so the
   // dashboard's ~100+ getReserves/balanceOf reads collapse into a couple of
   // eth_calls instead of flooding the rate-limited RPC and getting 429'd.
-  batch: { multicall: true },
+  batch: {
+    multicall: {
+      batchSize: 1024,
+      wait: 32,
+    },
+  },
   transports: {
-    [robinhoodChain.id]: http(RPC_TARGET, { batch: true }),
+    [robinhoodChain.id]: http(RPC_TARGET, {
+      batch: {
+        batchSize: 1024,
+        wait: 32,
+      },
+    }),
   },
 })
