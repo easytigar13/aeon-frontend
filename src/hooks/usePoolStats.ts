@@ -54,6 +54,7 @@ export function usePoolStats(prices: PriceMap): PoolStat[] {
       if (valA !== null && valB !== null) tvlUsd = valA + valB
       else if (valA !== null) tvlUsd = valA * 2   // estimate both sides
       else if (valB !== null) tvlUsd = valB * 2
+      else if (rA === 0n && rB === 0n) tvlUsd = 0
     }
 
     return {

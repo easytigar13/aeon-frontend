@@ -230,7 +230,7 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
           if (address.length === 0) continue
           calls.push((client as any).getLogs({
             address,
-            topics: [[group.topic]],
+            topics: [group.topic],
             fromBlock,
             toBlock,
           }))
@@ -240,13 +240,8 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
       return batches.flat()
     }
 
-    // Shared candidate-range search: try the measured window first, degrade
-    // to smaller windows only if the RPC itself rejects the range (e.g. a
-    // provider-side cap) — never silently accept a narrower window when the
-    // wide one just returned zero results, since "no real trades" and
-    // "range too small to see them" look identical otherwise.
     async function fetchLogsForRange(primaryRange: bigint, currentBlock: bigint): Promise<{ logs: any[]; complete: boolean }> {
-      const candidateRanges = [2000n, 1000n, 500n]
+      const candidateRanges = [primaryRange, 86400n, 43200n, 20000n, 5000n]
       for (const range of candidateRanges) {
         const fromBlock = currentBlock > range ? currentBlock - range : 0n
         try {
@@ -363,7 +358,7 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
         const currentBlock = await client!.getBlockNumber().catch(() => undefined)
         if (currentBlock === undefined) return
 
-        const logs24h = await fetchLogsForRange(2000n, currentBlock)
+        const logs24h = await fetchLogsForRange(86400n, currentBlock)
           .catch(() => ({ logs: [], complete: false }))
         const p = pricesRef.current
         const day = processLogs(logs24h.logs, p)
