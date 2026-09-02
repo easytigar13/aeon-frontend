@@ -346,10 +346,9 @@ export default function DashboardPage() {
     ? ((Number(totalBurned) / Number(aeonSupply)) * 100).toFixed(2)
     : '—'
 
-  // No team allocation or treasury lockup to net out (verified at genesis) --
-  // circulating = total supply minus everything permanently burned.
-  const circulatingSupply = (aeonSupply !== undefined && totalBurned !== undefined)
-    ? (aeonSupply as bigint) - (totalBurned as bigint)
+  // Circulating supply = total supply minus permanently burned and locked veAEON escrow
+  const circulatingSupply = (aeonSupply !== undefined)
+    ? (aeonSupply as bigint) - (totalBurned ? (totalBurned as bigint) : 0n) - (totalVotes ? (totalVotes as bigint) : 0n)
     : undefined
 
   const lockRate = aeonSupply && totalVotes && aeonSupply > 0n

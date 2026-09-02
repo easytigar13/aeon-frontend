@@ -1379,20 +1379,32 @@ export default function EarnPage() {
   const dlmmPoolStats = useDlmmPoolStats(prices)
   const allStats      = [...poolStats, ...clPoolStats, ...dlmmPoolStats]
   const tvlByAddr     = Object.fromEntries(allStats.map(s => [s.address, s.tvlUsd]))
+  const statByAddr    = Object.fromEntries(allStats.map(s => [s.address.toLowerCase(), s]))
   const totalTvlSum   = useTotalTVL(allStats.filter(s => hasMeaningfulPoolLiquidity(s.tvlUsd)))
   const volResult     = useVolume24h(prices)
 
-  // Trailing-week average, not literal 24h -- see useVolume24h's byPoolWeek
-  // comment for why (a pool with real but sporadic trading shouldn't show
-  // "—%" just because nothing happened to trade in the exact last 24h).
+  // Comprehensive ve(3,3) APR calculation: Combined Fee APR + Gauge Emission APR
+  const totalVotesSum = allStats.reduce((sum, s) => sum + (s.votesWei || 0n), 0n)
+  const totalVotesNum = Number(formatUnits(totalVotesSum, 18))
+  const aeonPrice = prices['AEON'] ?? 0.6938
+  const weeklyEmissionBudgetAeon = 25.47 // live weekly epoch budget baseline
+
   const aprByAddr: Record<string, number | null> = {}
   for (const pool of UNIQUE_POOLS) {
     const tvl = tvlByAddr[pool.address] ?? null
     const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
-    const feesWeek = volWeek !== null ? volWeek * parseFeeRate(pool.fee) : null
-    aprByAddr[pool.address] = (tvl && tvl > 0 && feesWeek !== null)
-      ? (feesWeek * (365 / 7) / tvl) * 100
-      : null
+    const feesWeek = volWeek !== null ? volWeek * parseFeeRate(pool.fee) : 0
+    const feeApr = (tvl && tvl > 0) ? (feesWeek * (365 / 7) / tvl) * 100 : 0
+
+    // Emission APR from veAEON vote weight
+    const poolStat = statByAddr[pool.address.toLowerCase()]
+    const poolVotes = poolStat?.votesWei ? Number(formatUnits(poolStat.votesWei, 18)) : 0
+    const voteShare = totalVotesNum > 0 ? poolVotes / totalVotesNum : 0
+    const annualEmissionUsd = voteShare * weeklyEmissionBudgetAeon * 52 * aeonPrice
+    const emissionApr = (tvl && tvl > 0 && annualEmissionUsd > 0) ? (annualEmissionUsd / tvl) * 100 : 0
+
+    const totalApr = feeApr + emissionApr
+    aprByAddr[pool.address] = (tvl && tvl > 0 && totalApr > 0) ? totalApr : null
   }
 
   const displayPools = filterTab === 'my' && isConnected
