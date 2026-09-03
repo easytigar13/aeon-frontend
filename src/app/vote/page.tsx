@@ -312,7 +312,7 @@ export default function VotePage() {
   const feesWeekByAddr: Record<string, number | null> = {}
   for (const pool of [...POOLS, ...CL_POOLS, ...DLMM_POOLS]) {
     const tvl = tvlByAddr[pool.address] ?? null
-    const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
+    const volWeek = volResult?.byPoolWeek?.[pool.address.toLowerCase()] ?? null
     const feesWeek = volWeek !== null ? volWeek * parseFeeRate(pool.fee) : null
     feesWeekByAddr[pool.address] = feesWeek
     aprByAddr[pool.address] = (tvl && tvl > 0 && feesWeek !== null)
@@ -415,7 +415,7 @@ export default function VotePage() {
     seenFeePools.add(address)
     return true
   })
-  const hasLiveFeeData = Object.keys(volResult.byPoolWeek).length > 0
+  const hasLiveFeeData = Object.keys(volResult?.byPoolWeek || {}).length > 0
   // Emissions are minted off ONLY oracle-priced-token fees (the protocol counts
   // unpriced memecoin fees as $0 toward lastEpochFeesUSD), so the live estimate
   // that feeds the projection weights each pool by its priced fraction. NOTE:
@@ -424,7 +424,7 @@ export default function VotePage() {
   // in-kind regardless of whether the oracle can price it.
   const liveEpochFeesUSD = hasLiveFeeData
     ? feeBudgetPools.reduce((sum, pool) => {
-        const volumeWeek = volResult.byPoolWeek[pool.address.toLowerCase()]
+        const volumeWeek = volResult?.byPoolWeek?.[pool.address.toLowerCase()]
         if (volumeWeek === undefined) return sum
         const raw = (volumeWeek / 7) * elapsedDays * parseFeeRate(pool.fee)
         return sum + raw * pricedFeeFraction(pool.token0, pool.token1, pricedTokens)

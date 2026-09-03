@@ -234,8 +234,8 @@ function usePoolListData(): UnifiedPool[] {
 
   const vamm: UnifiedPool[] = POOLS.map(p => {
     const tvlUsd = poolStats.find(s => s.address === p.address)?.tvlUsd ?? null
-    const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
-    const volUsdWeek = volResult.byPoolWeek[p.address.toLowerCase()] ?? null
+    const volUsd = volResult?.byPool?.[p.address.toLowerCase()] ?? null
+    const volUsdWeek = volResult?.byPoolWeek?.[p.address.toLowerCase()] ?? null
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
     const feesUsdWeek = volUsdWeek !== null ? volUsdWeek * feeRate : null
@@ -275,8 +275,8 @@ function usePoolListData(): UnifiedPool[] {
   // fix above in case CL/DLMM ever comes back.
   const cl: UnifiedPool[] = CL_POOLS.map(p => {
     const tvlUsd = clPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
-    const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
-    const volUsdWeek = volResult.byPoolWeek[p.address.toLowerCase()] ?? null
+    const volUsd = volResult?.byPool?.[p.address.toLowerCase()] ?? null
+    const volUsdWeek = volResult?.byPoolWeek?.[p.address.toLowerCase()] ?? null
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
     const feesUsdWeek = volUsdWeek !== null ? volUsdWeek * feeRate : null
@@ -288,8 +288,8 @@ function usePoolListData(): UnifiedPool[] {
 
   const dlmm: UnifiedPool[] = DLMM_POOLS.map(p => {
     const tvlUsd = dlmmPoolStats.find(s => s.address === p.address)?.tvlUsd ?? null
-    const volUsd = volResult.byPool[p.address.toLowerCase()] ?? null
-    const volUsdWeek = volResult.byPoolWeek[p.address.toLowerCase()] ?? null
+    const volUsd = volResult?.byPool?.[p.address.toLowerCase()] ?? null
+    const volUsdWeek = volResult?.byPoolWeek?.[p.address.toLowerCase()] ?? null
     const feeRate = parseFeeRate(p.fee)
     const feesUsd = volUsd !== null ? volUsd * feeRate : null
     const feesUsdWeek = volUsdWeek !== null ? volUsdWeek * feeRate : null
@@ -1069,7 +1069,7 @@ function VammLiquidity({ initialPool }: { initialPool?: string }) {
   // volume*feeRate inlined into the APR expression) so this always matches
   // the same fees-first derivation used on the pool list table.
   const tvlUsd       = poolStats.find(s => s.address === selectedPool.address)?.tvlUsd ?? null
-  const weekVolUsd    = volResult.byPoolWeek[selectedPool.address.toLowerCase()] ?? null
+  const weekVolUsd    = volResult?.byPoolWeek?.[selectedPool.address.toLowerCase()] ?? null
   const feesUsdWeek   = weekVolUsd !== null ? weekVolUsd * parseFeeRate(selectedPool.fee) : null
   const baseApr    = (tvlUsd !== null && tvlUsd > 0 && feesUsdWeek !== null)
     ? (feesUsdWeek * (365 / 7) / tvlUsd) * 100

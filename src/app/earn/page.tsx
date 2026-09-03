@@ -1392,7 +1392,7 @@ export default function EarnPage() {
   const aprByAddr: Record<string, number | null> = {}
   for (const pool of UNIQUE_POOLS) {
     const tvl = tvlByAddr[pool.address] ?? null
-    const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
+    const volWeek = volResult?.byPoolWeek?.[pool.address.toLowerCase()] ?? null
     const feesWeek = volWeek !== null ? volWeek * parseFeeRate(pool.fee) : 0
     const feeApr = (tvl && tvl > 0) ? (feesWeek * (365 / 7) / tvl) * 100 : 0
 

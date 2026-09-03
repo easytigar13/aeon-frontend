@@ -56,7 +56,7 @@ export function LiveHomepageStats() {
   let bestApr: number | null = null
   for (const pool of UNIQUE_POOLS) {
     const tvl = poolStats.find(s => s.address === pool.address)?.tvlUsd ?? null
-    const volWeek = volResult.byPoolWeek[pool.address.toLowerCase()] ?? null
+    const volWeek = volResult?.byPoolWeek?.[pool.address.toLowerCase()] ?? null
     if (hasMeaningfulPoolLiquidity(tvl) && volWeek !== null) {
       const feeRate = parseFloat(pool.fee.replace('%', '')) / 100
       const feesWeek = volWeek * feeRate
