@@ -51,9 +51,13 @@ export function MultiTokenFeeClaimer() {
 
   const epochsToScan = [lastClosedEpoch, prevClosedEpoch]
 
-  // Check poolVoteWeight for each pool x owned veNFT x epoch
+  // Check poolVoteWeight & claimed status for each pool x owned veNFT x epoch
   const voteCalls: any[] = []
+  const claimedCalls: any[] = []
+  const candidates: { pool: typeof POOLS[0]; tokenId: bigint; epoch: bigint }[] = []
+
   for (const pool of POOLS) {
+    const t0 = TOKENS[pool.token0 as keyof typeof TOKENS]?.address as `0x${string}` | undefined
     for (const tokenId of ownedIds) {
       for (const ep of epochsToScan) {
         voteCalls.push({
@@ -62,6 +66,15 @@ export function MultiTokenFeeClaimer() {
           functionName: 'poolVoteWeight' as const,
           args: [tokenId, pool.address as `0x${string}`, ep] as const,
         })
+        if (t0) {
+          claimedCalls.push({
+            address: CONTRACTS.FeeDistributor,
+            abi: FEE_DISTRIBUTOR_ABI,
+            functionName: 'claimed' as const,
+            args: [tokenId, pool.address as `0x${string}`, ep, t0] as const,
+          })
+        }
+        candidates.push({ pool, tokenId, epoch: ep })
       }
     }
   }
@@ -71,29 +84,31 @@ export function MultiTokenFeeClaimer() {
     query: { enabled: !!address && ownedIds.length > 0 && voteCalls.length > 0 },
   })
 
-  // Build list of claim targets
+  const { data: claimedRes, refetch: refetchClaimed } = useReadContracts({
+    contracts: claimedCalls,
+    query: { enabled: !!address && ownedIds.length > 0 && claimedCalls.length > 0 },
+  })
+
+  // Build list of claim targets that actually voted AND have not yet claimed
   const claimTargets: { pool: `0x${string}`; poolName: string; tokenId: bigint; epoch: bigint }[] = []
   const seenKey = new Set<string>()
 
-  if (voteWeightsRes) {
-    let callIdx = 0
-    for (const pool of POOLS) {
-      for (const tokenId of ownedIds) {
-        for (const ep of epochsToScan) {
-          const res = voteWeightsRes[callIdx]
-          callIdx++
-          if (res && res.status === 'success' && (res.result as bigint) > 0n) {
-            const key = `${pool.address.toLowerCase()}_${tokenId}_${ep}`
-            if (!seenKey.has(key)) {
-              seenKey.add(key)
-              claimTargets.push({
-                pool: pool.address as `0x${string}`,
-                poolName: pool.name,
-                tokenId,
-                epoch: ep,
-              })
-            }
-          }
+  if (voteWeightsRes && candidates.length > 0) {
+    for (let i = 0; i < candidates.length; i++) {
+      const { pool, tokenId, epoch } = candidates[i]
+      const voteRes = voteWeightsRes[i]
+      const claimedVal = claimedRes?.[i]?.status === 'success' ? (claimedRes[i].result as bigint) : 0n
+
+      if (voteRes && voteRes.status === 'success' && (voteRes.result as bigint) > 0n && claimedVal === 0n) {
+        const key = `${pool.address.toLowerCase()}_${tokenId}_${epoch}`
+        if (!seenKey.has(key)) {
+          seenKey.add(key)
+          claimTargets.push({
+            pool: pool.address as `0x${string}`,
+            poolName: pool.name,
+            tokenId,
+            epoch,
+          })
         }
       }
     }
@@ -103,7 +118,7 @@ export function MultiTokenFeeClaimer() {
     if (!address || claimTargets.length === 0 || claiming) return
     setClaiming(true)
     setSuccess(false)
-    setStatusMsg(`Claiming fee shares across ${claimTargets.length} pool/epoch stream(s)...`)
+    setStatusMsg(`Claiming fee shares across ${claimTargets.length} pool stream(s)...`)
 
     try {
       for (let i = 0; i < claimTargets.length; i++) {
@@ -122,7 +137,7 @@ export function MultiTokenFeeClaimer() {
 
       setStatusMsg('All epoch fee shares claimed successfully!')
       setSuccess(true)
-      await refetchVotes()
+      await Promise.all([refetchVotes(), refetchClaimed()])
     } catch (e: any) {
       setStatusMsg(`Claim failed: ${e?.shortMessage || e?.message || String(e)}`)
     } finally {
