@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Coins, Loader2, CheckCircle2, Gift } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContracts, useWriteContract, usePublicClient } from 'wagmi'
@@ -38,6 +38,11 @@ export function MultiTokenFeeClaimer() {
   const [claiming, setClaiming] = useState(false)
   const [statusMsg, setStatusMsg] = useState('')
   const [success, setSuccess] = useState(false)
+  const [mounted, setMounted] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   const ownedIds = useOwnedTokenIds(address)
   const nowSec = BigInt(Math.floor(Date.now() / 1000))
@@ -46,40 +51,38 @@ export function MultiTokenFeeClaimer() {
 
   const epochsToScan = [lastClosedEpoch, prevClosedEpoch]
 
-  // Scan poolTokenEpochFees or claimable fee status across pools x ownedIds x epochs
-  // Query poolWeight on FeeDistributor / Voter to see where fees exist
-  const scanCalls: any[] = []
-  poolsWithTokenIdAndEpoch:
+  // Check poolVoteWeight for each pool x owned veNFT x epoch
+  const voteCalls: any[] = []
   for (const pool of POOLS) {
     for (const tokenId of ownedIds) {
       for (const ep of epochsToScan) {
-        scanCalls.push({
-          address: CONTRACTS.FeeDistributor,
-          abi: FEE_DISTRIBUTOR_ABI,
-          functionName: 'getFeeTokens' as const,
-          args: [pool.address as `0x${string}`, ep] as const,
+        voteCalls.push({
+          address: CONTRACTS.AeonVoter,
+          abi: VOTER_ABI,
+          functionName: 'poolVoteWeight' as const,
+          args: [tokenId, pool.address as `0x${string}`, ep] as const,
         })
       }
     }
   }
 
-  const { data: feeTokensRes } = useReadContracts({
-    contracts: scanCalls,
-    query: { enabled: !!address && ownedIds.length > 0 && scanCalls.length > 0 },
+  const { data: voteWeightsRes, refetch: refetchVotes } = useReadContracts({
+    contracts: voteCalls,
+    query: { enabled: !!address && ownedIds.length > 0 && voteCalls.length > 0 },
   })
 
-  // Build list of valid claim targets (pool, tokenId, epoch)
+  // Build list of claim targets
   const claimTargets: { pool: `0x${string}`; poolName: string; tokenId: bigint; epoch: bigint }[] = []
   const seenKey = new Set<string>()
 
-  if (feeTokensRes) {
+  if (voteWeightsRes) {
     let callIdx = 0
     for (const pool of POOLS) {
       for (const tokenId of ownedIds) {
         for (const ep of epochsToScan) {
-          const res = feeTokensRes[callIdx]
+          const res = voteWeightsRes[callIdx]
           callIdx++
-          if (res && res.status === 'success' && Array.isArray(res.result) && res.result.length > 0) {
+          if (res && res.status === 'success' && (res.result as bigint) > 0n) {
             const key = `${pool.address.toLowerCase()}_${tokenId}_${ep}`
             if (!seenKey.has(key)) {
               seenKey.add(key)
@@ -100,7 +103,7 @@ export function MultiTokenFeeClaimer() {
     if (!address || claimTargets.length === 0 || claiming) return
     setClaiming(true)
     setSuccess(false)
-    setStatusMsg(`Claiming fee shares across ${claimTargets.length} pool/epoch target(s)...`)
+    setStatusMsg(`Claiming fee shares across ${claimTargets.length} pool/epoch stream(s)...`)
 
     try {
       for (let i = 0; i < claimTargets.length; i++) {
@@ -119,6 +122,7 @@ export function MultiTokenFeeClaimer() {
 
       setStatusMsg('All epoch fee shares claimed successfully!')
       setSuccess(true)
+      await refetchVotes()
     } catch (e: any) {
       setStatusMsg(`Claim failed: ${e?.shortMessage || e?.message || String(e)}`)
     } finally {
@@ -126,7 +130,7 @@ export function MultiTokenFeeClaimer() {
     }
   }
 
-  if (!address || ownedIds.length === 0 || claimTargets.length === 0) return null
+  if (!mounted || !address || ownedIds.length === 0 || claimTargets.length === 0) return null
 
   return (
     <div className="card p-4 bg-gradient-to-r from-amber-500/10 via-aeon-400/10 to-violet-500/10 border border-amber-500/30 mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
@@ -140,11 +144,11 @@ export function MultiTokenFeeClaimer() {
               Epoch Trading Fees Available
             </span>
             <span className="text-2xs font-mono text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-              {claimTargets.length} Claim Stream(s)
+              {claimTargets.length} Stream(s) Ready
             </span>
           </div>
           <p className="text-xs text-text-muted">
-            Trading fee shares (AEON, WETH, USDG, memecoins, tokenized stocks) ready to claim for your veNFTs
+            Trading fee shares (AEON, WETH, USDG, memecoins) ready to claim for your voted veNFTs
           </p>
         </div>
       </div>
