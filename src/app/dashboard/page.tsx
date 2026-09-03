@@ -204,6 +204,7 @@ export default function DashboardPage() {
   const volByAddr7d   = volResult?.byPool7d ?? {}
   const volByAddrAllTime = volResult?.byPoolAllTime ?? {}
   const volByAddrWeek = volResult?.byPoolWeek ?? {}
+  const volByAddr     = volByAddr24h
   const statByAddr = Object.fromEntries(allPoolStats.map(s => [s.address.toLowerCase(), s]))
 
   const seenAddrs = new Set<string>()
@@ -663,8 +664,8 @@ export default function DashboardPage() {
             <tbody className="divide-y divide-bg-border">
               {tablePools.map(pool => {
                 const stat    = statByAddr[pool.address.toLowerCase()]
-                const vol     = volByAddr[pool.address.toLowerCase()] ?? null
-                const volWeek = volByAddrWeek[pool.address.toLowerCase()] ?? null
+                const vol     = volByAddr24h?.[pool.address.toLowerCase()] ?? null
+                const volWeek = volByAddrWeek?.[pool.address.toLowerCase()] ?? null
                 const tvl     = stat?.tvlUsd ?? null
                 const feePct  = parseFeeRate(pool.fee)
                 // Trailing-week average, not literal 24h -- see useVolume24h's
