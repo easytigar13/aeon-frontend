@@ -561,7 +561,7 @@ export default function DashboardPage() {
               <div className="text-2xs text-text-muted font-mono mt-0.5">next: {furnaceRewardNextEpoch !== null ? fmtUsd(furnaceRewardNextEpoch, true) : '$—'}</div>
             </div>
           </div>
-          <div className="text-2xs text-text-muted font-mono uppercase tracking-wider mb-2">Voter share by pool</div>
+          <div className="text-2xs text-text-muted font-mono uppercase tracking-wider mb-2">Voter share by pool (Weekly Projected)</div>
           {feesByPool.length > 0 ? (
             <div className="space-y-1.5">
               {feesByPool.slice(0, 5).map(({ pool, feesWeek }) => (

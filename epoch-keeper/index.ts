@@ -57,6 +57,7 @@ const STATUS_FILE = fileURLToPath(new URL('status.json', import.meta.url))
 // Which epoch we last collected fees for. Persisted to status.json so a
 // restart inside the sweep window doesn't re-run the whole 67-gauge sweep.
 let lastSweptEpoch = 0n
+let lastVoteCheckpointStatus: Record<string, unknown> | undefined
 try {
   const s = JSON.parse(fs.readFileSync(STATUS_FILE, 'utf8'))
   if (s.lastSweptEpoch) lastSweptEpoch = BigInt(s.lastSweptEpoch)
@@ -158,7 +159,12 @@ function log(msg: string) {
 
 function writeStatus(extra: Record<string, unknown>) {
   try {
-    fs.writeFileSync(STATUS_FILE, JSON.stringify({ updatedAt: Date.now(), lastSweptEpoch: lastSweptEpoch.toString(), ...extra }, null, 2))
+    fs.writeFileSync(STATUS_FILE, JSON.stringify({
+      updatedAt: Date.now(),
+      lastSweptEpoch: lastSweptEpoch.toString(),
+      ...(lastVoteCheckpointStatus ? { voteCheckpoints: lastVoteCheckpointStatus } : {}),
+      ...extra,
+    }, null, 2))
   } catch {}
 }
 
@@ -227,7 +233,8 @@ async function checkpointPersistentVotesIfNearBoundary() {
   }
   log(`Vote checkpoints: ${checkpointed} written, ${alreadyRecorded} already recorded, ${notApproved} not opted in, ${failures.length} failed`)
   if (failures.length) log(`Vote checkpoint failures: ${JSON.stringify(failures)}`)
-  writeStatus({ voteCheckpoints: { epoch: epoch.toString(), checkpointed, alreadyRecorded, notApproved, failures } })
+  lastVoteCheckpointStatus = { epoch: epoch.toString(), checkpointed, alreadyRecorded, notApproved, failures }
+  writeStatus({})
 }
 
 // Collect fees exactly once per epoch, only inside the pre-boundary window.

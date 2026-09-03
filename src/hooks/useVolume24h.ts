@@ -378,22 +378,17 @@ export function useVolume24h(prices: PriceMap): VolumeResult {
 
         // 2. 7-Day (Current Epoch) Window: from epoch start timestamp to now
         const nowSec = Math.floor(Date.now() / 1000)
-        const GENESIS_S = 1782950400 // Genesis epoch timestamp
         const WEEK_S = 7 * 86400
-        const epochElapsedSec = Math.max(86400, (nowSec - GENESIS_S) % WEEK_S)
-        const blocksEpoch = await blocksForDuration(client!, epochElapsedSec, blocks24h * BigInt(Math.ceil(epochElapsedSec / 86400)))
+        const currentEpochStart = Math.floor(nowSec / WEEK_S) * WEEK_S
+        const epochElapsedSec = Math.max(1800, nowSec - currentEpochStart)
+        const blocksEpoch = await blocksForDuration(client!, epochElapsedSec, (blocks24h * BigInt(epochElapsedSec)) / 86400n)
         const logsEpoch = await fetchLogsForRange(blocksEpoch, currentBlock)
           .catch(() => ({ logs: [], complete: false }))
         const epoch = processLogs(logsEpoch.logs, p)
 
-        // Ensure 7d volume is at least 24h volume
         const vol24h = day.totalUsd
-        const vol7d = Math.max(vol24h, epoch.totalUsd)
-
-        const byPool7d: Record<string, number> = { ...day.byPool }
-        for (const [addr, v] of Object.entries(epoch.byPool)) {
-          byPool7d[addr] = Math.max(byPool7d[addr] ?? 0, v)
-        }
+        const vol7d = epoch.totalUsd
+        const byPool7d: Record<string, number> = { ...epoch.byPool }
 
         // 3. All-Time Window: Historical baseline + current epoch volume
         const byPoolAllTime: Record<string, number> = { ...HISTORIC_BASE_VOLUME_BY_POOL }
