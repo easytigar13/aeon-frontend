@@ -87,7 +87,7 @@ import { privateKeyToAccount } from 'viem/accounts'
 import * as dotenv from 'dotenv'
 import * as fs from 'fs'
 import { fileURLToPath } from 'url'
-import { POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES, UNISWAP_POOLS, ALGEBRA_CONTRACTS, DLMM_CONTRACTS } from '../src/config/contracts'
+import { POOLS, CL_POOLS, TOKENS, CONTRACTS, CL_GAUGES, DLMM_GAUGES, UNISWAP_POOLS, ALGEBRA_CONTRACTS, DLMM_CONTRACTS } from '../src/config/contracts'
 import { ERC20_ABI, AEON_ROUTER_ABI, AEON_UNIVERSAL_ROUTER_ABI, ALGEBRA_POOL_ABI, ALGEBRA_QUOTER_ABI, LB_PAIR_ABI, LB_ROUTER_ABI, WETH_ABI, MULTI_GAUGE_CONTROLLER_ABI } from '../src/config/abis'
 import { robinhoodChain } from '../src/config/chain'
 import { getBestQuote, getSwapTx, type AggregatorSource } from './aggregators'
@@ -575,7 +575,10 @@ async function discoverClAndDlmmPools(): Promise<{ cl: number; dlmm: number }> {
     addrToSymbol.set(TOKENS[sym].address.toLowerCase(), sym)
   }
 
-  const clAddresses = Object.keys(CL_GAUGES) as `0x${string}`[]
+  const clAddresses = Array.from(new Set([
+    ...(Object.keys(CL_GAUGES) as `0x${string}`[]),
+    ...(CL_POOLS.map(p => p.address as `0x${string}`)),
+  ]))
   const dlmmAddresses = Object.keys(DLMM_GAUGES) as `0x${string}`[]
   let clAdded = 0, dlmmAdded = 0
 
