@@ -278,75 +278,62 @@ export default function DashboardPage() {
   // NOT part of the voter/emission fee flow, so every FeeDistributor-derived
   // number below (voter 80% share AND the 25% emission budget) is vAMM-only.
   const vammFeePools = POOLS
+  // Real fees accrued so far this epoch directly from on-chain epoch volume (volByAddr7d)
   const realFeesThisEpoch = vammFeePools.reduce((sum, p) => {
-    const volWeek = volByAddrWeek[p.address.toLowerCase()]
-    if (volWeek === undefined || volWeek === null) return sum
-    return sum + (volWeek / 7) * elapsedDays * parseFeeRate(p.fee)
+    const volEpoch = volByAddr7d?.[p.address.toLowerCase()]
+    if (volEpoch === undefined || volEpoch === null) return sum
+    return sum + volEpoch * parseFeeRate(p.fee)
   }, 0)
-  // The emission mint is sized off ONLY oracle-priced-token fees — the protocol
-  // counts unpriced (memecoin) fees as $0 toward lastEpochFeesUSD. Weight each
-  // pool's fees by its priced fraction so the projected mint matches reality
-  // instead of overstating it with fees the protocol values at zero.
+
+  // Sized off oracle-priced tokens for emission budgeting
   const pricedRealFeesThisEpoch = vammFeePools.reduce((sum, p) => {
-    const volWeek = volByAddrWeek[p.address.toLowerCase()]
-    if (volWeek === undefined || volWeek === null) return sum
-    const raw = (volWeek / 7) * elapsedDays * parseFeeRate(p.fee)
+    const volEpoch = volByAddr7d?.[p.address.toLowerCase()]
+    if (volEpoch === undefined || volEpoch === null) return sum
+    const raw = volEpoch * parseFeeRate(p.fee)
     return sum + raw * pricedFeeFraction(p.token0, p.token1, pricedTokens)
   }, 0)
-  const hasLiveVolumeData = Object.keys(volByAddrWeek).length > 0
 
+  const hasLiveVolumeData = Object.keys(volByAddr7d || {}).length > 0
   const feesThisEpoch = hasLiveVolumeData
     ? realFeesThisEpoch
-    : epochFeesRaw
-      ? parseFloat(formatUnits(epochFeesRaw as bigint, 18))
-      : (volume24h !== null)
-        ? volume24h * elapsedDays * blendedFeePct
-        : null
+    : (volume7d > 0)
+      ? volume7d * blendedFeePct
+      : null
+
+  // Projected full 7-day epoch fees based on elapsed rate
+  const projectedWeeklyMultiplier = elapsedDays > 0.1 ? (7 / elapsedDays) : 7
+  const projectedFullEpochFees = feesThisEpoch !== null ? feesThisEpoch * projectedWeeklyMultiplier : null
+  const pricedProjectedFullEpochFees = pricedRealFeesThisEpoch > 0 ? pricedRealFeesThisEpoch * projectedWeeklyMultiplier : null
 
   // Live next-epoch model. VoteDirectedLpEmissionsEngineRH (live since
   // 2026-07-13, confirmed via MinterProxy.logic()) mints AEON worth exactly
   // 25% of the epoch's finalized fees -- no rolling average, no growth cap.
-  // Projecting the live in-epoch fee estimate (feesThisEpoch) instead of
-  // only the last finalized snapshot is what keeps this forward-looking.
   const lastFeesUSD = lastFeesUSDRaw !== undefined ? Number(formatUnits(lastFeesUSDRaw as bigint, 18)) : null
   const liveEmissionProjection = aeonPrice !== null
     ? projectNextEmission({
         lastFeesUSD,
-        // priced-only: matches what the engine actually mints on (unpriced fees
-        // -> $0). Falls back to the on-chain finalized lastFeesUSD when there's
-        // no live volume data (that number is already priced-only by design).
-        liveEpochFeesUSD: hasLiveVolumeData ? pricedRealFeesThisEpoch : null,
+        liveEpochFeesUSD: hasLiveVolumeData ? pricedProjectedFullEpochFees : null,
         aeonPriceUSD: aeonPrice,
       })
     : null
   const projectedEmissionsAeon = liveEmissionProjection?.projectedMintAeon ?? null
 
-  // Voter fee share — FeeDistributorV3 pays feeVoterSplit% (80%) of each
-  // pool's RAW trading fees directly to voters who backed that pool, in the
-  // pool's own fee token -- a completely separate stream from AEON
-  // emissions above (which pay LP gauge stakers, not voters). Per-pool
-  // basis is the SAME live weekly-volume estimate now powering the fee/APR
-  // numbers elsewhere (byPoolWeek), not the on-chain snapshot -- that
-  // snapshot only updates when the fee-collection keeper runs.
+  // Per-pool fee breakdown
   const feesByPool = vammFeePools
     .map(p => {
-      const volWeek = volByAddrWeek[p.address.toLowerCase()]
-      const feesWeek = volWeek !== undefined ? volWeek * parseFeeRate(p.fee) : null
-      return { pool: p, feesWeek }
+      const volEpoch = volByAddr7d?.[p.address.toLowerCase()] ?? 0
+      const feesEpoch = volEpoch * parseFeeRate(p.fee)
+      const feesWeek = feesEpoch * projectedWeeklyMultiplier
+      return { pool: p, feesEpoch, feesWeek }
     })
-    .filter((x): x is { pool: typeof x.pool; feesWeek: number } => x.feesWeek !== null && x.feesWeek > 0)
-    .sort((a, b) => b.feesWeek - a.feesWeek)
-  const totalFeesWeekUsd = feesByPool.reduce((sum, x) => sum + x.feesWeek, 0)
-  const voterShareThisEpoch = feesThisEpoch !== null ? feesThisEpoch * (EPOCH_CONFIG.feeVoterSplit / 100) : null
-  const voterShareNextEpoch = totalFeesWeekUsd > 0 ? totalFeesWeekUsd * (EPOCH_CONFIG.feeVoterSplit / 100) : null
+    .filter(x => x.feesEpoch > 0 || x.feesWeek > 0)
+    .sort((a, b) => b.feesEpoch - a.feesEpoch)
 
-  // The other 20% of raw fees (feeBuybackSplit) routes to BuybackEngineV3,
-  // which splits it 50/50: half swapped to AEON and permanently burned,
-  // half swapped to AEON and redistributed directly to Furnace burners --
-  // together with the 80% voter share above, these three numbers always
-  // sum to exactly 100% of raw fees collected.
+  const voterShareThisEpoch = feesThisEpoch !== null ? feesThisEpoch * (EPOCH_CONFIG.feeVoterSplit / 100) : null
+  const voterShareNextEpoch = projectedFullEpochFees !== null ? projectedFullEpochFees * (EPOCH_CONFIG.feeVoterSplit / 100) : null
+
   const buybackTotalThisEpoch = feesThisEpoch !== null ? feesThisEpoch * (EPOCH_CONFIG.feeBuybackSplit / 100) : null
-  const buybackTotalNextEpoch = totalFeesWeekUsd > 0 ? totalFeesWeekUsd * (EPOCH_CONFIG.feeBuybackSplit / 100) : null
+  const buybackTotalNextEpoch = projectedFullEpochFees !== null ? projectedFullEpochFees * (EPOCH_CONFIG.feeBuybackSplit / 100) : null
   const buybackBurnThisEpoch = buybackTotalThisEpoch !== null ? buybackTotalThisEpoch * (EPOCH_CONFIG.buybackBurnSplit / 100) : null
   const buybackBurnNextEpoch = buybackTotalNextEpoch !== null ? buybackTotalNextEpoch * (EPOCH_CONFIG.buybackBurnSplit / 100) : null
   const furnaceRewardThisEpoch = buybackTotalThisEpoch !== null ? buybackTotalThisEpoch * (EPOCH_CONFIG.buybackRedistributeSplit / 100) : null
@@ -561,18 +548,23 @@ export default function DashboardPage() {
               <div className="text-2xs text-text-muted font-mono mt-0.5">next: {furnaceRewardNextEpoch !== null ? fmtUsd(furnaceRewardNextEpoch, true) : '$—'}</div>
             </div>
           </div>
-          <div className="text-2xs text-text-muted font-mono uppercase tracking-wider mb-2">Voter share by pool (Weekly Projected)</div>
+          <div className="text-2xs text-text-muted font-mono uppercase tracking-wider mb-2">Voter share by pool (This Epoch)</div>
           {feesByPool.length > 0 ? (
             <div className="space-y-1.5">
-              {feesByPool.slice(0, 5).map(({ pool, feesWeek }) => (
+              {feesByPool.slice(0, 5).map(({ pool, feesEpoch, feesWeek }) => (
                 <div key={pool.address} className="flex justify-between items-center gap-3 text-sm">
                   <span className="text-text-muted">{pool.name}</span>
-                  <span className="font-mono text-text-primary">{fmtUsd(feesWeek * (EPOCH_CONFIG.feeVoterSplit / 100), true)}</span>
+                  <span className="font-mono text-text-primary">
+                    {fmtUsd(feesEpoch * (EPOCH_CONFIG.feeVoterSplit / 100))}
+                    <span className="text-2xs text-text-muted ml-1.5 font-normal">
+                      (est. {fmtUsd(feesWeek * (EPOCH_CONFIG.feeVoterSplit / 100), true)}/wk)
+                    </span>
+                  </span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="text-text-muted text-sm">No trailing-week fee data yet</div>
+            <div className="text-text-muted text-sm">No pool fee data yet</div>
           )}
         </div>
 
