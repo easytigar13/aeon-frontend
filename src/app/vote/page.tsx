@@ -821,7 +821,15 @@ export default function VotePage() {
 
 // The unique pools this tokenId could possibly have voted for — de-duped by
 // address, matching how AeonVoterV2 tracks votes per pool (not per fee tier).
-const UNIQUE_VOTE_POOLS = POOLS.filter((p, i, arr) => arr.findIndex(x => x.address === p.address) === i)
+const RETIRED_VOTE_POOLS: VotePool[] = [
+  {
+    name: 'FRONG/AEON (retired)', token0: 'FRONG', token1: 'AEON', type: 'vAMM', fee: '1%',
+    address: '0x2f8CBA007598cBb15FfABE7a826a9cC8576ed6be',
+  },
+]
+const RETIRED_VOTE_POOL_ADDRESSES = new Set(RETIRED_VOTE_POOLS.map(pool => pool.address.toLowerCase()))
+const UNIQUE_VOTE_POOLS = [...POOLS, ...RETIRED_VOTE_POOLS]
+  .filter((p, i, arr) => arr.findIndex(x => x.address.toLowerCase() === p.address.toLowerCase()) === i)
 const UNIQUE_MULTI_VOTE_POOLS = [...CL_POOLS, ...DLMM_POOLS]
   .filter((p, i, arr) => arr.findIndex(x => x.address === p.address) === i)
 
@@ -849,6 +857,7 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
     .filter(r => r.weight > 0n)
 
   const total = rows.reduce((s, r) => s + r.weight, 0n)
+  const hasRetiredAllocation = rows.some(({ pool }) => RETIRED_VOTE_POOL_ADDRESSES.has(pool.address.toLowerCase()))
 
   if (!data) return <div className="text-2xs text-text-muted text-center py-1">Loading your votes…</div>
   if (rows.length === 0) return <div className="text-2xs text-text-muted text-center py-1">No pool allocation found for this veNFT</div>
@@ -856,9 +865,14 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
   return (
     <div className="space-y-1 pt-1 border-t border-bg-border mt-1">
       <div className="text-2xs text-text-muted uppercase tracking-wider pt-1">Your Current Votes</div>
+      {hasRetiredAllocation && (
+        <div className="rounded-lg border border-red-400/30 bg-red-400/5 p-2 text-2xs text-red-300 leading-relaxed">
+          Automatic weekly checkpointing is blocked because this allocation includes a retired gauge. Reset the vote and vote only for live pools before the epoch closes.
+        </div>
+      )}
       {rows.map(({ pool, weight }) => (
         <div key={pool.address} className="flex justify-between items-center text-xs">
-          <span className="text-text-secondary">{pool.name}</span>
+          <span className={RETIRED_VOTE_POOL_ADDRESSES.has(pool.address.toLowerCase()) ? 'text-red-400' : 'text-text-secondary'}>{pool.name}</span>
           <div className="flex items-center gap-2">
             <span className="font-mono text-aeon-400">
               {total > 0n ? `${(Number(weight * 10000n / total) / 100).toFixed(1)}%` : '—'}
@@ -884,6 +898,16 @@ function AutomaticVoteCheckpoint({ tokenId, owner }: { tokenId: bigint; owner: `
     query: { enabled: !!operator, refetchInterval: 30000 },
   })
   const enabled = !!operator && typeof approvedAddress === 'string' && approvedAddress.toLowerCase() === operator.toLowerCase()
+  const { data: retiredWeights } = useReadContracts({
+    contracts: RETIRED_VOTE_POOLS.map(pool => ({
+      address: CONTRACTS.AeonVoter,
+      abi: VOTER_ABI,
+      functionName: 'getVotes' as const,
+      args: [tokenId, pool.address] as const,
+    })),
+    query: { refetchInterval: 30000 },
+  })
+  const blockedByRetiredPool = retiredWeights?.some(result => result.status === 'success' && (result.result as bigint) > 0n) ?? false
   const { writeContract, data: hash, isPending, error } = useWriteContract()
   const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash, query: { enabled: !!hash } })
 
@@ -909,8 +933,8 @@ function AutomaticVoteCheckpoint({ tokenId, owner }: { tokenId: bigint; owner: `
     <div className="space-y-1 mt-1 pt-1 border-t border-bg-border">
       <div className="flex items-center justify-between text-xs">
         <span className="text-text-muted">Weekly fee checkpoint</span>
-        <span className={enabled ? 'text-emerald-400 font-mono' : 'text-yellow-400 font-mono'}>
-          {enabled ? 'Automatic' : 'Manual'}
+        <span className={blockedByRetiredPool ? 'text-red-400 font-mono' : enabled ? 'text-emerald-400 font-mono' : 'text-yellow-400 font-mono'}>
+          {blockedByRetiredPool ? 'Blocked' : enabled ? 'Automatic' : 'Manual'}
         </span>
       </div>
       <button

@@ -676,14 +676,7 @@ export const DLMM_CONTRACTS = {
 // until someone adds liquidity.
 export const DLMM_POOLS: {
   name: string; token0: string; token1: string; type: 'DLMM'; binStep: number; fee: string; address: `0x${string}`
-}[] = [
-  { name: 'AEON/ETH',     token0: 'AEON',    token1: 'WETH',    type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x736d8E418673253b2CDE1ef3Df6205Fc9780816b' as `0x${string}` },
-  { name: 'AEON/USDG',    token0: 'AEON',    token1: 'USDG',    type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x8bCCec714f42eeb73954172C253F84f649599E3B' as `0x${string}` },
-  { name: 'ETH/USDG',     token0: 'WETH',    token1: 'USDG',    type: 'DLMM', binStep: 10, fee: '0.05%',  address: '0x6E3772afbef845Ef4a3aD23a6eEEf65776375bC6' as `0x${string}` },
-  { name: 'CASHCAT/AEON', token0: 'CASHCAT', token1: 'AEON',    type: 'DLMM', binStep: 25, fee: '0.125%', address: '0x754EDCcEdd8F27A6ba7874052760f42e801be172' as `0x${string}` },
-  { name: 'CASHCAT/USDG', token0: 'CASHCAT', token1: 'USDG',    type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xBEe641E8d7EAe49Cae27832dBf33dFd9F4AACb17' as `0x${string}` },
-  { name: 'CASHCAT/ETH',  token0: 'CASHCAT', token1: 'WETH',    type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xaF6cd582516C69BD2FDE8803f277b64D6d0A1247' as `0x${string}` },
-]
+}[] = []
 // Still hidden -- VIRTUAL/ROBINFUN pairs, not part of the restored subset.
 // // { name: 'VIRTUAL/AEON',     token0: 'VIRTUAL',  token1: 'AEON',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xcC62C85794F652ee257cf00c87530fF860755892' as `0x${string}` },
 // // { name: 'ROBINFUN/AEON',    token0: 'ROBINFUN', token1: 'AEON',     type: 'DLMM', binStep: 25, fee: '0.125%', address: '0xfD32dBb36B7873cCd9a1547AFf8341240Ebd1904' as `0x${string}` },
