@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
-import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, BarChart3, Search, SlidersHorizontal, Plus, ChevronRight, Info, Layers, ArrowUpRight, Waves, Grid3x3 } from 'lucide-react'
+import { Coins, ChevronDown, ChevronUp, Loader2, Wallet, BarChart3, Search, SlidersHorizontal, Plus, ChevronRight, Info, Layers, ArrowUpRight, Waves, Grid3x3, Calculator } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
@@ -20,6 +20,7 @@ import { TokenIcon } from '@/components/TokenIcon'
 import { tickToPrice, amountsForLiquidity } from '@/lib/clMath'
 import { binIdToPrice } from '@/lib/dlmmMath'
 import { hasMeaningfulPoolLiquidity } from '@/lib/poolVisibility'
+import { LpCalculatorModal } from '@/components/earn/LpCalculatorModal'
 
 type PriceMap = Record<string, number | null>
 
@@ -1371,6 +1372,7 @@ export default function EarnPage() {
 
   const [mainTab,   setMainTab]   = useState<'earn' | 'liquidity' | 'portfolio'>('earn')
   const [filterTab, setFilterTab] = useState<'all' | 'my'>('all')
+  const [showLpCalc, setShowLpCalc] = useState(false)
 
   const stats         = useEarnStats(isConnected ? address : undefined)
   const prices        = usePrices()
@@ -1546,12 +1548,20 @@ export default function EarnPage() {
               </div>
             </div>
 
-            <button
-              onClick={() => setMainTab('liquidity')}
-              className="w-full sm:w-auto bg-white hover:bg-slate-100 text-black font-extrabold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-            >
-              <Plus size={15} strokeWidth={3} /> Add Liquidity
-            </button>
+            <div className="flex items-center gap-2 w-full sm:w-auto">
+              <button
+                onClick={() => setShowLpCalc(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-[#121A2C] border border-[#223354] hover:border-emerald-400 text-xs font-mono text-emerald-400 hover:text-emerald-300 transition-all shadow-sm"
+              >
+                <Calculator size={14} /> LP Calculator
+              </button>
+              <button
+                onClick={() => setMainTab('liquidity')}
+                className="w-full sm:w-auto bg-white hover:bg-slate-100 text-black font-extrabold text-xs px-5 py-2.5 rounded-xl transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
+              >
+                <Plus size={15} strokeWidth={3} /> Add Liquidity
+              </button>
+            </div>
           </div>
 
           {/* AEON Pools Table Header */}
@@ -1596,6 +1606,9 @@ export default function EarnPage() {
           </div>
         </>
       )}
+
+      {/* LP Impermanent Loss & Yield Calculator Modal */}
+      <LpCalculatorModal isOpen={showLpCalc} onClose={() => setShowLpCalc(false)} />
     </div>
   )
 }

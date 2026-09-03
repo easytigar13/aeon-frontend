@@ -14,6 +14,7 @@ import { projectNextEmission } from '@/lib/emissionsProjection'
 import { useOraclePricedTokens } from '@/hooks/useOraclePricedTokens'
 import { pricedFeeFraction } from '@/lib/pricedFees'
 import { MultiTokenFeeClaimer } from '@/components/MultiTokenFeeClaimer'
+import { VoteSimulator } from '@/components/vote/VoteSimulator'
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000' as const
 
@@ -808,6 +809,11 @@ export default function VotePage() {
           </div>
           <p className="text-xs text-text-muted mt-3 text-center font-mono">{filteredPools.length} pools · Max {MAX_VOTE_POOLS} pools per vote</p>
         </div>
+      </div>
+
+      {/* ve(3,3) Interactive Simulator */}
+      <div className="mt-12">
+        <VoteSimulator />
       </div>
     </div>
   )

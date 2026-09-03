@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins, Sparkles } from 'lucide-react'
+import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins, Sparkles, Gift } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useReadContract, useReadContracts } from 'wagmi'
 import { formatUnits } from 'viem'
@@ -14,6 +14,7 @@ import { projectNextEmission } from '@/lib/emissionsProjection'
 import { useOraclePricedTokens } from '@/hooks/useOraclePricedTokens'
 import { pricedFeeFraction } from '@/lib/pricedFees'
 import { hasMeaningfulPoolLiquidity } from '@/lib/poolVisibility'
+import { GlobalRewardsClaimer } from '@/components/rewards/GlobalRewardsClaimer'
 
 function fmtUsd(n: number | null, compact = false): string {
   if (n === null) return '$—'
@@ -188,6 +189,7 @@ export default function DashboardPage() {
   }, [])
 
   const [chartTab, setChartTab] = useState<'tvl' | 'vol24h' | 'vol7d' | 'volAllTime'>('tvl')
+  const [showRewardsHub, setShowRewardsHub] = useState(false)
 
   const prices        = usePrices()
   const poolStats     = usePoolStats(prices)
@@ -390,9 +392,18 @@ export default function DashboardPage() {
     <div className="relative isolate">
       <DashboardBackdrop />
       <div className="max-w-7xl mx-auto px-4 py-12">
-        <div className="mb-8">
-          <h1 className="font-display font-bold text-3xl text-text-primary mb-2">Dashboard</h1>
-          <p className="text-text-secondary">Protocol stats, pool performance, and epoch data</p>
+        <div className="flex flex-wrap items-center justify-between gap-4 mb-8">
+          <div>
+            <h1 className="font-display font-bold text-3xl text-text-primary mb-1">Dashboard</h1>
+            <p className="text-text-secondary text-sm">Protocol stats, pool performance, and epoch data</p>
+          </div>
+          <button
+            onClick={() => setShowRewardsHub(true)}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-black font-bold text-xs shadow-[0_0_20px_-5px_rgba(16,185,129,0.5)] transition-all hover:scale-105 active:scale-95 cursor-pointer"
+          >
+            <Gift className="w-4 h-4" />
+            <span>Claim All Rewards</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-8">
@@ -694,6 +705,9 @@ export default function DashboardPage() {
         </div>
       </div>
       </div>
+
+      {/* Global 1-Click Rewards Claimer Modal */}
+      <GlobalRewardsClaimer isOpen={showRewardsHub} onClose={() => setShowRewardsHub(false)} />
     </div>
   )
 }
