@@ -59,6 +59,19 @@ let lastKnownPrices: PriceMap = {
   NASDAQ: 0.00000568,
 }
 
+const PRICES_CACHE_KEY = 'aeon_prices_cache_v2'
+if (typeof window !== 'undefined') {
+  try {
+    const raw = localStorage.getItem(PRICES_CACHE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object') {
+        lastKnownPrices = { ...lastKnownPrices, ...parsed }
+      }
+    }
+  } catch {}
+}
+
 export function usePrices(): PriceMap {
   const { data } = useReadContracts({ contracts: PRICE_CONTRACTS, query: { refetchInterval: 5000, staleTime: 5000 } })
 
@@ -126,6 +139,12 @@ export function usePrices(): PriceMap {
     if (prices[symbol] !== null && (prices[symbol] as number) > 0) {
       lastKnownPrices[symbol] = prices[symbol]
     }
+  }
+
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(PRICES_CACHE_KEY, JSON.stringify(lastKnownPrices))
+    } catch {}
   }
 
   return prices

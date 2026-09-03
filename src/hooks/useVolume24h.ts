@@ -187,7 +187,21 @@ const EMPTY_VOLUME_RESULT: VolumeResult = {
 // browser session, then fan it out to all consumers.
 const SHARED_DAY_TTL_MS = 15_000
 const SHARED_WEEK_TTL_MS = 30_000
+const CACHE_KEY = 'aeon_volume_cache_v3'
 let sharedVolumeResult: VolumeResult = EMPTY_VOLUME_RESULT
+
+if (typeof window !== 'undefined') {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && (parsed.volume24h > 0 || parsed.volume7d > 0)) {
+        sharedVolumeResult = { ...EMPTY_VOLUME_RESULT, ...parsed }
+      }
+    }
+  } catch {}
+}
+
 let sharedDayFetchedAt = 0
 let sharedWeekFetchedAt = 0
 let sharedVolumeFetch: Promise<void> | null = null
@@ -197,6 +211,11 @@ function publishSharedVolume(result: VolumeResult, freshness: 'day' | 'week') {
   sharedVolumeResult = result
   if (freshness === 'day') sharedDayFetchedAt = Date.now()
   if (freshness === 'week') sharedWeekFetchedAt = Date.now()
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(result))
+    } catch {}
+  }
   for (const listener of sharedVolumeListeners) listener(result)
 }
 
