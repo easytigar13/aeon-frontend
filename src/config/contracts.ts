@@ -385,6 +385,8 @@ export const TOKENS = {
   // Real Robinhood-chain token (verified on-chain name/symbol/decimals), added
   // 2026-07-30 with a vAMM/AEON pool + live gauge.
   FRONG: { address: '0x6245e67affA44a23077f0Ea7f981a8DC743a0c47' as `0x${string}`, symbol: 'FRONG', decimals: 18, name: 'frong' },
+  // Real Robinhood-chain token (legs.fun), added with vAMM & CL AEON pools + live gauge.
+  LEGS:  { address: '0x8FcF98e1348D3DDeE46cdD15A5C7D9a8d423077d' as `0x${string}`, symbol: 'LEGS',  decimals: 18, name: 'legs.fun' },
   // Curated external routing tokens. These are intermediate assets only:
   // profitable cycles must still settle back into AEON, USDG, or WETH.
   TENDIES: { address: '0x45242320DBB855EeA8Fd36804C6487E10E97FCF9' as `0x${string}`, symbol: 'TENDIES', decimals: 18, name: 'TENDIES' },
@@ -469,6 +471,7 @@ export const POOLS = [
   // This replacement has a nonzero fee vault, live V3 gauge, staked LP, and
   // a passing collectFees() simulation.
   { name: 'FRONG/AEON', token0: 'FRONG', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x693Bf3EeCb4110c777BEc13D6c11d139BF84e2E1' as `0x${string}` },
+  { name: 'LEGS/AEON',  token0: 'LEGS',  token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xAb224fE744D5175cCc0D53fCd788c87991Ab71fC' as `0x${string}` },
   { name: 'FRONG/ETH', token0: 'FRONG', token1: 'WETH', type: 'vAMM', fee: '1%', address: '0x2c07F05D5111da590D8749A091974285FcacDf0D' as `0x${string}` },
   { name: 'ROBINFUN/AEON', token0: 'ROBINFUN', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0xeB638e1FA253E5526C2be76626dE26F02E4bdaba' as `0x${string}` },
   { name: 'CASHCAT/AEON', token0: 'CASHCAT', token1: 'AEON', type: 'vAMM', fee: '1%', address: '0x22d76bf4e8d2c1DfCca7de6c9dC46Ec2a8Ed7Eb7' as `0x${string}` },
@@ -638,6 +641,7 @@ export const CL_POOLS: {
   { name: 'VEX/AEON',      token0: 'VEX',      token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x79Fa300e73C1b35aD6b7acFd070d8A7C9a112a61' as `0x${string}` },
   { name: 'PONS/AEON',     token0: 'PONS',     token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x21dBbAB7E90B7FD509a8eC2312B52313aba613B8' as `0x${string}` },
   { name: 'AI/AEON',       token0: 'AI',       token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x8502c37f3f98E19Fc5607Afd4A304eE391941782' as `0x${string}` },
+  { name: 'LEGS/AEON',     token0: 'LEGS',     token1: 'AEON', type: 'CL', fee: '0.25%', address: '0x614ceC9D781d3315740Fd0A7b09F51d326bC1f40' as `0x${string}` },
 ]
 // // { name: 'VIRTUAL/AEON',     token0: 'VIRTUAL',  token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0x280b2eb06B105944BB2f1378c861D604eb82Aa3d' as `0x${string}` },
 // // { name: 'ROBINFUN/AEON',    token0: 'ROBINFUN', token1: 'AEON',     type: 'CL', fee: '0.25%', address: '0xC4A0B77a4a09eE7ECff12CC6504BFA9BB8c62C3B' as `0x${string}` },

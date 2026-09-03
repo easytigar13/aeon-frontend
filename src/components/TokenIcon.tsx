@@ -67,6 +67,8 @@ const AVATAR_COLORS: Record<string, string> = {
   VIRTUAL:  '#8B5CF6',
   ROBINFUN: '#EC4899',
   CASHCAT:  '#22D3EE',
+  FRONG:    '#10B981',
+  LEGS:     '#F43F5E',
   SLEEP:    '#6366F1',
   SHERWOOD: '#10B981',
   // Real (approximate) brand colors -- only ever shown if the TradingView
