@@ -35,7 +35,7 @@ export function LpCalculatorModal({
 
   // For concentrated liquidity, IL is magnified by range width
   if (poolType === 'cl') {
-    ilPercent = Math.min(-100, ilPercent * 2.5)
+    ilPercent = Math.max(-100, ilPercent * 2.5)
   }
 
   // Estimated fee share
@@ -47,7 +47,7 @@ export function LpCalculatorModal({
   // Net PnL vs HODL
   // Value if HODL = 50% in Token A (up by k) + 50% in Token B (flat)
   const hodlValue = deposit * (0.5 * k + 0.5)
-  const lpValueWithoutFees = deposit * Math.sqrt(k)
+  const lpValueWithoutFees = poolType === 'cl' ? Math.max(0, hodlValue * (1 + ilPercent / 100)) : deposit * Math.sqrt(k)
   const lpValueWithFees1Year = lpValueWithoutFees + userYearlyFees
   const netAdvantageVsHodl = lpValueWithFees1Year - hodlValue
 
@@ -157,11 +157,11 @@ export function LpCalculatorModal({
             <div className="grid grid-cols-2 gap-3 text-center">
               <div className="bg-[#141C30] p-3 rounded-xl border border-[#223250]">
                 <span className="text-[10px] uppercase font-mono text-slate-400 block">Impermanent Loss</span>
-                <span className={clsx('text-base font-mono font-bold', ilPercent < -1 ? 'text-red-400' : 'text-slate-200')}>
+                <span className={clsx('text-base font-mono font-bold', ilPercent < -0.01 ? 'text-red-400' : 'text-slate-200')}>
                   {ilPercent.toFixed(2)}%
                 </span>
                 <span className="text-[10px] font-mono text-slate-400">
-                  ≈ -${Math.abs((deposit * (ilPercent / 100))).toFixed(2)}
+                  ≈ -${Math.abs(hodlValue - lpValueWithoutFees).toFixed(2)}
                 </span>
               </div>
 

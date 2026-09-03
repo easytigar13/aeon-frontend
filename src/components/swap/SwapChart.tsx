@@ -71,8 +71,8 @@ export function SwapChart({
   const priceChangePercent = firstPrice > 0 ? (priceChange / firstPrice) * 100 : 0
   const isPositive = priceChangePercent >= 0
 
-  const minPrice = Math.min(...chartData.map(d => d.price))
-  const maxPrice = Math.max(...chartData.map(d => d.price))
+  const minPrice = chartData.length > 0 ? Math.min(...chartData.map(d => d.price)) : (currentRate || 1)
+  const maxPrice = chartData.length > 0 ? Math.max(...chartData.map(d => d.price)) : (currentRate || 1)
 
   return (
     <div className="bg-[#0B0F19]/90 border border-[#182337] rounded-2xl p-4 sm:p-5 flex flex-col h-full backdrop-blur-md shadow-xl">

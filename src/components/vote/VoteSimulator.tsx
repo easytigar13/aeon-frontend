@@ -1,43 +1,66 @@
 'use client'
 import { useState, useMemo } from 'react'
 import { Calculator, Sparkles, TrendingUp, Shield, HelpCircle, ArrowRight } from 'lucide-react'
-import { POOLS, CL_POOLS, DLMM_POOLS } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
+import { VOTER_ABI } from '@/config/abis'
+import { useReadContract } from 'wagmi'
+import { formatUnits } from 'viem'
 import { usePrices } from '@/hooks/usePrices'
+import { useVolume24h } from '@/hooks/useVolume24h'
 import { clsx } from 'clsx'
 
 export function VoteSimulator() {
   const [lockAmount, setLockAmount] = useState<string>('5000')
-  const [lockWeeks, setLockWeeks] = useState<number>(208) // 4 years = 208 weeks
+  const [lockWeeks, setLockWeeks] = useState<number>(208) // 4 years = 208 weeks (AeonVotingEscrow.MAXTIME)
   const [selectedPoolIndex, setSelectedPoolIndex] = useState<number>(0)
-  const [estimatedWeeklyFees, setEstimatedWeeklyFees] = useState<number>(12500) // $12.5k estimated weekly protocol fees
 
   const prices = usePrices()
   const aeonPrice = prices['AEON'] || 0.45
+  const volResult = useVolume24h(prices)
+
+  // Read live on-chain total voting weight from AeonVoter contract
+  const { data: totalWeightRaw } = useReadContract({
+    address: CONTRACTS.AeonVoter,
+    abi: VOTER_ABI,
+    functionName: 'totalWeight',
+  })
+
+  const onChainTotalVe = totalWeightRaw !== undefined
+    ? parseFloat(formatUnits(totalWeightRaw as bigint, 18))
+    : 100000
+
+  const activeTotalVeSupply = Math.max(1000, onChainTotalVe)
+
+  // Calculate live trailing 7-day protocol fees (or fallback to reasonable benchmark)
+  const liveWeeklyVolume = volResult?.volume7d ?? 45000
+  const liveWeeklyFees = Math.max(1000, liveWeeklyVolume * 0.005) // ~0.5% blended fee
 
   const allPools = useMemo(() => {
-    return [
-      { name: 'AEON / ETH', type: 'vAMM', fee: '1.0%', address: '0xD1E04Ab9CE0a6854914cd9C929B401BDf0700Be3', aprEstimate: 48.5 },
-      { name: 'AEON / USDG', type: 'vAMM', fee: '1.0%', address: '0x69072b04Cf3eEE09b474d9aB9f80Aa17506ee434', aprEstimate: 52.0 },
-      { name: 'ETH / USDG', type: 'vAMM', fee: '0.3%', address: '0x955bEeee93D334437c1Fe284C40ab28EACbe1ca2', aprEstimate: 24.2 },
-      { name: 'AEON / VIRTUAL', type: 'CL Pool', fee: '0.3%', address: '0xAlgebraPool', aprEstimate: 65.0 },
-    ]
+    const list = [...POOLS.slice(0, 4), ...CL_POOLS.slice(0, 2), ...DLMM_POOLS.slice(0, 2)]
+    return list.map(p => ({
+      name: p.name,
+      type: p.type,
+      fee: p.fee,
+      address: p.address,
+    }))
   }, [])
 
   // Calculations
   const numericLock = parseFloat(lockAmount) || 0
   const lockYears = (lockWeeks / 52).toFixed(1)
-  const maxWeeks = 208 // 4 years
+  const maxWeeks = 208 // Exactly 4 years (AeonVotingEscrow.MAXTIME = 1460 days)
 
-  // Voting power: linear decay from 4 years
-  const veVotingPower = numericLock * (lockWeeks / maxWeeks)
+  // Voting power: linear scaling up to 4 years (208 weeks)
+  const veVotingPower = numericLock * Math.min(1, lockWeeks / maxWeeks)
   const initialValueUsd = numericLock * aeonPrice
 
-  // Estimated 80% fee pass-through to voters + 5% furnace rewards
-  // If user holds ~X% of voting power, they capture that fraction of pool fees
-  const simulatedTotalVeSupply = 150000 // hypothetical active voting power
-  const userVotingShare = veVotingPower / (simulatedTotalVeSupply + veVotingPower)
-  
-  const weeklyRewardUsd = estimatedWeeklyFees * 0.8 * userVotingShare
+  // Estimated 80% fee pass-through to voters (EPOCH_CONFIG.feeVoterSplit = 80)
+  const voterSharePercentage = (EPOCH_CONFIG.feeVoterSplit ?? 80) / 100
+  const userVotingShare = (activeTotalVeSupply + veVotingPower > 0)
+    ? veVotingPower / (activeTotalVeSupply + veVotingPower)
+    : 0
+
+  const weeklyRewardUsd = liveWeeklyFees * voterSharePercentage * userVotingShare
   const annualRewardUsd = weeklyRewardUsd * 52
   const projectedVotingApr = initialValueUsd > 0 ? (annualRewardUsd / initialValueUsd) * 100 : 0
   const monthsToBreakeven = annualRewardUsd > 0 ? (initialValueUsd / (annualRewardUsd / 12)).toFixed(1) : '—'

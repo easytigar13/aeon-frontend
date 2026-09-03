@@ -7,6 +7,7 @@ import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { CONTRACTS } from '@/config/contracts'
 import { useToast } from '@/components/layout/ToastContext'
 import { useSoundEffects } from '@/hooks/useSoundEffects'
+import { usePrices } from '@/hooks/usePrices'
 import { clsx } from 'clsx'
 
 interface GlobalRewardsClaimerProps {
@@ -30,13 +31,14 @@ export function GlobalRewardsClaimer({
   const { openConnectModal } = useConnectModal()
   const { showToast } = useToast()
   const { playClick, playSuccess, playError } = useSoundEffects()
+  const prices = usePrices()
+  const aeonPrice = prices['AEON'] ?? 0.45
 
   const [isClaiming, setIsClaiming] = useState(false)
   const [claimedSuccessfully, setClaimedSuccessfully] = useState(false)
 
   if (!isOpen) return null
 
-  const aeonPrice = 0.45
   const totalValueUsd =
     veBribesUsd +
     furnaceRewardsAeon * aeonPrice +
