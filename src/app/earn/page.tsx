@@ -6,7 +6,7 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, useBalance } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, DLMM_GAUGES, CONTRACTS, TOKENS, NATIVE_SENTINEL, LEGACY_AEON_VOTER } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, DLMM_GAUGES, CONTRACTS, TOKENS, NATIVE_SENTINEL } from '@/config/contracts'
 import { ERC20_ABI, GAUGE_ABI, PAIR_ABI, LIQUIDITY_HELPER_V2_ABI, VOTER_ABI, ALGEBRA_POOL_ABI, LB_PAIR_ABI, DLMM_GAUGE_ABI, FURNACE_ABI, VOTING_ESCROW_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats, useTotalTVL } from '@/hooks/usePoolStats'
@@ -251,13 +251,12 @@ function PoolRow({ pool, wallet, tvlUsd, apr, volume24h, prices }: {
   volume24h?: number | null
   prices: PriceMap
 }) {
-  const [expanded,     setExpanded]     = useState(false)
-  const [innerTab,     setInnerTab]     = useState<'earn' | 'liquidity'>('earn')
-  const [gaugeVersion, setGaugeVersion] = useState<'new' | 'old'>('new')
-  const [stakeAmt,     setStakeAmt]     = useState('')
-  const [unstakeAmt,   setUnstakeAmt]   = useState('')
-  const [step,         setStep]         = useState<Step>('idle')
-  const [errMsg,       setErrMsg]       = useState('')
+  const [expanded,   setExpanded]   = useState(false)
+  const [innerTab,   setInnerTab]   = useState<'earn' | 'liquidity'>('earn')
+  const [stakeAmt,   setStakeAmt]   = useState('')
+  const [unstakeAmt, setUnstakeAmt] = useState('')
+  const [step,       setStep]       = useState<Step>('idle')
+  const [errMsg,     setErrMsg]     = useState('')
 
   const poolPrice = usePoolPrice(pool)
 
@@ -266,14 +265,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, volume24h, prices }: {
     args: [pool.address], query: { enabled: expanded, refetchInterval: 60000 },
   })
   const gauge = gaugeAddr && gaugeAddr !== '0x0000000000000000000000000000000000000000' ? gaugeAddr : undefined
-
-  const { data: oldGaugeAddr } = useReadContract({
-    address: LEGACY_AEON_VOTER, abi: VOTER_ABI, functionName: 'gauges',
-    args: [pool.address], query: { enabled: expanded, refetchInterval: 60000 },
-  })
-  const oldGauge = oldGaugeAddr && oldGaugeAddr !== '0x0000000000000000000000000000000000000000' ? oldGaugeAddr : undefined
-
-  const activeGauge = gaugeVersion === 'old' ? oldGauge : gauge
+  const activeGauge = gauge
 
   const { data: lpBalRaw, refetch: refetchLP } = useReadContract({
     address: pool.address, abi: ERC20_ABI, functionName: 'balanceOf',
@@ -288,12 +280,6 @@ function PoolRow({ pool, wallet, tvlUsd, apr, volume24h, prices }: {
   })
   const staked = (stakedRaw as bigint | undefined) ?? 0n
   const stakedFormatted = staked > 0n ? formatUnits(staked, 18).replace(/\.?0+$/, '') : '0'
-
-  const { data: oldStakedRaw, refetch: refetchOldStaked } = useReadContract({
-    address: oldGauge, abi: GAUGE_ABI, functionName: 'balanceOf',
-    args: wallet ? [wallet] : undefined, query: { enabled: !!oldGauge && !!wallet },
-  })
-  const oldStaked = (oldStakedRaw as bigint | undefined) ?? 0n
 
   const { data: earnedRaw, refetch: refetchEarned } = useReadContract({
     address: activeGauge, abi: GAUGE_ABI, functionName: 'earned',
@@ -337,7 +323,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, volume24h, prices }: {
 
   useEffect(() => {
     if (!txSuccess) return
-    refetchLP(); refetchStaked(); refetchEarned(); refetchAllowance(); refetchOldStaked()
+    refetchLP(); refetchStaked(); refetchEarned(); refetchAllowance()
     if (step === 'approve_wait')    { setStep('staking');  return }
     if (step === 'stake_wait')      { setStep('done');     setStakeAmt('');   return }
     if (step === 'unstake_wait')    { setStep('idle');     setUnstakeAmt(''); return }
@@ -393,7 +379,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, volume24h, prices }: {
   return (
     <div className={clsx('bg-[#0B0F19] border border-[#192134] rounded-xl overflow-hidden transition-all duration-150', expanded && 'border-[#38BDF8]/40 shadow-[0_0_20px_-5px_rgba(56,189,248,0.2)]')}>
       <button
-        className="w-full grid grid-cols-12 gap-3 px-5 py-4 items-center hover:bg-[#131926] transition-colors text-left"
+        className="w-full grid grid-cols-12 gap-3 px-5 py-4 items-center hover:bg-[#131926] transition-colors text-left cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
         {/* Pool name & Icons */}
@@ -455,7 +441,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, volume24h, prices }: {
         <div className="border-t border-bg-border bg-bg-raised">
           <div className="flex gap-1 px-4 pt-3">
             {(['earn', 'liquidity'] as const).map(t => (
-              <button key={t} onClick={() => setInnerTab(t)} className={clsx('flex items-center gap-1.5 px-4 py-1.5 rounded-t-lg text-xs font-medium border border-b-0 transition-all', innerTab === t ? 'bg-bg-base border-bg-border text-text-primary' : 'border-transparent text-text-muted')}>
+              <button key={t} onClick={() => setInnerTab(t)} className={clsx('flex items-center gap-1.5 px-4 py-1.5 rounded-t-lg text-xs font-medium border border-b-0 transition-all cursor-pointer', innerTab === t ? 'bg-bg-base border-bg-border text-text-primary' : 'border-transparent text-text-muted')}>
                 <Coins size={11} /> {t === 'earn' ? 'Earn' : 'Add Liquidity'}
               </button>
             ))}
@@ -466,7 +452,7 @@ function PoolRow({ pool, wallet, tvlUsd, apr, volume24h, prices }: {
               poolPrice.hasLiquidity ? 'bg-emerald-500/5 border border-emerald-500/20' : 'bg-red-500/5 border border-red-500/20'
             )}>
               <span className={poolPrice.hasLiquidity ? 'text-emerald-400' : 'text-red-400'}>
-                {poolPrice.hasLiquidity ? '● Pool active — earning fees on every trade' : '● Pool empty — add liquidity to start earning'}
+                {poolPrice.hasLiquidity ? '● Pool active — earning fees on every trade' : '● Pool active'}
               </span>
               {poolPrice.priceLabel && <span className="text-text-muted hidden sm:inline">{poolPrice.priceLabel}</span>}
             </div>
@@ -478,82 +464,100 @@ function PoolRow({ pool, wallet, tvlUsd, apr, volume24h, prices }: {
             ) : !wallet
               ? <div className="p-4 text-center text-sm text-text-muted">Connect wallet to stake and earn</div>
               : (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-1.5 p-1 rounded-lg bg-bg-raised border border-bg-border w-fit">
-                    <button
-                      onClick={() => setGaugeVersion('new')}
-                      className={clsx('text-2xs font-mono px-2.5 py-1 rounded-md transition-colors', gaugeVersion === 'new' ? 'bg-bg-base text-violet-400' : 'text-text-muted hover:text-text-secondary')}
-                    >
-                      New — stake here
-                    </button>
-                    <button
-                      onClick={() => setGaugeVersion('old')}
-                      className={clsx('text-2xs font-mono px-2.5 py-1 rounded-md transition-colors', gaugeVersion === 'old' ? 'bg-bg-base text-text-primary' : 'text-text-muted hover:text-text-secondary')}
-                    >
-                      Old — unstake here
-                    </button>
-                  </div>
-                  {gaugeVersion === 'new' && oldStaked > 0n && (
-                    <div className="p-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20 text-2xs text-violet-300 font-mono">
-                      {`You still have ${parseFloat(formatUnits(oldStaked, 18)).toFixed(4)} LP staked in the Old gauge — unstake there, then stake here to start earning again.`}
-                    </div>
-                  )}
-                  {gaugeVersion === 'old' && (
-                    <div className="p-2.5 rounded-lg bg-amber-500/5 border border-amber-500/20 text-2xs text-amber-300 font-mono">
-                      Migration complete — this gauge no longer earns emissions. Unstake and move to New.
-                    </div>
-                  )}
+                <div className="space-y-4">
                   {!activeGauge
                     ? <div className="p-4 text-center text-xs text-yellow-400">Gauge not yet deployed for this pool</div>
                     : (
-                    <div className="space-y-3">
-                      {gaugeVersion === 'new' && (
+                    <div className="space-y-4">
+                      {/* Stake Section */}
+                      <div className="p-4 rounded-xl bg-[#0E1526] border border-[#1D2B44] space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-300 font-medium">Stake LP Tokens</span>
+                          <span className="text-slate-400 font-mono text-2xs">Available: {lpFormatted} LP</span>
+                        </div>
                         <div className="flex items-center gap-2">
-                          <input type="number" value={stakeAmt} onChange={e => setStakeAmt(e.target.value)} placeholder="0.0" className="input-base flex-1 text-sm py-2" />
-                          <button onClick={() => setStakeAmt(lpFormatted)} className="text-xs text-aeon-400 font-mono hover:underline px-1">MAX</button>
+                          <input
+                            type="number"
+                            value={stakeAmt}
+                            onChange={e => setStakeAmt(e.target.value)}
+                            placeholder="0.0"
+                            className="input-base flex-1 text-sm py-2 font-mono"
+                          />
+                          <button
+                            onClick={() => setStakeAmt(lpFormatted)}
+                            className="text-xs text-emerald-400 font-mono hover:underline px-2 cursor-pointer font-bold"
+                          >
+                            MAX
+                          </button>
                           <button
                             disabled={!stakeAmt || parseFloat(stakeAmt) <= 0 || isBusy}
                             onClick={handleStake}
-                            className="btn-primary text-sm py-2 px-4 disabled:opacity-40 flex items-center gap-1 min-w-[110px] justify-center"
+                            className="btn-primary text-xs py-2.5 px-4 disabled:opacity-40 flex items-center gap-1.5 min-w-[120px] justify-center cursor-pointer font-bold"
                           >
-                            {(step === 'approving' || step === 'approve_wait' || step === 'staking' || step === 'stake_wait') && <Loader2 size={12} className="animate-spin" />}
+                            {(step === 'approving' || step === 'approve_wait' || step === 'staking' || step === 'stake_wait') && (
+                              <Loader2 size={12} className="animate-spin" />
+                            )}
                             {stakeLabel()}
                           </button>
                         </div>
-                      )}
-                      <div className="flex justify-between text-xs">
-                        <span className="text-text-muted">LP Balance: <span className="font-mono text-text-primary">{lpFormatted}</span></span>
-                        <span className="text-text-muted">Staked: <span className="font-mono text-text-primary">{stakedFormatted}</span></span>
                       </div>
-                      {staked > 0n && (
-                        <div className="flex items-center gap-2">
-                          <input type="number" value={unstakeAmt} onChange={e => setUnstakeAmt(e.target.value)} placeholder="Unstake amount" className="input-base flex-1 text-sm py-2" />
-                          <button onClick={() => setUnstakeAmt(stakedFormatted)} className="text-xs text-text-muted font-mono hover:underline px-1">MAX</button>
-                          <button
-                            disabled={!unstakeAmt || parseFloat(unstakeAmt) <= 0 || isBusy}
-                            onClick={() => setStep('unstaking')}
-                            className="btn-ghost text-sm py-2 px-4 border border-bg-border disabled:opacity-40 flex items-center gap-1"
-                          >
-                            {(step === 'unstaking' || step === 'unstake_wait') && <Loader2 size={12} className="animate-spin" />}
-                            Unstake
-                          </button>
+
+                      {/* Staked & Unstake Section */}
+                      <div className="p-4 rounded-xl bg-[#0E1526] border border-[#1D2B44] space-y-3">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-slate-300 font-medium">Your Staked Balance</span>
+                          <span className="text-white font-mono font-bold text-xs">{stakedFormatted} LP</span>
+                        </div>
+                        {staked > 0n && (
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              value={unstakeAmt}
+                              onChange={e => setUnstakeAmt(e.target.value)}
+                              placeholder="Amount to unstake"
+                              className="input-base flex-1 text-sm py-2 font-mono"
+                            />
+                            <button
+                              onClick={() => setUnstakeAmt(stakedFormatted)}
+                              className="text-xs text-slate-400 font-mono hover:underline px-2 cursor-pointer"
+                            >
+                              MAX
+                            </button>
+                            <button
+                              disabled={!unstakeAmt || parseFloat(unstakeAmt) <= 0 || isBusy}
+                              onClick={() => setStep('unstaking')}
+                              className="px-4 py-2.5 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/40 text-red-400 text-xs font-bold font-mono disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+                            >
+                              {(step === 'unstaking' || step === 'unstake_wait') && <Loader2 size={12} className="animate-spin" />}
+                              Unstake
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Claim Rewards */}
+                      <div className="flex items-center justify-between p-4 bg-[#101728] border border-[#1E2B44] rounded-xl">
+                        <div>
+                          <span className="text-xs text-slate-400 block">Pending Gauge Rewards</span>
+                          <span className={clsx('font-mono font-bold text-sm', earned > 0n ? 'text-emerald-400' : 'text-slate-400')}>
+                            {earnedFormatted} AEON
+                          </span>
+                        </div>
+                        <button
+                          disabled={earned === 0n || isBusy}
+                          onClick={() => setStep('claiming')}
+                          className="px-4 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-400 text-xs font-bold font-mono disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+                        >
+                          {(step === 'claiming' || step === 'claim_wait') && <Loader2 size={12} className="animate-spin" />}
+                          Claim AEON
+                        </button>
+                      </div>
+
+                      {errMsg && (
+                        <div className="p-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-xs text-red-400 font-mono break-all">
+                          {errMsg}
                         </div>
                       )}
-                      <div className="flex items-center justify-between p-3 bg-bg-raised rounded-xl">
-                        <span className="text-sm text-text-muted">Claimable AEON</span>
-                        <div className="flex items-center gap-2">
-                          <span className={clsx('font-mono font-bold text-sm', earned > 0n ? 'text-aeon-400' : 'text-text-muted')}>{earnedFormatted} AEON</span>
-                          <button
-                            disabled={earned === 0n || isBusy}
-                            onClick={() => setStep('claiming')}
-                            className="text-xs btn-ghost py-1 px-2 text-aeon-400 disabled:opacity-40 flex items-center gap-1"
-                          >
-                            {(step === 'claiming' || step === 'claim_wait') && <Loader2 size={10} className="animate-spin" />}
-                            Claim
-                          </button>
-                        </div>
-                      </div>
-                      {errMsg && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{errMsg}</div>}
                     </div>
                     )
                   }
