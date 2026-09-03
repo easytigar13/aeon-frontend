@@ -123,7 +123,20 @@ if (!Number.isFinite(MIN_PROFIT_PCT) || MIN_PROFIT_PCT < 0) throw new Error('MIN
 // Percent converted to parts-per-million of amountIn. PPM precision is needed
 // because the configured 0.001% floor is one tenth of a basis point.
 const MIN_NET_PROFIT_PPM = BigInt(Math.ceil(MIN_PROFIT_PCT * 10_000))
-const minimumNetProfitRaw = (amountIn: bigint, tokenSym?: string) => {
+const touchesAeonPool = (hops: HopCandidate[]): boolean => {
+  return hops.some(h => h.pool.pool.kind === 'vAMM' || h.pool.pool.kind === 'CL' || h.pool.pool.kind === 'directCL')
+}
+
+const minimumNetProfitRaw = (amountIn: bigint, tokenSym?: string, graph?: Map<string, HopCandidate[]>) => {
+  const minUsdg = parseUnits('0.01', TOKENS.USDG.decimals) // $0.01 net profit floor
+  if (tokenSym === 'USDG') return minUsdg
+  if (graph && tokenSym) {
+    const path = findConversionPath(graph, 'USDG', tokenSym)
+    if (path) {
+      const val = convertSpot(minUsdg, path)
+      if (val > 0n) return val
+    }
+  }
   const decimals = tokenSym && (TOKENS as any)[tokenSym]?.decimals ? (TOKENS as any)[tokenSym].decimals : 18
   const tokenFloor = parseUnits('0.0001', decimals)
   return tokenFloor > 0n ? tokenFloor : 1n
@@ -989,6 +1002,7 @@ function findArbs(graph: Map<string, HopCandidate[]>, baseSym: keyof typeof TOKE
   let capped = false
 
   function tryOpp(hops: HopCandidate[]) {
+    if (!touchesAeonPool(hops)) return
     const key = hops.map(h => h.pool.pool.address).join('>')
     if (seen.has(key)) return
     seen.add(key)
@@ -1072,6 +1086,7 @@ function findSettlementRoutes(graph: Map<string, HopCandidate[]>, baseSym: keyof
   const startPath = usdgPath(baseSym)
 
   function tryOpp(hops: HopCandidate[], endSym: string) {
+    if (!touchesAeonPool(hops)) return
     const key = hops.map(h => h.pool.pool.address).join('>') + '=>' + endSym
     if (seen.has(key)) return
     seen.add(key)
@@ -2387,7 +2402,7 @@ async function preflightCycleExact(
   }
   if (exactOut <= opp.amountIn) return false
   const grossProfit = exactOut - opp.amountIn
-  if (grossProfit < minimumNetProfitRaw(opp.amountIn)) return false
+  if (grossProfit < minimumNetProfitRaw(opp.amountIn, tokenIn.symbol, graph)) return false
 
   let executionGas: bigint
   if (mixed) {
@@ -2407,7 +2422,7 @@ async function preflightCycleExact(
   const bufferedGasWei = (executionGas * gasPrice * GAS_SAFETY_MULT_PCT) / 100n
   const exactGasInToken = await weiToTokenExact(tokenIn.symbol, bufferedGasWei, graph)
   if (exactGasInToken === null) return false
-  const minNetProfit = minimumNetProfitRaw(opp.amountIn)
+  const minNetProfit = minimumNetProfitRaw(opp.amountIn, tokenIn.symbol, graph)
   const requiredGrossProfit = exactGasInToken + minNetProfit
   if (grossProfit < requiredGrossProfit) return false
 
@@ -2433,7 +2448,7 @@ async function preflightCycleExact(
   opp.gasCostUsd = Number(formatUnits(valueInUsdg(tokenIn.symbol, exactGasInToken, graph), TOKENS.USDG.decimals))
   opp.expectedNetUsd = Number(formatUnits(valueInUsdg(tokenIn.symbol, netProfit, graph), TOKENS.USDG.decimals))
   opp.routeScore = scoreOpportunity(opp, opp.expectedNetUsd)
-  return opp.profitPct >= MIN_PROFIT_PCT && opp.expectedNetUsd > 0
+  return opp.profitPct >= MIN_PROFIT_PCT && opp.expectedNetUsd >= 0.01
 }
 
 async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
@@ -2863,10 +2878,11 @@ async function executeSettlementSwap(
   console.log(`   Est. gas cost: ~${formatUnits(gasUsdg, TOKENS.USDG.decimals)} USDG`)
 
   const inUsdgValue = tokenIn.symbol === 'USDG' ? amountIn : convertSpot(amountIn, inUsdgPath)
-  const requiredOutUsdg = inUsdgValue + gasUsdg + 1n
+  const minNetProfitUsdg = parseUnits('0.01', TOKENS.USDG.decimals) // Guaranteed $0.01 net profit
+  const requiredOutUsdg = inUsdgValue + gasUsdg + minNetProfitUsdg
   const amountOutMin = tokenOut.symbol === 'USDG' ? requiredOutUsdg : convertSpotReverse(requiredOutUsdg, outUsdgPath)
   if (amountOutMin <= 0n || opp.amountOut < amountOutMin) {
-    console.log('   Profit does not clear the estimated gas cost, skipping')
+    console.log('   Profit does not clear estimated gas + $0.01 net profit floor, skipping')
     return 'skipped'
   }
 
