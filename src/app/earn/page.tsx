@@ -117,14 +117,18 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   const t0 = TOKENS[pool.token0 as keyof typeof TOKENS]
   const t1 = TOKENS[pool.token1 as keyof typeof TOKENS]
 
-  // Pools sort token0/token1 by address on-chain, which doesn't always match
-  // this config's declared order ("AEON/ETH" doesn't guarantee AEON is
-  // token0) — LiquidityHelperRH.addLiquidity() reverts TokenMismatch() unless
-  // the args exactly match the pool's own token0()/token1().
   const { data: poolToken0Addr } = useReadContract({
     address: pool.address as `0x${string}`, abi: PAIR_ABI, functionName: 'token0',
   })
   const isToken0First = !poolToken0Addr || !t0 || (poolToken0Addr as string).toLowerCase() === t0.address.toLowerCase()
+
+  const { data: reservesData } = useReadContract({
+    address: pool.address as `0x${string}`, abi: PAIR_ABI, functionName: 'getReserves', query: { refetchInterval: 10000 },
+  })
+  const [r0raw, r1raw] = (reservesData as [bigint, bigint, number] | undefined) ?? [0n, 0n, 0]
+  const reserve0 = isToken0First ? r0raw : r1raw
+  const reserve1 = isToken0First ? r1raw : r0raw
+  const hasReserves = reserve0 > 0n && reserve1 > 0n
 
   const { data: bal0Raw,    refetch: refBal0   } = useReadContract({ address: t0?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t0, refetchInterval: 15000 } })
   const { data: bal1Raw,    refetch: refBal1   } = useReadContract({ address: t1?.address, abi: ERC20_ABI, functionName: 'balanceOf', args: [wallet], query: { enabled: !!t1, refetchInterval: 15000 } })
@@ -162,8 +166,8 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
   useEffect(() => {
     if (!t0 || !t1) return
     setLiqErr('')
-    if (liqStep === 'app0')    { liqWrite({ address: t0.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, parseUnits(amt0 || '0', t0.decimals)] }); setLiqStep('app0_wait') }
-    if (liqStep === 'app1')    { liqWrite({ address: t1.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, parseUnits(amt1 || '0', t1.decimals)] }); setLiqStep('app1_wait') }
+    if (liqStep === 'app0')    { liqWrite({ address: t0.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, 2n ** 256n - 1n] }); setLiqStep('app0_wait') }
+    if (liqStep === 'app1')    { liqWrite({ address: t1.address, abi: ERC20_ABI, functionName: 'approve', args: [CONTRACTS.LiquidityHelperV2, 2n ** 256n - 1n] }); setLiqStep('app1_wait') }
     if (liqStep === 'adding')  {
       const a0 = parseUnits(amt0 || '0', t0.decimals)
       const a1 = parseUnits(amt1 || '0', t1.decimals)
@@ -172,7 +176,7 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
         : [t1.address, a1, t0.address, a0]
       liqWrite({
         address: CONTRACTS.LiquidityHelperV2, abi: LIQUIDITY_HELPER_V2_ABI, functionName: 'addLiquidity',
-        args: [pool.address as `0x${string}`, addr0, amt0Wei, amt1Wei, withLiqSlippage(amt0Wei), withLiqSlippage(amt1Wei), addr1, wallet, liqDeadline()],
+        args: [pool.address as `0x${string}`, addr0, amt0Wei, amt1Wei, 0n, 0n, addr1, wallet, liqDeadline()],
       })
       setLiqStep('adding_wait')
     }
@@ -180,15 +184,34 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
 
   function autoFill0(v: string) {
     setAmt0(v)
-    const p0 = prices[pool.token0] ?? null
-    const p1 = prices[pool.token1] ?? null
-    if (p0 && p1 && v && parseFloat(v) > 0) setAmt1(((parseFloat(v) * p0) / p1).toFixed(8))
+    if (!v || parseFloat(v) <= 0 || !t0 || !t1) return
+    if (hasReserves) {
+      try {
+        const wei0 = parseUnits(v, t0.decimals)
+        const wei1 = (wei0 * reserve1) / reserve0
+        setAmt1(parseFloat(formatUnits(wei1, t1.decimals)).toFixed(6))
+      } catch {}
+    } else {
+      const p0 = prices[pool.token0] ?? null
+      const p1 = prices[pool.token1] ?? null
+      if (p0 && p1) setAmt1(((parseFloat(v) * p0) / p1).toFixed(6))
+    }
   }
+
   function autoFill1(v: string) {
     setAmt1(v)
-    const p0 = prices[pool.token0] ?? null
-    const p1 = prices[pool.token1] ?? null
-    if (p0 && p1 && v && parseFloat(v) > 0) setAmt0(((parseFloat(v) * p1) / p0).toFixed(8))
+    if (!v || parseFloat(v) <= 0 || !t0 || !t1) return
+    if (hasReserves) {
+      try {
+        const wei1 = parseUnits(v, t1.decimals)
+        const wei0 = (wei1 * reserve0) / reserve1
+        setAmt0(parseFloat(formatUnits(wei0, t0.decimals)).toFixed(6))
+      } catch {}
+    } else {
+      const p0 = prices[pool.token0] ?? null
+      const p1 = prices[pool.token1] ?? null
+      if (p0 && p1) setAmt0(((parseFloat(v) * p1) / p0).toFixed(6))
+    }
   }
 
   function handleAdd() {
@@ -215,30 +238,27 @@ function LiquidityPanel({ pool, wallet, prices, tvlUsd, onDone }: {
       <div>
         <div className="flex justify-between text-2xs text-text-muted mb-1">
           <span>{dispSym(t0?.symbol ?? pool.token0)}</span>
-          <button onClick={() => autoFill0(bal0Fmt)} className="text-aeon-400 font-mono hover:underline">MAX {bal0Fmt}</button>
+          <button onClick={() => autoFill0(bal0Fmt)} className="text-aeon-400 font-mono hover:underline cursor-pointer">MAX {bal0Fmt}</button>
         </div>
-        <input type="number" value={amt0} onChange={e => autoFill0(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
+        <input type="number" value={amt0} onChange={e => autoFill0(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2 font-mono" />
       </div>
       <div>
         <div className="flex justify-between text-2xs text-text-muted mb-1">
           <span>{dispSym(t1?.symbol ?? pool.token1)}</span>
-          <button onClick={() => autoFill1(bal1Fmt)} className="text-aeon-400 font-mono hover:underline">MAX {bal1Fmt}</button>
+          <button onClick={() => autoFill1(bal1Fmt)} className="text-aeon-400 font-mono hover:underline cursor-pointer">MAX {bal1Fmt}</button>
         </div>
-        <input type="number" value={amt1} onChange={e => autoFill1(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2" />
+        <input type="number" value={amt1} onChange={e => autoFill1(e.target.value)} placeholder="0.0" className="input-base w-full text-sm py-2 font-mono" />
       </div>
-      {!prices[pool.token0] && !prices[pool.token1] && (
-        <div className="text-2xs text-yellow-400 font-mono px-1">No price feed yet — enter both amounts manually to set the initial ratio</div>
-      )}
       <button
         disabled={!amt0 || !amt1 || parseFloat(amt0 || '0') <= 0 || parseFloat(amt1 || '0') <= 0 || addBusy}
         onClick={handleAdd}
-        className="btn-primary w-full text-sm py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40"
+        className="btn-primary w-full text-sm py-2.5 flex items-center justify-center gap-1.5 disabled:opacity-40 cursor-pointer font-bold"
       >
         {addBusy && <Loader2 size={12} className="animate-spin" />}
         {addLabel()}
       </button>
       {liqErr && <div className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-2xs text-red-400 font-mono break-all">{liqErr}</div>}
-      {lpBal > 0n && <div className="text-2xs text-text-muted text-center">Your LP: {lpFmt} · use the <a href="/liquidity" className="text-aeon-400 hover:underline">Liquidity</a> page to remove</div>}
+      {lpBal > 0n && <div className="text-2xs text-text-muted text-center font-mono">Your LP: {lpFmt} · use the <a href="/liquidity" className="text-aeon-400 hover:underline">Liquidity</a> page to manage</div>}
     </div>
   )
 }
