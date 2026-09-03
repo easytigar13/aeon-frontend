@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { TrendingUp, Flame, Lock, Vote, BarChart3, Clock, Coins, Sparkles } from 'lucide-react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { useReadContract, useReadContracts } from 'wagmi'
@@ -182,6 +182,11 @@ let dashboardCache: {
 }
 
 export default function DashboardPage() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   const [chartTab, setChartTab] = useState<'tvl' | 'vol24h' | 'vol7d' | 'volAllTime'>('tvl')
 
   const prices        = usePrices()
@@ -192,13 +197,13 @@ export default function DashboardPage() {
   const liquidPoolStats = allPoolStats.filter(stat => hasMeaningfulPoolLiquidity(stat.tvlUsd))
   const totalTVL      = useTotalTVL(liquidPoolStats)
   const volResult     = useVolume24h(prices)
-  const volume24h     = volResult.volume24h
-  const volume7d      = volResult.volume7d
-  const volumeAllTime = volResult.volumeAllTime
-  const volByAddr24h  = volResult.byPool24h
-  const volByAddr7d   = volResult.byPool7d
-  const volByAddrAllTime = volResult.byPoolAllTime
-  const volByAddrWeek = volResult.byPoolWeek
+  const volume24h     = volResult?.volume24h ?? 0
+  const volume7d      = volResult?.volume7d ?? 0
+  const volumeAllTime = volResult?.volumeAllTime ?? 0
+  const volByAddr24h  = volResult?.byPool24h ?? {}
+  const volByAddr7d   = volResult?.byPool7d ?? {}
+  const volByAddrAllTime = volResult?.byPoolAllTime ?? {}
+  const volByAddrWeek = volResult?.byPoolWeek ?? {}
   const statByAddr = Object.fromEntries(allPoolStats.map(s => [s.address.toLowerCase(), s]))
 
   const seenAddrs = new Set<string>()
@@ -365,17 +370,17 @@ export default function DashboardPage() {
     .slice(0, 10)
 
   const vol24hChartData = liquidPools
-    .map(p => ({ name: chartName(p), value: volByAddr24h[p.address.toLowerCase()] ?? 0 }))
+    .map(p => ({ name: chartName(p), value: volByAddr24h?.[p.address.toLowerCase()] ?? 0 }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10)
 
   const vol7dChartData = liquidPools
-    .map(p => ({ name: chartName(p), value: volByAddr7d[p.address.toLowerCase()] ?? 0 }))
+    .map(p => ({ name: chartName(p), value: volByAddr7d?.[p.address.toLowerCase()] ?? 0 }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10)
 
   const volAllTimeChartData = liquidPools
-    .map(p => ({ name: chartName(p), value: volByAddrAllTime[p.address.toLowerCase()] ?? 0 }))
+    .map(p => ({ name: chartName(p), value: volByAddrAllTime?.[p.address.toLowerCase()] ?? 0 }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 10)
 
@@ -435,7 +440,11 @@ export default function DashboardPage() {
             </div>
             <span className="text-xs text-text-muted font-mono">Live on-chain</span>
           </div>
-          {chartEmpty ? (
+          {!mounted ? (
+            <div className="h-[200px] flex items-center justify-center text-text-muted text-sm font-mono animate-pulse">
+              Loading analytics...
+            </div>
+          ) : chartEmpty ? (
             <div className="h-[200px] flex items-center justify-center text-text-muted text-sm font-mono">
               No volume data recorded yet for this window
             </div>
