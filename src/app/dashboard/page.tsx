@@ -406,12 +406,11 @@ export default function DashboardPage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
           <KpiCard label="Total Value Locked" value={fmtUsd(totalTVL || null, true)} accent="emerald" icon={<TrendingUp size={16} className="text-emerald-400" />} delta={`${liquidPools.length} pools`} />
           <KpiCard label="24h Volume"         value={fmtUsd(volume24h, true)}         accent="blue"    icon={<BarChart3  size={16} className="text-blue-400" />}    delta="trailing 24h" />
           <KpiCard label="7d (Epoch) Volume"  value={fmtUsd(volume7d, true)}          accent="violet"  icon={<Sparkles   size={16} className="text-violet-400" />}  delta={`Epoch #${protocolEpoch}`} />
           <KpiCard label="All-Time Volume"    value={fmtUsd(volumeAllTime, true)}     accent="aeon"    icon={<TrendingUp size={16} className="text-aeon-400" />}    delta="all epochs" />
-          <KpiCard label="AEON Supply"        value={`${fmt18(aeonSupply)} AEON`}     accent="aeon"    icon={<Coins      size={16} className="text-aeon-400" />}    delta="genesis: 100,000" />
           <KpiCard label="Circulating Supply" value={`${fmt18(circulatingSupply)} AEON`} accent="violet" icon={<Vote      size={16} className="text-violet-400" />}  delta="supply − burned − veAEON" />
           <KpiCard label="AEON Burned"        value={`${fmt18(totalBurned)} AEON`}    accent="red"     icon={<Flame      size={16} className="text-red-400" />}     delta={`${burnedPct}% of supply`} />
         </div>
