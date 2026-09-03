@@ -60,7 +60,7 @@ let lastKnownPrices: PriceMap = {
 }
 
 export function usePrices(): PriceMap {
-  const { data } = useReadContracts({ contracts: PRICE_CONTRACTS, query: { refetchInterval: 15000, staleTime: 60000 } })
+  const { data } = useReadContracts({ contracts: PRICE_CONTRACTS, query: { refetchInterval: 5000, staleTime: 5000 } })
 
   const get = (i: number) => (data?.[i]?.status === 'success' ? data[i].result : undefined)
 

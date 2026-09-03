@@ -12,7 +12,7 @@ export type DexTokenInfo = {
 const TOKEN_ENTRIES = Object.entries(TOKENS).filter(([k]) => k !== 'ETH')
 
 const SESSION_KEY = 'aeon_dex_token_info_v2'
-const TTL = 5 * 60 * 1000
+const TTL = 30 * 1000
 
 export function useDexTokenInfo(): Record<string, DexTokenInfo> {
   const [info, setInfo] = useState<Record<string, DexTokenInfo>>({})

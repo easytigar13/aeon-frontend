@@ -80,6 +80,10 @@ const MULTI_GAUGE_CONTROLLER_ADDRESS = (process.env.MULTI_GAUGE_CONTROLLER_ADDRE
 // (distributor.notifier == buyback; poolForToken[USDG/WETH] registered) — the
 // only missing piece was a caller.
 const BUYBACK_ENGINE_ADDRESS = (process.env.BUYBACK_ENGINE_ADDRESS ?? CONTRACTS.BuybackEngine) as `0x${string}`
+// Optional no-LP-migration vote checkpoint operator. It is deliberately
+// inactive until a confirmed deployed address is configured. Voters opt in
+// once by approving the operator on the veNFT contract.
+const CHECKPOINT_OPERATOR_ADDRESS = process.env.CHECKPOINT_OPERATOR_ADDRESS as `0x${string}` | undefined
 
 // One-off: cutover (2026-07-16) happened mid-epoch, so the real fees
 // collected up to that point (~700 AEON) are stranded on the OLD
@@ -105,6 +109,19 @@ const VOTER_ABI = parseAbi([
   'function gauges(address) view returns (address)',
   'function isAlive(address) view returns (bool)',
   'function distributeAll()',
+  'function ve() view returns (address)',
+  'function poolVote(uint256,uint256) view returns (address)',
+  'function poolVoteWeight(uint256,address,uint256) view returns (uint256)',
+  'function usedWeights(uint256) view returns (uint256)',
+])
+const VE_ABI = parseAbi([
+  'function tokenId() view returns (uint256)',
+  'function getApproved(uint256) view returns (address)',
+  'function isApprovedForAll(address,address) view returns (bool)',
+  'function ownerOf(uint256) view returns (address)',
+])
+const CHECKPOINT_OPERATOR_ABI = parseAbi([
+  'function checkpoint(uint256 tokenId)',
 ])
 const GAUGE_ABI = parseAbi([
   'function collectFees()',
@@ -143,6 +160,74 @@ function writeStatus(extra: Record<string, unknown>) {
   try {
     fs.writeFileSync(STATUS_FILE, JSON.stringify({ updatedAt: Date.now(), lastSweptEpoch: lastSweptEpoch.toString(), ...extra }, null, 2))
   } catch {}
+}
+
+async function checkpointPersistentVotesIfNearBoundary() {
+  if (!CHECKPOINT_OPERATOR_ADDRESS) return
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  const epoch = (now / WEEK) * WEEK
+  const secondsToBoundary = epoch + WEEK - now
+  if (secondsToBoundary > BigInt(Math.floor(SWEEP_WINDOW_MS / 1000))) return
+
+  const ve = await publicClient.readContract({
+    address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 've',
+  })
+  const maxTokenId = await publicClient.readContract({
+    address: ve, abi: VE_ABI, functionName: 'tokenId',
+  })
+  let checkpointed = 0
+  let alreadyRecorded = 0
+  let notApproved = 0
+  const failures: { tokenId: string; error: string }[] = []
+
+  for (let tokenId = 1n; tokenId <= maxTokenId; tokenId++) {
+    let owner: `0x${string}`
+    try {
+      owner = await publicClient.readContract({ address: ve, abi: VE_ABI, functionName: 'ownerOf', args: [tokenId] })
+    } catch { continue }
+    const usedWeight = await publicClient.readContract({
+      address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 'usedWeights', args: [tokenId],
+    })
+    if (usedWeight === 0n) continue
+
+    let firstPool: `0x${string}`
+    try {
+      firstPool = await publicClient.readContract({
+        address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 'poolVote', args: [tokenId, 0n],
+      })
+    } catch { continue }
+    const historicalWeight = await publicClient.readContract({
+      address: VOTER_ADDRESS, abi: VOTER_ABI, functionName: 'poolVoteWeight', args: [tokenId, firstPool, epoch],
+    })
+    if (historicalWeight > 0n) { alreadyRecorded++; continue }
+
+    const [tokenApproval, approvedForAll] = await Promise.all([
+      publicClient.readContract({
+        address: ve, abi: VE_ABI, functionName: 'getApproved', args: [tokenId],
+      }),
+      publicClient.readContract({
+      address: ve, abi: VE_ABI, functionName: 'isApprovedForAll', args: [owner, CHECKPOINT_OPERATOR_ADDRESS],
+      }),
+    ])
+    const approved = tokenApproval.toLowerCase() === CHECKPOINT_OPERATOR_ADDRESS.toLowerCase() || approvedForAll
+    if (!approved) { notApproved++; continue }
+
+    try {
+      const simulation = await publicClient.simulateContract({
+        account, address: CHECKPOINT_OPERATOR_ADDRESS, abi: CHECKPOINT_OPERATOR_ABI,
+        functionName: 'checkpoint', args: [tokenId],
+      })
+      const hash = await walletClient.writeContract(simulation.request)
+      await publicClient.waitForTransactionReceipt({ hash })
+      checkpointed++
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      failures.push({ tokenId: tokenId.toString(), error: message.slice(0, 300) })
+    }
+  }
+  log(`Vote checkpoints: ${checkpointed} written, ${alreadyRecorded} already recorded, ${notApproved} not opted in, ${failures.length} failed`)
+  if (failures.length) log(`Vote checkpoint failures: ${JSON.stringify(failures)}`)
+  writeStatus({ voteCheckpoints: { epoch: epoch.toString(), checkpointed, alreadyRecorded, notApproved, failures } })
 }
 
 // Collect fees exactly once per epoch, only inside the pre-boundary window.
@@ -345,6 +430,7 @@ async function snapshotLegacyFeeDistributorIfNeeded() {
 
 async function tick() {
   try {
+    await checkpointPersistentVotesIfNearBoundary()
     await sweepFeesIfNearBoundary()
     await closeEpochIfNeeded()
     await snapshotLegacyFeeDistributorIfNeeded()

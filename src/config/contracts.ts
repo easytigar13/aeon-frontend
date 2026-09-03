@@ -5,6 +5,13 @@
 
 export const CHAIN_ID = 4663
 
+// Deployed address is injected only after the checkpoint operator deployment
+// is confirmed on-chain. Leaving this unset keeps the UI and keeper inert.
+const checkpointOperator = process.env.NEXT_PUBLIC_EPOCH_CHECKPOINT_OPERATOR
+export const EPOCH_CHECKPOINT_OPERATOR = checkpointOperator && /^0x[0-9a-fA-F]{40}$/.test(checkpointOperator)
+  ? checkpointOperator as `0x${string}`
+  : undefined
+
 // Cut over 2026-07-16: the AeonVoterV3 furnace-double-count-vote fix (see
 // aeon-protocol-v5/MIGRATION_V3_CHECKLIST.md) is now the LIVE voter --
 // AeonVotingEscrow.voter and MinterProxy both point at the new stack

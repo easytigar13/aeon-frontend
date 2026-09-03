@@ -30,7 +30,7 @@ const POOL_TOKEN0_FIRST = POOLS.map(p => {
 const POOL_STATS_CACHE = new Map<string, PoolStat>()
 
 export function usePoolStats(prices: PriceMap): PoolStat[] {
-  const { data } = useReadContracts({ contracts: POOL_STAT_CONTRACTS, query: { refetchInterval: 30000, staleTime: 60000 } })
+  const { data } = useReadContracts({ contracts: POOL_STAT_CONTRACTS, query: { refetchInterval: 10000, staleTime: 5000 } })
 
   return POOLS.map((pool, i) => {
     const base = i * 2

@@ -450,6 +450,23 @@ export const VOTING_ESCROW_ABI = [
     outputs: [{ name: '', type: 'address' }],
   },
   {
+    name: 'getApproved',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [{ name: 'tokenId', type: 'uint256' }],
+    outputs: [{ name: '', type: 'address' }],
+  },
+  {
+    name: 'approve',
+    type: 'function',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'tokenId', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
     name: 'balanceOf',
     type: 'function',
     stateMutability: 'view',

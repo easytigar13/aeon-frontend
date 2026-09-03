@@ -5,7 +5,7 @@ import { clsx } from 'clsx'
 import { useAccount, useReadContract, useReadContracts, useWriteContract, useWaitForTransactionReceipt, usePublicClient } from 'wagmi'
 import { useConnectModal } from '@rainbow-me/rainbowkit'
 import { formatUnits, parseUnits } from 'viem'
-import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG } from '@/config/contracts'
+import { POOLS, CL_POOLS, DLMM_POOLS, CONTRACTS, EPOCH_CONFIG, EPOCH_CHECKPOINT_OPERATOR } from '@/config/contracts'
 import { VOTING_ESCROW_ABI, VOTER_ABI, MULTI_GAUGE_CONTROLLER_ABI, EMISSIONS_ENGINE_ABI, FURNACE_ABI, ERC20_ABI, FEE_DISTRIBUTOR_ABI, GAUGE_ABI } from '@/config/abis'
 import { usePrices } from '@/hooks/usePrices'
 import { usePoolStats, useClPoolStats, useDlmmPoolStats } from '@/hooks/usePoolStats'
@@ -615,12 +615,15 @@ export default function VotePage() {
                       </span>
                     </div>
                     <div className="flex justify-between text-xs">
-                      <span className="text-text-muted">Has Voted</span>
+                      <span className="text-text-muted">Persistent Allocation</span>
                       <span className={clsx('font-mono', hasVotedForMode ? 'text-yellow-400' : 'text-emerald-400')}>
-                        {voteMode === 'vAMM' && hasVoted === undefined ? '—' : voteMode === 'CL_DLMM' && multiHasVoted === undefined ? '—' : hasVotedForMode ? 'Yes' : 'No'}
+                        {voteMode === 'vAMM' && hasVoted === undefined ? '—' : voteMode === 'CL_DLMM' && multiHasVoted === undefined ? '—' : hasVotedForMode ? 'Active' : 'None'}
                       </span>
                     </div>
                     {hasVotedForMode && <CurrentVotes tokenId={tokenId} mode={voteMode} epoch={multiEpoch} />}
+                    {voteMode === 'vAMM' && hasVoted && tokenId !== undefined && isOwner && (
+                      <AutomaticVoteCheckpoint tokenId={tokenId} owner={address!} />
+                    )}
                     {voteMode === 'vAMM' && hasVoted && (
                       <div className="space-y-1 mt-1">
                         <button onClick={handleReset} disabled={isResetting || !canReset} className="btn-ghost w-full text-xs py-1.5 text-red-400 border border-red-400/20 hover:border-red-400/50 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
@@ -858,6 +861,61 @@ function CurrentVotes({ tokenId, mode, epoch }: { tokenId: bigint | undefined; m
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// One token-specific ERC-721 approval lets the checkpoint operator copy this
+// persistent allocation into each weekly fee snapshot. LP tokens and gauge
+// stakes never move, and users can revoke the approval at any time.
+function AutomaticVoteCheckpoint({ tokenId, owner }: { tokenId: bigint; owner: `0x${string}` }) {
+  const operator = EPOCH_CHECKPOINT_OPERATOR
+  const { data: approvedAddress, refetch } = useReadContract({
+    address: CONTRACTS.AeonVotingEscrow,
+    abi: VOTING_ESCROW_ABI,
+    functionName: 'getApproved',
+    args: [tokenId],
+    query: { enabled: !!operator, refetchInterval: 30000 },
+  })
+  const enabled = !!operator && typeof approvedAddress === 'string' && approvedAddress.toLowerCase() === operator.toLowerCase()
+  const { writeContract, data: hash, isPending, error } = useWriteContract()
+  const { isLoading: isConfirming, isSuccess } = useWaitForTransactionReceipt({ hash, query: { enabled: !!hash } })
+
+  useEffect(() => {
+    if (isSuccess) refetch()
+  }, [isSuccess, refetch])
+
+  if (!operator) {
+    return <p className="text-2xs text-text-muted text-center">Automatic weekly fee eligibility is awaiting operator deployment.</p>
+  }
+
+  function setEnabled(next: boolean) {
+    writeContract({
+      account: owner,
+      address: CONTRACTS.AeonVotingEscrow,
+      abi: VOTING_ESCROW_ABI,
+      functionName: 'approve',
+      args: [next ? operator! : ZERO_ADDRESS, tokenId],
+    })
+  }
+
+  return (
+    <div className="space-y-1 mt-1 pt-1 border-t border-bg-border">
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-text-muted">Weekly fee checkpoint</span>
+        <span className={enabled ? 'text-emerald-400 font-mono' : 'text-yellow-400 font-mono'}>
+          {enabled ? 'Automatic' : 'Manual'}
+        </span>
+      </div>
+      <button
+        onClick={() => setEnabled(!enabled)}
+        disabled={isPending || isConfirming}
+        className="btn-ghost w-full text-xs py-1.5 border border-aeon-400/20 disabled:opacity-40"
+      >
+        {isPending || isConfirming ? 'Confirming…' : enabled ? 'Disable automatic checkpoint' : 'Enable automatic checkpoint'}
+      </button>
+      <p className="text-2xs text-text-muted text-center">Your pool allocation and staked LP stay exactly where they are.</p>
+      {error && <p className="text-2xs text-red-400 font-mono break-all">{error.message.slice(0, 150)}</p>}
     </div>
   )
 }

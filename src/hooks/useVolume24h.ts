@@ -185,8 +185,8 @@ const EMPTY_VOLUME_RESULT: VolumeResult = {
 // Without a shared cache, every mounted instance independently downloaded
 // the same seven days of logs. Keep one in-flight request and one result per
 // browser session, then fan it out to all consumers.
-const SHARED_DAY_TTL_MS = 60_000
-const SHARED_WEEK_TTL_MS = 10 * 60_000
+const SHARED_DAY_TTL_MS = 15_000
+const SHARED_WEEK_TTL_MS = 30_000
 let sharedVolumeResult: VolumeResult = EMPTY_VOLUME_RESULT
 let sharedDayFetchedAt = 0
 let sharedWeekFetchedAt = 0
