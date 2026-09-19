@@ -1,0 +1,1717 @@
+{
+  "metricsVersion": 5,
+  "updatedAt": "2026-09-19T17:11:09.686Z",
+  "keeperAddress": "0x32A3FC106f77300524Dc2dC4D5E672EF08615391",
+  "dryRun": false,
+  "intervalMs": 200,
+  "tickMs": 2724,
+  "scanTelemetry": {
+    "mode": "full",
+    "networkSetupMs": 146,
+    "stateReadMs": 156,
+    "balanceReadMs": 299,
+    "localSearchMs": 2272,
+    "exactQuoteMs": 0,
+    "approximateCandidates": 1707,
+    "exactSelected": 0,
+    "exactChecked": 0,
+    "exactValid": 0,
+    "lastBlock": "67250797"
+  },
+  "poolsMonitored": 38,
+  "poolsLiveThisTick": 36,
+  "venueBreakdown": {
+    "vAMM": {
+      "total": 9,
+      "live": 9
+    },
+    "uniV2": {
+      "total": 7,
+      "live": 7
+    },
+    "uniV3": {
+      "total": 3,
+      "live": 3
+    },
+    "uniV4": {
+      "total": 16,
+      "live": 14
+    },
+    "CL": {
+      "total": 3,
+      "live": 3
+    }
+  },
+  "monitoredPools": [
+    {
+      "name": "AEON/ETH",
+      "address": "0xD215650cb628113A64D938164Ee5CD72293F9ea6",
+      "poolId": null,
+      "kind": "vAMM",
+      "token0": "AEON",
+      "token1": "WETH",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "AEON": "3857.815326173109647185",
+        "WETH": "1.111649783932354323"
+      }
+    },
+    {
+      "name": "AEON/USDG",
+      "address": "0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288",
+      "poolId": null,
+      "kind": "vAMM",
+      "token0": "AEON",
+      "token1": "USDG",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "AEON": "1631.920474955828239772",
+        "USDG": "1227.766668"
+      }
+    },
+    {
+      "name": "VIRTUAL/AEON",
+      "address": "0x67B2da1742187Aa09b427082b06ACDC5bBCA2D99",
+      "poolId": null,
+      "kind": "vAMM",
+      "token0": "VIRTUAL",
+      "token1": "AEON",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "VIRTUAL": "45.963939122433338607",
+        "AEON": "38.281148054460197512"
+      }
+    },
+    {
+      "name": "FRONG/AEON",
+      "address": "0x693Bf3EeCb4110c777BEc13D6c11d139BF84e2E1",
+      "poolId": null,
+      "kind": "vAMM",
+      "token0": "FRONG",
+      "token1": "AEON",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "FRONG": "8467.548536403462388117",
+        "AEON": "80.934909758818539149"
+      }
+    },
+    {
+      "name": "FRONG/ETH",
+      "address": "0x2c07F05D5111da590D8749A091974285FcacDf0D",
+      "poolId": null,
+      "kind": "vAMM",
+      "token0": "FRONG",
+      "token1": "WETH",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "FRONG": "804.554071465839496013",
+        "WETH": "0.002461734307470474"
+      }
+    },
+    {
+      "name": "ROBINFUN/AEON",
+      "address": "0xeB638e1FA253E5526C2be76626dE26F02E4bdaba",
+      "poolId": null,
+      "kind": "vAMM",
+      "token0": "ROBINFUN",
+      "token1": "AEON",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "ROBINFUN": "17907.753490892153375518",
+        "AEON": "2.324063906475440426"
+      }
+    },
+    {
+      "name": "CASHCAT/AEON",
+      "address": "0x22d76bf4e8d2c1DfCca7de6c9dC46Ec2a8Ed7Eb7",
+      "poolId": null,
+      "kind": "vAMM",
+      "token0": "CASHCAT",
+      "token1": "AEON",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "CASHCAT": "4335.000706366864685386",
+        "AEON": "1194.789457070438547709"
+      }
+    },
+    {
+      "name": "HOODIE/AEON",
+      "address": "0x3C643F22F0b24795710638CdEf2296eA12896317",
+      "poolId": null,
+      "kind": "vAMM",
+      "token0": "HOODIE",
+      "token1": "AEON",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "HOODIE": "28309451.286627346625453045",
+        "AEON": "32.804448324524690061"
+      }
+    },
+    {
+      "name": "NASDAQ/AEON",
+      "address": "0xbf5FCFF8e5604b3ba404a4Cb5Be49EF230e0dA76",
+      "poolId": null,
+      "kind": "vAMM",
+      "token0": "NASDAQ",
+      "token1": "AEON",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "NASDAQ": "3779480.0352286641505559",
+        "AEON": "31.508703786511295013"
+      }
+    },
+    {
+      "name": "WETH/USDG",
+      "address": "0x8803c117ccae7B5146297876c2A25DF135141C4d",
+      "poolId": null,
+      "kind": "uniV2",
+      "token0": "WETH",
+      "token1": "USDG",
+      "feeBps": 30,
+      "live": true,
+      "reserves": {
+        "WETH": "173.050271367049560461",
+        "USDG": "457939.237889"
+      }
+    },
+    {
+      "name": "WETH/VIRTUAL",
+      "address": "0xd95e8e2Cd04c207625C6F23c974d365a5F3A91D3",
+      "poolId": null,
+      "kind": "uniV2",
+      "token0": "WETH",
+      "token1": "VIRTUAL",
+      "feeBps": 30,
+      "live": true,
+      "reserves": {
+        "WETH": "473.282681941927031274",
+        "VIRTUAL": "1851182.165021789982902419"
+      }
+    },
+    {
+      "name": "USDG/VIRTUAL",
+      "address": "0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D",
+      "poolId": null,
+      "kind": "uniV2",
+      "token0": "USDG",
+      "token1": "VIRTUAL",
+      "feeBps": 30,
+      "live": true,
+      "reserves": {
+        "USDG": "87008.837795",
+        "VIRTUAL": "128328.622783810340675679"
+      }
+    },
+    {
+      "name": "VEX/VIRTUAL",
+      "address": "0x817f16F5D8da83d1B089B082c0172af3923618dA",
+      "poolId": null,
+      "kind": "uniV2",
+      "token0": "VEX",
+      "token1": "VIRTUAL",
+      "feeBps": 130,
+      "live": true,
+      "reserves": {
+        "VEX": "41966009.670621747924783613",
+        "VIRTUAL": "274523.552475673743951427"
+      }
+    },
+    {
+      "name": "UniV3 WETH/FRONG 10000",
+      "address": "0x09a431261E3d0F1dc2f7e0b14718DBBBCBe19Ae4",
+      "poolId": null,
+      "kind": "uniV3",
+      "token0": "WETH",
+      "token1": "FRONG",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "WETH": "78.488356285339189517",
+        "FRONG": "29156951.821077793096956232"
+      }
+    },
+    {
+      "name": "UniV3 CASHCAT/WETH 3000",
+      "address": "0xd42A491087a15E5afd51FEb3606066Cc152d2b09",
+      "poolId": null,
+      "kind": "uniV3",
+      "token0": "CASHCAT",
+      "token1": "WETH",
+      "feeBps": 30,
+      "live": true,
+      "reserves": {
+        "CASHCAT": "32743110.764100093849386211",
+        "WETH": "2554.68942927230488049"
+      }
+    },
+    {
+      "name": "UniV3 CASHCAT/WETH 10000",
+      "address": "0xA70fc67C9F69da90B63a0e4C05D229954574E313",
+      "poolId": null,
+      "kind": "uniV3",
+      "token0": "CASHCAT",
+      "token1": "WETH",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "CASHCAT": "38596991.95439489316995354",
+        "WETH": "2998.592323492419870652"
+      }
+    },
+    {
+      "name": "UniV4 WETH/FRONG 2500",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0xacea8920877840033f0275c37f9b61550b5326917e948bcf8339714d96f9521a",
+      "kind": "uniV4",
+      "token0": "WETH",
+      "token1": "FRONG",
+      "feeBps": 25,
+      "live": true,
+      "reserves": {
+        "WETH": "165.848893463642636722",
+        "FRONG": "61517432.343125042934564061"
+      }
+    },
+    {
+      "name": "UniV4 USDG/FRONG 8388608",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x43907ea5b073cbbcdbf03228df029764dc285bc7a5fb616b1fb973b454e5d46c",
+      "kind": "uniV4",
+      "token0": "USDG",
+      "token1": "FRONG",
+      "feeBps": 83887,
+      "live": false,
+      "reserves": null
+    },
+    {
+      "name": "UniV4 USDG/FRONG 21000",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x20d317b609c9a9af863d0dd6cd95953f8c209f775cd148171e9566b86cc6bc7f",
+      "kind": "uniV4",
+      "token0": "USDG",
+      "token1": "FRONG",
+      "feeBps": 210,
+      "live": true,
+      "reserves": {
+        "USDG": "99369.045039",
+        "FRONG": "13861506.971014630419763254"
+      }
+    },
+    {
+      "name": "UniV4 CASHCAT/USDG 2690",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0xa92a3df27a00a276183ff7265fd8affa11df1fe8bb23ddfaf13f6c879a3f818b",
+      "kind": "uniV4",
+      "token0": "CASHCAT",
+      "token1": "USDG",
+      "feeBps": 27,
+      "live": true,
+      "reserves": {
+        "CASHCAT": "11853948.02670969783471503",
+        "USDG": "2453171.964863"
+      }
+    },
+    {
+      "name": "UniV4 WETH/CASHCAT 10075",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0xa2a8b872de9a817eb3ebee0706693143b687c25606a15ec12ec0b859f8b90036",
+      "kind": "uniV4",
+      "token0": "WETH",
+      "token1": "CASHCAT",
+      "feeBps": 101,
+      "live": false,
+      "reserves": null
+    },
+    {
+      "name": "UniV4 WETH/CASHCAT 20000",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0xf7dc0af99fce7169eb76854c0b39beb9915526894d42229946e5cb469cab50b1",
+      "kind": "uniV4",
+      "token0": "WETH",
+      "token1": "CASHCAT",
+      "feeBps": 200,
+      "live": true,
+      "reserves": {
+        "WETH": "113.465253709395001359",
+        "CASHCAT": "1445368.507947492502332464"
+      }
+    },
+    {
+      "name": "UniV4 WETH/CASHCAT 2925",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x404c8eb258ece3c428a6ac879854488b103f4fd33058df3af17cd5d641fa3be1",
+      "kind": "uniV4",
+      "token0": "WETH",
+      "token1": "CASHCAT",
+      "feeBps": 30,
+      "live": true,
+      "reserves": {
+        "WETH": "11.03337136952145696",
+        "CASHCAT": "141243.447312384186128295"
+      }
+    },
+    {
+      "name": "External V2 FRONG/WETH 1.5%",
+      "address": "0x00EccbF137ee425B211c36cfdeC3B2E5535d2289",
+      "poolId": null,
+      "kind": "uniV2",
+      "token0": "WETH",
+      "token1": "FRONG",
+      "feeBps": 150,
+      "live": true,
+      "reserves": {
+        "WETH": "0.060170736061583849",
+        "FRONG": "22305.183520607750070492"
+      }
+    },
+    {
+      "name": "External V2 CASHCAT/WETH 0.5%",
+      "address": "0xDC5BAa131c844D0CA548f4e0AA7CE9f50c742eC5",
+      "poolId": null,
+      "kind": "uniV2",
+      "token0": "CASHCAT",
+      "token1": "WETH",
+      "feeBps": 50,
+      "live": true,
+      "reserves": {
+        "CASHCAT": "10102.791629212926278977",
+        "WETH": "0.785520392688428184"
+      }
+    },
+    {
+      "name": "Uniswap CASHCAT/WETH",
+      "address": "0x0579fA41416101b66e202F66bF3B0de5101F5b9F",
+      "poolId": null,
+      "kind": "uniV2",
+      "token0": "CASHCAT",
+      "token1": "WETH",
+      "feeBps": 30,
+      "live": true,
+      "reserves": {
+        "CASHCAT": "557.034066119592162329",
+        "WETH": "0.043644037498586741"
+      }
+    },
+    {
+      "name": "UniV4 WETH/USDG 200",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x84bd4e2d8be11aeb0afc1195b38f587b61e90068548f1063fdbe448fb8cad0b6",
+      "kind": "uniV4",
+      "token0": "WETH",
+      "token1": "USDG",
+      "feeBps": 2,
+      "live": true,
+      "reserves": {
+        "WETH": "512.959479946339261929",
+        "USDG": "1360311.523576"
+      }
+    },
+    {
+      "name": "UniV4 AI/USDG 2300",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x7aebd80541bfaaf23dbb6e99ce13d4d31c1a84c91414f971eadbff7db5f85995",
+      "kind": "uniV4",
+      "token0": "AI",
+      "token1": "USDG",
+      "feeBps": 23,
+      "live": true,
+      "reserves": {
+        "AI": "13467034.180565987228554581",
+        "USDG": "3851645.109691"
+      }
+    },
+    {
+      "name": "UniV4 PONS/USDG 3000",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x4be9657ec9002e528f4f17a5c43edc525a07f888f7b180c2afbf75e096c4f38a",
+      "kind": "uniV4",
+      "token0": "PONS",
+      "token1": "USDG",
+      "feeBps": 30,
+      "live": true,
+      "reserves": {
+        "PONS": "16903959.079436371702762915",
+        "USDG": "9984637.0755"
+      }
+    },
+    {
+      "name": "UniV4 CASHCAT/USDG 8388608",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x31608601d541e868706aa557558a4d4f99c57e6dd13bd3362edcf05d00a16212",
+      "kind": "uniV4",
+      "token0": "CASHCAT",
+      "token1": "USDG",
+      "feeBps": 0,
+      "live": true,
+      "reserves": {
+        "CASHCAT": "9995361.964482505462322716",
+        "USDG": "2059126.450451"
+      }
+    },
+    {
+      "name": "UniV4 PONS/USDG 8388608",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x486435a1f76cd58193f854c6e6213cd05fd58d637865d02065ff558b387fa6ea",
+      "kind": "uniV4",
+      "token0": "PONS",
+      "token1": "USDG",
+      "feeBps": 0,
+      "live": true,
+      "reserves": {
+        "PONS": "33144357.296339118865548883",
+        "USDG": "19647117.227147"
+      }
+    },
+    {
+      "name": "UniV4 AI/PONS 3000",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x230bc4a0fb5fb7ab27f6e72350dfa3f2489b0cdbaf34f0189d68672086ccb919",
+      "kind": "uniV4",
+      "token0": "AI",
+      "token1": "PONS",
+      "feeBps": 30,
+      "live": true,
+      "reserves": {
+        "AI": "2539882.669727446313973725",
+        "PONS": "1230633.850483581563520561"
+      }
+    },
+    {
+      "name": "UniV4 WETH/PONS 8388608",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0xb59001413cb070e28433826f927b7265a0813213ba21f454d86896cee3cce674",
+      "kind": "uniV4",
+      "token0": "WETH",
+      "token1": "PONS",
+      "feeBps": 0,
+      "live": true,
+      "reserves": {
+        "WETH": "657.395851969863130986",
+        "PONS": "2952331.269540307202685758"
+      }
+    },
+    {
+      "name": "UniV4 WETH/AI 8388608",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0xe85f633a1374ee279140fa997b547d6a2ccd94fc5eae0e98f7d15ce0e3ddfa93",
+      "kind": "uniV4",
+      "token0": "WETH",
+      "token1": "AI",
+      "feeBps": 0,
+      "live": true,
+      "reserves": {
+        "WETH": "1462.476101541249088067",
+        "AI": "13560854.507736925493882703"
+      }
+    },
+    {
+      "name": "UniV4 AI/USDG 10000",
+      "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+      "poolId": "0x0ff2e264ba5a85052e0ba970365fbce49a7bf426c78ee15fefc51077cd377355",
+      "kind": "uniV4",
+      "token0": "AI",
+      "token1": "USDG",
+      "feeBps": 100,
+      "live": true,
+      "reserves": {
+        "AI": "10453329.831608287217790213",
+        "USDG": "3002501.803406"
+      }
+    },
+    {
+      "name": "CL WETH/AEON",
+      "address": "0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e",
+      "poolId": null,
+      "kind": "CL",
+      "token0": "WETH",
+      "token1": "AEON",
+      "feeBps": 25,
+      "live": true,
+      "reserves": {
+        "WETH": "0.157438513043227192",
+        "AEON": "555.803077291212162158"
+      }
+    },
+    {
+      "name": "CL USDG/AEON",
+      "address": "0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6",
+      "poolId": null,
+      "kind": "CL",
+      "token0": "USDG",
+      "token1": "AEON",
+      "feeBps": 25,
+      "live": true,
+      "reserves": {
+        "USDG": "550.868977",
+        "AEON": "737.75532663958753787"
+      }
+    },
+    {
+      "name": "CL CASHCAT/AEON",
+      "address": "0xbCD1Bf0d9F25503DDfEd0b663827811637B27B80",
+      "poolId": null,
+      "kind": "CL",
+      "token0": "CASHCAT",
+      "token1": "AEON",
+      "feeBps": 25,
+      "live": true,
+      "reserves": {
+        "CASHCAT": "2424.228860862792829016",
+        "AEON": "667.90179447455821982"
+      }
+    }
+  ],
+  "poolActivity": {
+    "checkedAt": "2026-09-19T16:09:56.941Z",
+    "nextCheckAt": "2026-09-21T16:09:56.941Z",
+    "inactiveAfterHours": 50,
+    "checkIntervalHours": 48,
+    "auditRunning": false,
+    "pools": [
+      {
+        "name": "AEON/ETH",
+        "address": "0xD215650cb628113A64D938164Ee5CD72293F9ea6",
+        "kind": "vAMM",
+        "token0": "AEON",
+        "token1": "WETH",
+        "lastActivityAt": "2026-09-19T00:58:19.000Z",
+        "inactiveHours": 15.1938725,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "AEON/USDG",
+        "address": "0x38be0a822326D51fdF37a9b44Cb6dcA49A59E288",
+        "kind": "vAMM",
+        "token0": "AEON",
+        "token1": "USDG",
+        "lastActivityAt": "2026-09-18T19:51:20.000Z",
+        "inactiveHours": 20.31026138888889,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "VIRTUAL/AEON",
+        "address": "0x67B2da1742187Aa09b427082b06ACDC5bBCA2D99",
+        "kind": "vAMM",
+        "token0": "VIRTUAL",
+        "token1": "AEON",
+        "lastActivityAt": null,
+        "inactiveHours": 50,
+        "flagged": true,
+        "state": "inactive"
+      },
+      {
+        "name": "FRONG/AEON",
+        "address": "0x693Bf3EeCb4110c777BEc13D6c11d139BF84e2E1",
+        "kind": "vAMM",
+        "token0": "FRONG",
+        "token1": "AEON",
+        "lastActivityAt": "2026-09-19T13:22:40.000Z",
+        "inactiveHours": 2.7880391666666666,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "FRONG/ETH",
+        "address": "0x2c07F05D5111da590D8749A091974285FcacDf0D",
+        "kind": "vAMM",
+        "token0": "FRONG",
+        "token1": "WETH",
+        "lastActivityAt": "2026-09-18T03:49:04.000Z",
+        "inactiveHours": 36.348039166666666,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "ROBINFUN/AEON",
+        "address": "0xeB638e1FA253E5526C2be76626dE26F02E4bdaba",
+        "kind": "vAMM",
+        "token0": "ROBINFUN",
+        "token1": "AEON",
+        "lastActivityAt": null,
+        "inactiveHours": 50,
+        "flagged": true,
+        "state": "inactive"
+      },
+      {
+        "name": "CASHCAT/AEON",
+        "address": "0x22d76bf4e8d2c1DfCca7de6c9dC46Ec2a8Ed7Eb7",
+        "kind": "vAMM",
+        "token0": "CASHCAT",
+        "token1": "AEON",
+        "lastActivityAt": "2026-09-19T16:02:35.000Z",
+        "inactiveHours": 0.12276138888888889,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "HOODIE/AEON",
+        "address": "0x3C643F22F0b24795710638CdEf2296eA12896317",
+        "kind": "vAMM",
+        "token0": "HOODIE",
+        "token1": "AEON",
+        "lastActivityAt": null,
+        "inactiveHours": 50,
+        "flagged": true,
+        "state": "inactive"
+      },
+      {
+        "name": "NASDAQ/AEON",
+        "address": "0xbf5FCFF8e5604b3ba404a4Cb5Be49EF230e0dA76",
+        "kind": "vAMM",
+        "token0": "NASDAQ",
+        "token1": "AEON",
+        "lastActivityAt": null,
+        "inactiveHours": 50,
+        "flagged": true,
+        "state": "inactive"
+      },
+      {
+        "name": "WETH/USDG",
+        "address": "0x8803c117ccae7B5146297876c2A25DF135141C4d",
+        "kind": "uniV2",
+        "token0": "WETH",
+        "token1": "USDG",
+        "lastActivityAt": "2026-09-19T16:09:55.000Z",
+        "inactiveHours": 0.0005391666666666666,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "WETH/VIRTUAL",
+        "address": "0xd95e8e2Cd04c207625C6F23c974d365a5F3A91D3",
+        "kind": "uniV2",
+        "token0": "WETH",
+        "token1": "VIRTUAL",
+        "lastActivityAt": "2026-09-19T16:04:55.000Z",
+        "inactiveHours": 0.0838725,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "USDG/VIRTUAL",
+        "address": "0xee8D21C0E5AAA31269867Db4E3C66a90C3D5951D",
+        "kind": "uniV2",
+        "token0": "USDG",
+        "token1": "VIRTUAL",
+        "lastActivityAt": "2026-09-19T16:09:08.000Z",
+        "inactiveHours": 0.013594722222222222,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "VEX/VIRTUAL",
+        "address": "0x817f16F5D8da83d1B089B082c0172af3923618dA",
+        "kind": "uniV2",
+        "token0": "VEX",
+        "token1": "VIRTUAL",
+        "lastActivityAt": "2026-09-19T16:09:29.000Z",
+        "inactiveHours": 0.007761388888888889,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "UniV3 WETH/FRONG 10000",
+        "address": "0x09a431261E3d0F1dc2f7e0b14718DBBBCBe19Ae4",
+        "kind": "uniV3",
+        "token0": "WETH",
+        "token1": "FRONG",
+        "lastActivityAt": "2026-09-19T16:09:35.000Z",
+        "inactiveHours": 0.006094722222222222,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "UniV3 CASHCAT/WETH 3000",
+        "address": "0xd42A491087a15E5afd51FEb3606066Cc152d2b09",
+        "kind": "uniV3",
+        "token0": "CASHCAT",
+        "token1": "WETH",
+        "lastActivityAt": "2026-09-19T16:09:50.000Z",
+        "inactiveHours": 0.0019280555555555555,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "UniV3 CASHCAT/WETH 10000",
+        "address": "0xA70fc67C9F69da90B63a0e4C05D229954574E313",
+        "kind": "uniV3",
+        "token0": "CASHCAT",
+        "token1": "WETH",
+        "lastActivityAt": "2026-09-19T16:09:50.000Z",
+        "inactiveHours": 0.0019280555555555555,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "UniV4 WETH/FRONG 2500",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "FRONG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 USDG/FRONG 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "USDG",
+        "token1": "FRONG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 USDG/FRONG 21000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "USDG",
+        "token1": "FRONG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 CASHCAT/USDG 2690",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "CASHCAT",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/CASHCAT 10075",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "CASHCAT",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/CASHCAT 20000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "CASHCAT",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/CASHCAT 2925",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "CASHCAT",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "External V2 FRONG/WETH 1.5%",
+        "address": "0x00EccbF137ee425B211c36cfdeC3B2E5535d2289",
+        "kind": "uniV2",
+        "token0": "WETH",
+        "token1": "FRONG",
+        "lastActivityAt": "2026-09-19T14:56:43.000Z",
+        "inactiveHours": 1.2205391666666667,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "External V2 CASHCAT/WETH 0.5%",
+        "address": "0xDC5BAa131c844D0CA548f4e0AA7CE9f50c742eC5",
+        "kind": "uniV2",
+        "token0": "CASHCAT",
+        "token1": "WETH",
+        "lastActivityAt": "2026-09-19T16:06:11.000Z",
+        "inactiveHours": 0.0627613888888889,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "Uniswap CASHCAT/WETH",
+        "address": "0x0579fA41416101b66e202F66bF3B0de5101F5b9F",
+        "kind": "uniV2",
+        "token0": "CASHCAT",
+        "token1": "WETH",
+        "lastActivityAt": "2026-09-19T15:12:26.000Z",
+        "inactiveHours": 0.9585947222222222,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "UniV4 WETH/USDG 200",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 AI/USDG 2300",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "AI",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 PONS/USDG 3000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "PONS",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 CASHCAT/USDG 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "CASHCAT",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 PONS/USDG 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "PONS",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 AI/PONS 3000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "AI",
+        "token1": "PONS",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/PONS 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "PONS",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/AI 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "AI",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 AI/USDG 10000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "AI",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "CL WETH/AEON",
+        "address": "0x3c8090c3Cb3A45A677A6492acb5ad5253F9A686e",
+        "kind": "CL",
+        "token0": "WETH",
+        "token1": "AEON",
+        "lastActivityAt": "2026-09-19T10:35:57.000Z",
+        "inactiveHours": 5.566650277777778,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "CL USDG/AEON",
+        "address": "0xE2503a27a33DacdBEEc821557fe8747800Cf6ff6",
+        "kind": "CL",
+        "token0": "USDG",
+        "token1": "AEON",
+        "lastActivityAt": "2026-09-18T22:22:47.000Z",
+        "inactiveHours": 17.786094722222224,
+        "flagged": false,
+        "state": "active"
+      },
+      {
+        "name": "CL CASHCAT/AEON",
+        "address": "0xbCD1Bf0d9F25503DDfEd0b663827811637B27B80",
+        "kind": "CL",
+        "token0": "CASHCAT",
+        "token1": "AEON",
+        "lastActivityAt": "2026-09-19T16:01:49.000Z",
+        "inactiveHours": 0.13553916666666666,
+        "flagged": false,
+        "state": "active"
+      }
+    ],
+    "flagged": [
+      {
+        "name": "VIRTUAL/AEON",
+        "address": "0x67B2da1742187Aa09b427082b06ACDC5bBCA2D99",
+        "kind": "vAMM",
+        "token0": "VIRTUAL",
+        "token1": "AEON",
+        "lastActivityAt": null,
+        "inactiveHours": 50,
+        "flagged": true,
+        "state": "inactive"
+      },
+      {
+        "name": "ROBINFUN/AEON",
+        "address": "0xeB638e1FA253E5526C2be76626dE26F02E4bdaba",
+        "kind": "vAMM",
+        "token0": "ROBINFUN",
+        "token1": "AEON",
+        "lastActivityAt": null,
+        "inactiveHours": 50,
+        "flagged": true,
+        "state": "inactive"
+      },
+      {
+        "name": "HOODIE/AEON",
+        "address": "0x3C643F22F0b24795710638CdEf2296eA12896317",
+        "kind": "vAMM",
+        "token0": "HOODIE",
+        "token1": "AEON",
+        "lastActivityAt": null,
+        "inactiveHours": 50,
+        "flagged": true,
+        "state": "inactive"
+      },
+      {
+        "name": "NASDAQ/AEON",
+        "address": "0xbf5FCFF8e5604b3ba404a4Cb5Be49EF230e0dA76",
+        "kind": "vAMM",
+        "token0": "NASDAQ",
+        "token1": "AEON",
+        "lastActivityAt": null,
+        "inactiveHours": 50,
+        "flagged": true,
+        "state": "inactive"
+      }
+    ],
+    "unknown": [
+      {
+        "name": "UniV4 WETH/FRONG 2500",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "FRONG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 USDG/FRONG 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "USDG",
+        "token1": "FRONG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 USDG/FRONG 21000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "USDG",
+        "token1": "FRONG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 CASHCAT/USDG 2690",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "CASHCAT",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/CASHCAT 10075",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "CASHCAT",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/CASHCAT 20000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "CASHCAT",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/CASHCAT 2925",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "CASHCAT",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/USDG 200",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 AI/USDG 2300",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "AI",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 PONS/USDG 3000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "PONS",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 CASHCAT/USDG 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "CASHCAT",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 PONS/USDG 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "PONS",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 AI/PONS 3000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "AI",
+        "token1": "PONS",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/PONS 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "PONS",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 WETH/AI 8388608",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "WETH",
+        "token1": "AI",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      },
+      {
+        "name": "UniV4 AI/USDG 10000",
+        "address": "0x8366a39CC670B4001A1121B8F6A443A643e40951",
+        "kind": "uniV4",
+        "token0": "AI",
+        "token1": "USDG",
+        "lastActivityAt": null,
+        "inactiveHours": 0,
+        "flagged": false,
+        "state": "unknown",
+        "error": "Missing or invalid parameters.\nDouble check you have provided the correct parameters."
+      }
+    ]
+  },
+  "rpcEndpointCount": 1,
+  "gasReserve": {
+    "requiredEth": "0.005",
+    "availableEth": "0.011005684896182927",
+    "healthy": true
+  },
+  "pendingTransaction": null,
+  "outcomeCounters": {
+    "detected": 0,
+    "executed": 6,
+    "belowGas": 0,
+    "insufficientBalance": 0,
+    "simulationFailed": 4,
+    "preflightRejected": 4,
+    "staleQuote": 4,
+    "reverted": 0
+  },
+  "activeRouteCooldowns": [],
+  "balances": {
+    "ETH": "0.011005684896182927",
+    "AEON": "64.400540742639789381",
+    "VIRTUAL": "0",
+    "FRONG": "95.772336527613240263",
+    "USDG": "32.560083",
+    "NASDAQ": "0",
+    "AI": "0",
+    "ROBINFUN": "0",
+    "HOODIE": "0",
+    "CASHCAT": "57.81428744946534071",
+    "WETH": "0",
+    "PONS": "0",
+    "VEX": "0"
+  },
+  "lastOpportunities": [
+    {
+      "pair": "AEON→VIRTUAL→USDG",
+      "profitPct": 3.36,
+      "amountIn": "1.287501885385693378",
+      "tokenIn": "AEON",
+      "tokenOut": "USDG",
+      "grossProfit": "0.032554",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.032554,
+      "expectedNetUsd": -0.012128,
+      "gasCostUsd": 0.044682,
+      "routeScore": -0.011486089215999999,
+      "reliabilityPct": 98,
+      "venues": "vAMM -> uniV2",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→VIRTUAL→WETH",
+      "profitPct": 3.25,
+      "amountIn": "1.244222414833081048",
+      "tokenIn": "AEON",
+      "tokenOut": "WETH",
+      "grossProfit": "0.030441",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.030441,
+      "expectedNetUsd": -0.014241,
+      "gasCostUsd": 0.044682,
+      "routeScore": -0.01350260415,
+      "reliabilityPct": 98,
+      "venues": "vAMM -> uniV2",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→VIRTUAL→USDG→AEON",
+      "profitPct": 3.61,
+      "amountIn": "1.318603901425770737",
+      "tokenIn": "AEON",
+      "tokenOut": "AEON",
+      "grossProfit": "0.047616560773436295",
+      "grossProfitToken": "AEON",
+      "grossProfitUsd": 0.035824,
+      "expectedNetUsd": -0.02189,
+      "gasCostUsd": 0.057714,
+      "routeScore": -0.017261870266666667,
+      "reliabilityPct": 88.2,
+      "venues": "vAMM -> uniV2 -> CL",
+      "validation": "discovery"
+    },
+    {
+      "pair": "USDG→AEON→VIRTUAL→USDG",
+      "profitPct": 3.62,
+      "amountIn": "0.9866",
+      "tokenIn": "USDG",
+      "tokenOut": "USDG",
+      "grossProfit": "0.035773",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.035773,
+      "expectedNetUsd": -0.021941,
+      "gasCostUsd": 0.057714,
+      "routeScore": -0.017888021911666666,
+      "reliabilityPct": 88.2,
+      "venues": "CL -> vAMM -> uniV2",
+      "validation": "discovery"
+    },
+    {
+      "pair": "USDG→AEON→VIRTUAL→WETH",
+      "profitPct": 3.51,
+      "amountIn": "0.956882",
+      "tokenIn": "USDG",
+      "tokenOut": "WETH",
+      "grossProfit": "0.033612",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.033612,
+      "expectedNetUsd": -0.024102,
+      "gasCostUsd": 0.057714,
+      "routeScore": -0.019649838389999997,
+      "reliabilityPct": 88.2,
+      "venues": "CL -> vAMM -> uniV2",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→VIRTUAL→WETH→USDG",
+      "profitPct": 3.34,
+      "amountIn": "1.282980044328190648",
+      "tokenIn": "AEON",
+      "tokenOut": "USDG",
+      "grossProfit": "0.032333",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.032333,
+      "expectedNetUsd": -0.025381,
+      "gasCostUsd": 0.057714,
+      "routeScore": -0.020478622248518517,
+      "reliabilityPct": 90.16000000000001,
+      "venues": "vAMM -> uniV2 -> uniV4",
+      "validation": "discovery"
+    },
+    {
+      "pair": "WETH→AEON→VIRTUAL→USDG",
+      "profitPct": 3.4,
+      "amountIn": "0.000349701450362278",
+      "tokenIn": "WETH",
+      "tokenOut": "USDG",
+      "grossProfit": "0.031503",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.031503,
+      "expectedNetUsd": -0.026211,
+      "gasCostUsd": 0.057714,
+      "routeScore": -0.02135855757,
+      "reliabilityPct": 88.2,
+      "venues": "CL -> vAMM -> uniV2",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→WETH→USDG",
+      "profitPct": 0.26,
+      "amountIn": "10.317170570355672493",
+      "tokenIn": "AEON",
+      "tokenOut": "USDG",
+      "grossProfit": "0.020806",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.020806,
+      "expectedNetUsd": -0.023876,
+      "gasCostUsd": 0.044682,
+      "routeScore": -0.021908808608000003,
+      "reliabilityPct": 92,
+      "venues": "vAMM -> uniV4",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→VIRTUAL→USDG→WETH",
+      "profitPct": 3.23,
+      "amountIn": "1.24380851977061301",
+      "tokenIn": "AEON",
+      "tokenOut": "WETH",
+      "grossProfit": "0.030266",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.030266,
+      "expectedNetUsd": -0.027448,
+      "gasCostUsd": 0.057714,
+      "routeScore": -0.022171583533037036,
+      "reliabilityPct": 90.16000000000001,
+      "venues": "vAMM -> uniV2 -> uniV4",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→VIRTUAL→WETH→AEON",
+      "profitPct": 3.29,
+      "amountIn": "1.185965173017991785",
+      "tokenIn": "AEON",
+      "tokenOut": "AEON",
+      "grossProfit": "0.039075244606805801",
+      "grossProfitToken": "AEON",
+      "grossProfitUsd": 0.029398,
+      "expectedNetUsd": -0.028316,
+      "gasCostUsd": 0.057714,
+      "routeScore": -0.022410179073333328,
+      "reliabilityPct": 88.2,
+      "venues": "vAMM -> uniV2 -> CL",
+      "validation": "discovery"
+    },
+    {
+      "pair": "WETH→FRONG→WETH",
+      "profitPct": 5.86,
+      "amountIn": "0.000128859906915424",
+      "tokenIn": "WETH",
+      "tokenOut": "WETH",
+      "grossProfit": "0.000007559968268739",
+      "grossProfitToken": "WETH",
+      "grossProfitUsd": 0.020005,
+      "expectedNetUsd": -0.024677,
+      "gasCostUsd": 0.044682,
+      "routeScore": -0.022702840000000002,
+      "reliabilityPct": 92,
+      "venues": "uniV4 -> vAMM",
+      "validation": "discovery"
+    },
+    {
+      "pair": "WETH→AEON→VIRTUAL→WETH",
+      "profitPct": 3.29,
+      "amountIn": "0.000338249293770508",
+      "tokenIn": "WETH",
+      "tokenOut": "WETH",
+      "grossProfit": "0.000011144660605456",
+      "grossProfitToken": "WETH",
+      "grossProfitUsd": 0.029491,
+      "expectedNetUsd": -0.028223,
+      "gasCostUsd": 0.057714,
+      "routeScore": -0.02300038088833333,
+      "reliabilityPct": 88.2,
+      "venues": "CL -> vAMM -> uniV2",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→WETH",
+      "profitPct": 0.17,
+      "amountIn": "6.621525523976253315",
+      "tokenIn": "AEON",
+      "tokenOut": "WETH",
+      "grossProfit": "0.008532",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.008532,
+      "expectedNetUsd": -0.023118,
+      "gasCostUsd": 0.03165,
+      "routeScore": -0.0230786994,
+      "reliabilityPct": 100,
+      "venues": "vAMM",
+      "validation": "discovery"
+    },
+    {
+      "pair": "WETH→USDG→AEON→VIRTUAL→USDG",
+      "profitPct": 3.72,
+      "amountIn": "0.000382478555042529",
+      "tokenIn": "WETH",
+      "tokenOut": "USDG",
+      "grossProfit": "0.037699",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.037699,
+      "expectedNetUsd": -0.033048,
+      "gasCostUsd": 0.070747,
+      "routeScore": -0.02311764579310345,
+      "reliabilityPct": 81.144,
+      "venues": "uniV4 -> CL -> vAMM -> uniV2",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→VIRTUAL→WETH→USDG→AEON",
+      "profitPct": 3.59,
+      "amountIn": "1.31784153173889688",
+      "tokenIn": "AEON",
+      "tokenOut": "AEON",
+      "grossProfit": "0.047316818098956764",
+      "grossProfitToken": "AEON",
+      "grossProfitUsd": 0.035598,
+      "expectedNetUsd": -0.035149,
+      "gasCostUsd": 0.070747,
+      "routeScore": -0.02374152731304828,
+      "reliabilityPct": 81.144,
+      "venues": "vAMM -> uniV2 -> uniV4 -> CL",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→VIRTUAL→WETH→FRONG→WETH",
+      "profitPct": 9.31,
+      "amountIn": "0.565645460505001119",
+      "tokenIn": "AEON",
+      "tokenOut": "WETH",
+      "grossProfit": "0.03965",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.03965,
+      "expectedNetUsd": -0.031097,
+      "gasCostUsd": 0.070747,
+      "routeScore": -0.023814578007379312,
+      "reliabilityPct": 90.16000000000001,
+      "venues": "vAMM -> uniV2 -> uniV4 -> vAMM",
+      "validation": "discovery"
+    },
+    {
+      "pair": "AEON→VIRTUAL→USDG→WETH",
+      "profitPct": 3.19,
+      "amountIn": "1.230912856858442886",
+      "tokenIn": "AEON",
+      "tokenOut": "WETH",
+      "grossProfit": "0.029603",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.029603,
+      "expectedNetUsd": -0.028111,
+      "gasCostUsd": 0.057714,
+      "routeScore": -0.024195532295148144,
+      "reliabilityPct": 96.03999999999999,
+      "venues": "vAMM -> uniV2 -> uniV2",
+      "validation": "discovery"
+    },
+    {
+      "pair": "USDG→AEON→VIRTUAL→WETH→USDG",
+      "profitPct": 3.6,
+      "amountIn": "0.985572",
+      "tokenIn": "USDG",
+      "tokenOut": "USDG",
+      "grossProfit": "0.035548",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.035548,
+      "expectedNetUsd": -0.035199,
+      "gasCostUsd": 0.070747,
+      "routeScore": -0.02458044945676552,
+      "reliabilityPct": 81.144,
+      "venues": "CL -> vAMM -> uniV2 -> uniV4",
+      "validation": "discovery"
+    },
+    {
+      "pair": "WETH→AEON→VIRTUAL→USDG→AEON",
+      "profitPct": 3.67,
+      "amountIn": "0.000356686253583291",
+      "tokenIn": "WETH",
+      "tokenOut": "AEON",
+      "grossProfit": "0.034701",
+      "grossProfitToken": "USDG",
+      "grossProfitUsd": 0.034701,
+      "expectedNetUsd": -0.036046,
+      "gasCostUsd": 0.070747,
+      "routeScore": -0.024612384058137936,
+      "reliabilityPct": 79.38000000000001,
+      "venues": "CL -> vAMM -> uniV2 -> CL",
+      "validation": "discovery"
+    },
+    {
+      "pair": "WETH→USDG→AEON→VIRTUAL→WETH",
+      "profitPct": 3.6,
+      "amountIn": "0.000372045774639365",
+      "tokenIn": "WETH",
+      "tokenOut": "WETH",
+      "grossProfit": "0.000013407548963245",
+      "grossProfitToken": "WETH",
+      "grossProfitUsd": 0.03548,
+      "expectedNetUsd": -0.035267,
+      "gasCostUsd": 0.070747,
+      "routeScore": -0.02466987455172414,
+      "reliabilityPct": 81.144,
+      "venues": "uniV4 -> CL -> vAMM -> uniV2",
+      "validation": "discovery"
+    }
+  ],
+  "recentArbs": [
+    {
+      "time": "2026-09-19T16:02:35.141Z",
+      "pair": "USDG→CASHCAT→AEON",
+      "tokenIn": "USDG",
+      "amountIn": "7.756303",
+      "profit": "0.016178",
+      "profitToken": "USDG",
+      "grossProfit": "0.06468",
+      "gasCost": "0.048502",
+      "gasCostEth": "0.000018328923008",
+      "profitPct": 0.87,
+      "txHash": "0x000d0504d349150c90895a9c8835f5952fb7fb43d4c3a6691679127e062e90c1",
+      "status": "success",
+      "route": "internal",
+      "venues": "Uniswap V4 (USDG→CASHCAT) → AEON DEX (CASHCAT→AEON)"
+    },
+    {
+      "time": "2026-09-19T16:01:49.874Z",
+      "pair": "USDG→CASHCAT→AEON",
+      "tokenIn": "USDG",
+      "amountIn": "6.09073",
+      "profit": "0.031128",
+      "profitToken": "USDG",
+      "grossProfit": "0.07828",
+      "gasCost": "0.047152",
+      "gasCostEth": "0.000017818669908",
+      "profitPct": 1.23,
+      "txHash": "0x2c535d5f925c0bbe46e1a455ee0033ccd1c40b387484d49900465c394dfd6fa6",
+      "status": "success",
+      "route": "internal",
+      "venues": "Uniswap V4 (USDG→CASHCAT) → AEON CL (CASHCAT→AEON)"
+    },
+    {
+      "time": "2026-09-19T15:40:56.558Z",
+      "pair": "WETH→CASHCAT→AEON",
+      "tokenIn": "WETH",
+      "amountIn": "0.002698102897030567",
+      "profit": "0.015339",
+      "profitToken": "USDG",
+      "grossProfit": "0.056516",
+      "gasCost": "0.041177",
+      "gasCostEth": "0.0000156172489",
+      "profitPct": 0.79,
+      "txHash": "0x953375bbdac7573ae482ecbaff17877e344d684abe701580e32809f7504f3b8b",
+      "status": "success",
+      "route": "internal",
+      "venues": "Uniswap V3 (WETH→CASHCAT) → AEON DEX (CASHCAT→AEON)"
+    },
+    {
+      "time": "2026-09-19T14:34:23.545Z",
+      "pair": "WETH→CASHCAT→AEON",
+      "tokenIn": "WETH",
+      "amountIn": "0.001939107516717734",
+      "profit": "0.020397",
+      "profitToken": "USDG",
+      "grossProfit": "0.061848",
+      "gasCost": "0.041451",
+      "gasCostEth": "0.000015718017776",
+      "profitPct": 1.02,
+      "txHash": "0x9f2f1a75fc228075d2b24c5a36b938869fef20b3ba80d715babb7a28d5c8667a",
+      "status": "success",
+      "route": "internal",
+      "venues": "Uniswap V3 (WETH→CASHCAT) → AEON CL (CASHCAT→AEON)"
+    },
+    {
+      "time": "2026-09-19T13:22:41.655Z",
+      "pair": "AEON→FRONG→WETH",
+      "tokenIn": "AEON",
+      "amountIn": "2.345271693590191861",
+      "profit": "0.002734",
+      "profitToken": "USDG",
+      "grossProfit": "0.051808",
+      "gasCost": "0.049074",
+      "gasCostEth": "0.000018584789544",
+      "profitPct": 2.97,
+      "txHash": "0x0cd91526c994229922d47ccca1702c552d70f42d9ebe6e66adfa9d66197659dd",
+      "status": "success",
+      "route": "internal",
+      "venues": "AEON DEX (AEON→FRONG) → Uniswap V4 (FRONG→WETH)"
+    },
+    {
+      "time": "2026-09-19T10:51:27.243Z",
+      "pair": "USDG→CASHCAT→AEON",
+      "tokenIn": "USDG",
+      "amountIn": "21.258303",
+      "profit": "0.449217",
+      "profitToken": "USDG",
+      "grossProfit": "0.497727",
+      "gasCost": "0.04851",
+      "gasCostEth": "0.000018354879504",
+      "profitPct": 2.38,
+      "txHash": "0x3eb750ebc78eaf17a669220c835602889b4590b2f9af4554e3c3a25c546ca4da",
+      "status": "success",
+      "route": "internal",
+      "venues": "Uniswap V4 (USDG→CASHCAT) → AEON DEX (CASHCAT→AEON)"
+    }
+  ],
+  "cumulativeProfit": {
+    "USDG": "0.534993"
+  },
+  "totalArbsExecuted": 6,
+  "totalArbsFailed": 4,
+  "consecutiveFailures": 0,
+  "pausedUntil": null,
+  "recentErrors": []
+}

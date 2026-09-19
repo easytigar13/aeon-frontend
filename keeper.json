@@ -1,0 +1,66 @@
+{
+  "updatedAt": "2026-09-19T17:11:10.643Z",
+  "keeperAddress": "0x32A3FC106f77300524Dc2dC4D5E672EF08615391",
+  "dryRun": false,
+  "intervalMs": 500,
+  "tickMs": 314,
+  "scanTelemetry": {
+    "lastBlock": "67250842",
+    "mode": "heartbeat",
+    "changedPools": 0,
+    "stateReadMs": 0,
+    "balanceReadMs": 190,
+    "localSearchMs": 0,
+    "exactQuoteMs": 0,
+    "exactSelected": 0,
+    "exactChecked": 0,
+    "exactValid": 0,
+    "approximateCandidates": 0,
+    "routeVisits": 14,
+    "marginalPruned": 0,
+    "sizedRoutes": 0,
+    "eventSkippedBlocks": 7609,
+    "fullScans": 50,
+    "incrementalScans": 0,
+    "gasOnlyScans": 245,
+    "inactivePools": [
+      "UniV3 CASHCAT/WETH"
+    ]
+  },
+  "poolsMonitored": 7,
+  "rpcEndpointCount": 1,
+  "gasReserve": {
+    "requiredEth": "0.002",
+    "availableEth": "0.011005684896182927",
+    "healthy": true
+  },
+  "pendingTransaction": null,
+  "outcomeCounters": {
+    "detected": 0,
+    "executed": 0,
+    "belowGas": 0,
+    "insufficientBalance": 0,
+    "simulationFailed": 0,
+    "staleQuote": 0,
+    "reverted": 0
+  },
+  "activeRouteCooldowns": [],
+  "balances": {
+    "ETH": "0.011005684896182927",
+    "AEON": "64.400540742639789381",
+    "WETH": "0",
+    "USDG": "32.560083",
+    "FRONG": "95.772336527613240263",
+    "CASHCAT": "57.81428744946534071",
+    "HOODIE": "0",
+    "NASDAQ": "0"
+  },
+  "lastOpportunities": [],
+  "recentArbs": [],
+  "cumulativeProfit": {},
+  "totalArbsExecuted": 0,
+  "totalArbsFailed": 0,
+  "consecutiveFailures": 0,
+  "pausedUntil": null,
+  "recentErrors": []
+}
