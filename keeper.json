@@ -1,0 +1,71 @@
+{
+  "updatedAt": "2026-10-17T22:10:12.993Z",
+  "keeperAddress": "0x32A3FC106f77300524Dc2dC4D5E672EF08615391",
+  "dryRun": false,
+  "intervalMs": 500,
+  "tickMs": 310,
+  "scanTelemetry": {
+    "lastBlock": "91269208",
+    "mode": "heartbeat",
+    "changedPools": 0,
+    "stateReadMs": 0,
+    "balanceReadMs": 184,
+    "localSearchMs": 0,
+    "exactQuoteMs": 0,
+    "exactSelected": 0,
+    "exactChecked": 0,
+    "exactValid": 0,
+    "approximateCandidates": 0,
+    "routeVisits": 14,
+    "marginalPruned": 0,
+    "sizedRoutes": 0,
+    "eventSkippedBlocks": 1462933,
+    "fullScans": 9426,
+    "incrementalScans": 140,
+    "gasOnlyScans": 46599,
+    "inactivePools": [
+      "UniV3 CASHCAT/WETH"
+    ]
+  },
+  "poolsMonitored": 7,
+  "rpcEndpointCount": 1,
+  "gasReserve": {
+    "requiredEth": "0.002",
+    "availableEth": "0.005005106595283156",
+    "healthy": true
+  },
+  "pendingTransaction": null,
+  "outcomeCounters": {
+    "detected": 0,
+    "executed": 0,
+    "belowGas": 0,
+    "insufficientBalance": 0,
+    "simulationFailed": 0,
+    "staleQuote": 0,
+    "reverted": 0
+  },
+  "activeRouteCooldowns": [],
+  "balances": {
+    "ETH": "0.005005106595283156",
+    "AEON": "133.612394221007634166",
+    "WETH": "0",
+    "USDG": "0.035098",
+    "FRONG": "95.772336527613240263",
+    "CASHCAT": "27.486452943806038372",
+    "HOODIE": "0",
+    "NASDAQ": "0"
+  },
+  "lastOpportunities": [],
+  "recentArbs": [],
+  "cumulativeProfit": {},
+  "totalArbsExecuted": 0,
+  "totalArbsFailed": 0,
+  "consecutiveFailures": 0,
+  "pausedUntil": null,
+  "recentErrors": [
+    {
+      "time": "2026-10-14T21:27:39.744Z",
+      "message": "HTTP request failed.\n\nURL: https://rpc.mainnet.chain.robinhood.com/\nRequest body: {\"method\":\"eth_call\",\"params\":[{\"data\":\"0x76671808\",\"to\":\"0x4D49C36197bF806dc5f65267a847b3A7a4ab1335\"},\"latest\"]}\n \nRaw Call Arguments:\n  to:    0x4D49C36197bF806dc5f65267a847b3A7a4ab1335\n  data:  0x76671808\n \nContract Call:\n  address:   0x4D49C36197bF806dc5f65267a847b3A7a4ab1335\n  function:  currentEpoch()\n\nDocs: https://viem.sh/docs/contract/readContract\nDetails: fetch failed\nVersion: viem@2.53.1"
+    }
+  ]
+}
